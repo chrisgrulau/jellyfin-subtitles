@@ -34,6 +34,11 @@ public class PluginConfiguration : BasePluginConfiguration
     public ChangePolicy TextChanges { get; set; } = ChangePolicy.Review;
 
     /// <summary>
+    /// Gets or sets the clean-up settings (adverts, sound descriptions, repeated lines, overlaps, brief lines).
+    /// </summary>
+    public CleanupSettings Cleanup { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets speech-to-text for the short snippets used to check and synchronise subtitles.
     /// </summary>
     public TranscriptionTier SyncSnippets { get; set; } = new() { Enabled = true };

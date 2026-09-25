@@ -37,7 +37,14 @@ public enum CleanChangeKind
 /// <param name="At">The start time of the affected cue (before cleaning).</param>
 /// <param name="Before">The cue text before.</param>
 /// <param name="After">The cue text after (empty if the cue was removed).</param>
-public sealed record CleanChange(CleanChangeKind Kind, TimeSpan At, string Before, string After);
+public sealed record CleanChange(CleanChangeKind Kind, TimeSpan At, string Before, string After)
+{
+    /// <summary>Gets when the cue ended before the change (timing changes and merges).</summary>
+    public TimeSpan? EndBefore { get; init; }
+
+    /// <summary>Gets when the cue ends after the change (timing changes and merges).</summary>
+    public TimeSpan? EndAfter { get; init; }
+}
 
 /// <summary>
 /// Clean-up options. The defaults are safe for any subtitle; stripping hearing-impaired text is opt-in.
@@ -55,6 +62,16 @@ public sealed record CleanOptions
 
     /// <summary>Gets a value indicating whether hearing-impaired descriptions (<c>[door slams]</c>) and speaker labels are removed.</summary>
     public bool StripHearingImpaired { get; init; }
+
+    /// <summary>Gets a value indicating whether a cue repeating the previous one back to back is merged into it.</summary>
+    public bool MergeDuplicates { get; init; } = true;
+
+    /// <summary>
+    /// Gets a value indicating whether timing fixes also apply to ASS typesetting: signs and karaoke (override tags
+    /// such as <c>\pos</c>, <c>\move</c>, <c>\k</c>, <c>\t</c>, <c>\fad</c>, <c>\clip</c>), layers above 0 and styles other
+    /// than the dialogue style. They are short and overlap on purpose, so this is off by default.
+    /// </summary>
+    public bool FixTypesetTiming { get; init; }
 
     /// <summary>
     /// Gets the duration below which a cue counts as a flash, too short to read, and is lengthened. Short interjections
@@ -150,12 +167,14 @@ public static partial class SubtitleCleaner
         var merged = new List<SubtitleCue>();
         foreach (var c in cues)
         {
-            if (merged.Count > 0
+            if (options.MergeDuplicates
+                && merged.Count > 0
                 && string.Equals(SubtitleMarkup.ToPlainText(merged[^1].Text), SubtitleMarkup.ToPlainText(c.Text), StringComparison.Ordinal)
                 && c.Start - merged[^1].End <= TimeSpan.FromMilliseconds(250))
             {
-                changes.Add(new CleanChange(CleanChangeKind.MergedDuplicate, c.Start, c.Text, merged[^1].Text));
-                merged[^1] = merged[^1] with { End = c.End > merged[^1].End ? c.End : merged[^1].End };
+                var newEnd = c.End > merged[^1].End ? c.End : merged[^1].End;
+                changes.Add(new CleanChange(CleanChangeKind.MergedDuplicate, c.Start, c.Text, merged[^1].Text) { EndBefore = merged[^1].End, EndAfter = newEnd });
+                merged[^1] = merged[^1] with { End = newEnd };
             }
             else
             {
@@ -165,17 +184,19 @@ public static partial class SubtitleCleaner
 
         cues = merged;
 
-        // 5. timing: overlaps, then cues too short to read
+        // 5. timing: overlaps, then cues too short to read. ASS typesetting is left alone unless asked for.
+        var dialogueStyle = DialogueStyle(document, cues);
+        bool Fixable(SubtitleCue c) => options.FixTypesetTiming || !IsTypeset(document, c, dialogueStyle);
         for (var i = 0; i < cues.Count - 1; i++)
         {
             var (c, next) = (cues[i], cues[i + 1]);
             var overlap = c.End - next.Start;
-            if (options.FixOverlaps && overlap > TimeSpan.Zero && overlap <= options.MaximumOverlapToFix)
+            if (options.FixOverlaps && overlap > TimeSpan.Zero && overlap <= options.MaximumOverlapToFix && Fixable(c) && Fixable(next))
             {
                 var end = next.Start - options.MinimumGap;
                 if (end > c.Start)
                 {
-                    changes.Add(new CleanChange(CleanChangeKind.FixedOverlap, c.Start, c.Text, c.Text));
+                    changes.Add(new CleanChange(CleanChangeKind.FixedOverlap, c.Start, c.Text, c.Text) { EndBefore = c.End, EndAfter = end });
                     cues[i] = c with { End = end };
                 }
             }
@@ -186,7 +207,7 @@ public static partial class SubtitleCleaner
             for (var i = 0; i < cues.Count; i++)
             {
                 var c = cues[i];
-                if (c.Duration >= options.FlashThreshold)
+                if (c.Duration >= options.FlashThreshold || !Fixable(c))
                 {
                     continue;
                 }
@@ -196,13 +217,72 @@ public static partial class SubtitleCleaner
                 var end = wanted < limit ? wanted : limit;
                 if (end > c.End)
                 {
-                    changes.Add(new CleanChange(CleanChangeKind.ExtendedShortCue, c.Start, c.Text, c.Text));
+                    changes.Add(new CleanChange(CleanChangeKind.ExtendedShortCue, c.Start, c.Text, c.Text) { EndBefore = c.End, EndAfter = end });
                     cues[i] = c with { End = end };
                 }
             }
         }
 
         return (document with { Cues = cues }, changes);
+    }
+
+    /// <summary>
+    /// Whether an ASS event is typesetting (a sign, karaoke, an effect) rather than ordinary dialogue: it has
+    /// positioning, movement, karaoke, transform, fade or clip override tags, sits on a layer above 0, or uses a style
+    /// other than the document's dialogue style (the most common one). Always <c>false</c> for SubRip and WebVTT.
+    /// </summary>
+    /// <param name="document">The document the cue belongs to.</param>
+    /// <param name="cue">The cue.</param>
+    /// <param name="dialogueStyle">The document's dialogue style (see <see cref="DialogueStyle"/>).</param>
+    /// <returns><c>true</c> for typesetting.</returns>
+    public static bool IsTypeset(SubtitleDocument document, SubtitleCue cue, string? dialogueStyle)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(cue);
+        if (document.Format != SubtitleFormat.Ass)
+        {
+            return false;
+        }
+
+        if (TypesetTag().IsMatch(cue.Text))
+        {
+            return true;
+        }
+
+        if (cue.AssFields is not { } fields)
+        {
+            return false;
+        }
+
+        var layer = Field(document, fields, "Layer");
+        var style = Field(document, fields, "Style");
+        return (layer is not null && layer.Trim() is not ("0" or ""))
+            || (dialogueStyle is not null && style is not null && !string.Equals(style.Trim(), dialogueStyle, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The style most ASS events use, taken to be the dialogue style; <c>null</c> for other formats.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="cues">Its cues.</param>
+    /// <returns>The style name, or <c>null</c>.</returns>
+    public static string? DialogueStyle(SubtitleDocument document, IEnumerable<SubtitleCue> cues)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(cues);
+        return document.Format != SubtitleFormat.Ass ? null
+            : cues.Select(c => c.AssFields is { } f ? Field(document, f, "Style")?.Trim() : null)
+                .OfType<string>()
+                .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count())
+                .Select(g => g.Key)
+                .FirstOrDefault();
+    }
+
+    private static string? Field(SubtitleDocument document, IReadOnlyList<string> fields, string name)
+    {
+        var i = document.AssFormat.ToList().FindIndex(f => f.Equals(name, StringComparison.OrdinalIgnoreCase));
+        return i >= 0 && i < fields.Count ? fields[i] : null;
     }
 
     /// <summary>
@@ -272,6 +352,11 @@ public static partial class SubtitleCleaner
     // Leading upper-case speaker label, optionally after markup or a dash: "JOHN: Hi" → "Hi", "- MARY: Hi" → "- Hi"
     [GeneratedRegex(@"^((?:<[^>]+>|\{[^}]*\}|-\s*)*)[A-Z][A-Z0-9 .'\-]{0,24}:\s+")]
     private static partial Regex SpeakerLabel();
+
+    // Override tags that make an ASS event a sign or karaoke: position, movement, origin, karaoke, transform, fade, clip,
+    // drawing mode
+    [GeneratedRegex(@"\{[^}]*\\(?:pos|move|org|k[fo]?\d|K\d|t\(|fade?\(|i?clip|p[1-9])", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex TypesetTag();
 
     [GeneratedRegex(@"[ \t]{2,}")]
     private static partial Regex MultipleSpaces();

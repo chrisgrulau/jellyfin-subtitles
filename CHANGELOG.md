@@ -43,3 +43,12 @@ All notable changes to this project are documented here. The format follows
   actions, Dependabot, CODEOWNERS.
 - Plugin skeleton targeting Jellyfin 12.1 / net10.0, and a settings page with basic settings (languages, timing and
   wording change policies, speech-to-text per use, monthly budget) and a collapsed advanced section.
+
+### Changed
+- Clean-up leaves ASS signs, karaoke and effects alone (SUB-05): timing fixes skip events with positioning, movement,
+  karaoke, transform, fade, clip or drawing tags, on a layer above 0, or in a style other than the dialogue style. An
+  advanced setting turns this back on. Timing and merge changes record the old and new end time for review.
+- Clean-up follows the change policies (SUB-08): advert and credit removal has its own setting (automatic by default),
+  empty lines are always removed, merging repeated lines and removing sound descriptions follow the wording setting,
+  and timing clean-up follows the timing setting. New settings: basic (remove adverts, remove sound descriptions) and
+  advanced (advert policy, merge repeats, fix overlaps, lengthen brief lines with their thresholds, typesetting).

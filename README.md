@@ -48,6 +48,11 @@ Providers:
   how it was scored and synchronised, and what it cost. Re-running skips work already done.
 - **Timing fixes** are applied automatically by default; **changes to the wording** are never applied without your review
   unless you choose otherwise.
+- **Clean-up** follows the same rules. Removing subtitle-site adverts and credit lines is automatic by default (they are
+  never dialogue; this can be switched to review). Empty lines are always removed. Merging a line repeated back to back
+  and removing sound descriptions (off by default) change the wording, so they follow the wording setting. Shortening
+  overlaps and lengthening lines too brief to read follow the timing setting. ASS signs, karaoke and effects keep their
+  timing unless you ask otherwise.
 - **Budgets and limits**: monthly spending limit for paid services, cost estimates before bulk runs, and respectful
   handling of provider limits (no hammering an API that has said stop).
 
