@@ -1,6 +1,6 @@
 ## ---------------------------------------------------------------------------
-## Secrets — never commit these. The plugin itself needs none (it uses the
-## metadata providers already configured in Jellyfin), but local tooling might.
+## Secrets — never commit these. This plugin handles API keys for paid
+## speech-to-text services; keys belong only in the server's plugin configuration.
 ## ---------------------------------------------------------------------------
 *.key
 *.pem
@@ -80,3 +80,16 @@ desktop.ini
 *.mp4
 *.avi
 *.m4v
+
+## ---------------------------------------------------------------------------
+## Test audio and speech models — large, and possibly not ours to publish
+## ---------------------------------------------------------------------------
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.ogg
+*.opus
+ggml-*.bin
+*.gguf
+*.onnx

@@ -12,5 +12,8 @@
     <Authors>chrisgrulau</Authors>
     <RepositoryUrl>https://github.com/chrisgrulau/jellyfin-subtitles</RepositoryUrl>
     <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <!-- Reproducible restores: exact package versions are recorded in packages.lock.json and CI restores in locked mode.
+         The Jellyfin packages are pinned to the version in build.yaml's targetAbi and bumped together with it. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>

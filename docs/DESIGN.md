@@ -92,7 +92,10 @@ behaviour, provider-stated reset times, spending caps per service and purpose, e
 approve-first or automatic scheduled runs.
 
 Spending limits: 0 means **no paid usage** (cloud providers are never called); unlimited is a separate, explicit choice
-with a warning; the default is a small cap (US$5 a month), so entering an API key never means open-ended spending.
+with a warning; the default is a small cap (5 a month in the chosen currency), so entering an API key never means
+open-ended spending. Limits are set and costs shown in the user's currency; each charge is recorded in the currency it
+was made in and converted as described in jellyfin-plugin-common's *Currencies* notes (ECB daily rates; unknown rates
+pause paid calls in other currencies rather than guess), plus an optional percentage for taxes or card fees.
 When budgets are enforced, the estimated cost of each call is reserved before it is made, atomically across concurrent
 jobs, and the actual cost is settled afterwards, so parallel jobs can't overshoot the limit together.
 

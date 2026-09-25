@@ -53,8 +53,9 @@ Providers:
   and removing sound descriptions (off by default) change the wording, so they follow the wording setting. Shortening
   overlaps and lengthening lines too brief to read follow the timing setting. ASS signs, karaoke and effects keep their
   timing unless you ask otherwise.
-- **Budgets and limits**: monthly spending limit for paid services (US$5 by default; 0 means no paid services at all,
-  and "no limit" is an explicit choice), cost estimates before bulk runs, and respectful
+- **Budgets and limits**: monthly spending limit for paid services, in your own currency (5 a month by default; 0 means
+  no paid services at all, and "no limit" is an explicit choice). Providers' charges (usually in US dollars) are
+  converted with the European Central Bank's daily rates, with an optional percentage for taxes or card fees, cost estimates before bulk runs, and respectful
   handling of provider limits (no hammering an API that has said stop).
 
 ## Settings
@@ -79,9 +80,17 @@ make results worse.
 
 ## Building
 
+The shared source ([jellyfin-plugin-common](https://github.com/chrisgrulau/jellyfin-plugin-common)) is a git
+submodule, so clone with `--recurse-submodules`, or fetch it in an existing clone; the build fails without
+`external/common`:
+
 ```bash
+git submodule update --init --recursive
 dotnet build -c Release
 ```
+
+The SDK version is pinned in `global.json`, and package versions are locked in `packages.lock.json`. The Jellyfin
+packages are pinned to the server version in `build.yaml`'s `targetAbi`; bump them together.
 
 The output `Jellyfin.Plugin.Subtitles.dll` goes in `<jellyfin data>/plugins/Subtitles_<version>/`.
 
@@ -92,4 +101,4 @@ configuration on your server. See [SECURITY.md](SECURITY.md).
 
 ## Licence
 
-[GPL-3.0](LICENSE), in line with Jellyfin and its official plugins.
+[GPL-3.0](LICENSE), in line with Jellyfin's official plugins (the server itself is GPL-2.0).

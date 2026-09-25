@@ -34,6 +34,20 @@ public class SubtitlesPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// <inheritdoc />
     public override string Description => "Finds, checks and synchronises subtitles so they match the audio.";
 
+    /// <inheritdoc />
+    public override void UpdateConfiguration(BasePluginConfiguration configuration)
+    {
+        // Keep values the plugin relies on within safe bounds, whatever the settings page (or an API client) sent
+        if (configuration is PluginConfiguration c)
+        {
+            c.Currency = SpendingLimit.NormaliseCurrency(c.Currency);
+            c.MonthlyBudget = Math.Max(0, c.MonthlyBudget);
+            c.ExtraChargesPercent = SpendingLimit.NormaliseExtraPercent(c.ExtraChargesPercent);
+        }
+
+        base.UpdateConfiguration(configuration);
+    }
+
     /// <summary>
     /// Gets the current plugin instance.
     /// </summary>

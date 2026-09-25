@@ -1,3 +1,4 @@
+using System.Linq;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Xunit;
 
@@ -33,7 +34,7 @@ public class ConfigurationTests
 
     [Fact]
     public void The_default_limit_is_a_small_cap()
-        => Assert.InRange(SpendingLimit.DefaultMonthlyUsd, 0.01m, 10m);
+        => Assert.InRange(SpendingLimit.DefaultMonthly, 0.01m, 10m);
 
     [Fact]
     public void Built_in_speech_to_text_needs_consent_only_when_it_would_be_used()
@@ -45,5 +46,33 @@ public class ConfigurationTests
         Assert.True(SpendingLimit.NeedsBuiltInConsent([builtIn, off], allowed: false));
         Assert.False(SpendingLimit.NeedsBuiltInConsent([builtIn], allowed: true));
         Assert.False(SpendingLimit.NeedsBuiltInConsent([off, cloud], allowed: false));
+    }
+
+    [Theory]
+    [InlineData("aud", "AUD")]
+    [InlineData(" EUR ", "EUR")]
+    [InlineData("XYZ", "USD")]
+    [InlineData("A$", "USD")]
+    [InlineData(null, "USD")]
+    public void Currency_settings_are_made_safe(string? input, string expected)
+        => Assert.Equal(expected, SpendingLimit.NormaliseCurrency(input));
+
+    [Theory]
+    [InlineData(-5, 0)]
+    [InlineData(10, 10)]
+    [InlineData(250, 100)]
+    public void Extra_charges_stay_between_0_and_100_percent(int input, int expected)
+        => Assert.Equal(expected, SpendingLimit.NormaliseExtraPercent(input));
+
+    [Fact]
+    public void The_settings_page_offers_exactly_the_supported_currencies()
+    {
+        using var stream = typeof(SpendingLimit).Assembly.GetManifestResourceStream("Jellyfin.Plugin.Subtitles.Configuration.configPage.html")!;
+        using var reader = new System.IO.StreamReader(stream);
+        var page = reader.ReadToEnd();
+        var list = System.Text.RegularExpressions.Regex.Match(page, @"var currencies = \[(?<list>[^\]]*)\]").Groups["list"].Value;
+        var offered = System.Text.RegularExpressions.Regex.Matches(list, "'([A-Z]{3})'").Select(m => m.Groups[1].Value);
+
+        Assert.Equal(Common.Costs.CurrencyCode.Supported, offered);
     }
 }

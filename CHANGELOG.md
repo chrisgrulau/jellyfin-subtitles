@@ -57,3 +57,10 @@ All notable changes to this project are documented here. The format follows
 - Built-in speech-to-text (SUB-06) asks before its first download: the settings page says what is downloaded, how big it
   is and where from, and nothing set to Built-in runs until an administrator allows it. The safety requirements for the
   downloader are set out in `docs/DESIGN.md`.
+- Currency: costs and limits are shown and set in a currency of your choice (the euro and the ~30 currencies of the
+  European Central Bank's daily rates, including AUD); an advanced setting adds a percentage for taxes or card fees.
+  The monthly limit setting is now `MonthlyBudget` in that currency.
+- Builds (BLD-01, BLD-03, DOC-01): Jellyfin packages pinned to 12.1.0 with lock files and locked-mode restores; SDK
+  pinned in `global.json`; releases carry SHA256SUMS and a build-provenance attestation and are published from a draft;
+  the tag must match the plugin version; checkout without persisted credentials; job timeouts; Dependabot follows the
+  common submodule and the SDK. `.gitignore` covers test audio and models. README explains the submodule.

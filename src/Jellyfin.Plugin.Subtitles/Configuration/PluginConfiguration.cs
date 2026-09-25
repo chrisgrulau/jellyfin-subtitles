@@ -54,11 +54,17 @@ public class PluginConfiguration : BasePluginConfiguration
     public TranscriptionTier FullTranscript { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets the monthly spending limit for paid services in US dollars. 0 means no paid usage at all (cloud
-    /// services are never called); "no limit" is a separate, explicit choice (<see cref="NoSpendingLimit"/>). A small cap
-    /// by default, so entering an API key never means open-ended spending.
+    /// Gets or sets the currency costs and limits are shown and set in (ISO 4217, e.g. <c>AUD</c>). Providers charge in
+    /// their own currency (usually US dollars); charges are converted with the European Central Bank's daily rates.
     /// </summary>
-    public decimal MonthlyBudgetUsd { get; set; } = SpendingLimit.DefaultMonthlyUsd;
+    public string Currency { get; set; } = SpendingLimit.DefaultCurrency;
+
+    /// <summary>
+    /// Gets or sets the monthly spending limit for paid services, in <see cref="Currency"/>. 0 means no paid usage at all
+    /// (cloud services are never called); "no limit" is a separate, explicit choice (<see cref="NoSpendingLimit"/>). A
+    /// small cap by default, so entering an API key never means open-ended spending.
+    /// </summary>
+    public decimal MonthlyBudget { get; set; } = SpendingLimit.DefaultMonthly;
 
     /// <summary>
     /// Gets or sets a value indicating whether paid services may spend without a limit of our own (limits set with the
@@ -74,6 +80,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AllowBuiltInDownload { get; set; }
 
     // ---- Advanced ----
+
+    /// <summary>
+    /// Gets or sets a percentage added to every provider charge, for taxes on overseas services (such as GST) or a card's
+    /// foreign-transaction fee, so limits match what is actually paid. 0 to 100; 0 by default.
+    /// </summary>
+    public decimal ExtraChargesPercent { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether confidence thresholds are tuned automatically against subtitles already
