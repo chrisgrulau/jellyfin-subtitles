@@ -79,3 +79,7 @@ All notable changes to this project are documented here. The format follows
   build it; CI uses the newest .NET 10 SDK, and Dependabot no longer raises the minimum. Package versions stay locked.
 - The plugin family is now called **Shoal**: this plugin shows as "Shoal Subtitles". Settings, data and the plugin id
   are unchanged.
+- Speech-to-text settings: a local service address, write-only API keys for the local service, Deepgram and OpenAI
+  (kept in an owner-only file outside the configuration, never shown again), and a Test button per service that sends
+  one second of near-silence and reports the result in plain language. Paid services aren't used when the spending
+  limit is 0; the built-in Whisper still waits for permission.

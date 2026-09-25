@@ -1,3 +1,6 @@
+using System.IO;
+using Jellyfin.Plugin.Subtitles.SpeechToText;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,6 +15,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
-        // Services are registered here as the pipeline stages land (sources, scoring, speech-to-text, sync).
+        // Speech-to-text keys live in their own owner-only file in the plugin's data folder, never in the configuration
+        serviceCollection.AddSingleton(sp => new SpeechToTextKeys(
+            Path.Combine(sp.GetRequiredService<IApplicationPaths>().PluginsPath, typeof(SubtitlesPlugin).Assembly.GetName().Name!, "keys.json")));
     }
 }

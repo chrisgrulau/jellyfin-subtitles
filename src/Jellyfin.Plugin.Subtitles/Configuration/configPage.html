@@ -13,6 +13,12 @@
       #SubtitlesConfigPage details.subs-advanced { margin-top: 2em; border-top: 1px solid rgba(128,128,128,.25); padding-top: 1em; }
       #SubtitlesConfigPage details.subs-advanced > summary { cursor: pointer; font-size: 1.1em; }
       #SubtitlesConfigPage .subs-warning { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
+      #SubtitlesConfigPage .subs-service { padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
+      #SubtitlesConfigPage .subs-service h4 { margin: .5em 0; }
+      #SubtitlesConfigPage .subs-key { display: flex; gap: .5em; align-items: end; flex-wrap: wrap; }
+      #SubtitlesConfigPage .subs-key .inputContainer { flex: 1 1 14em; margin: 0; }
+      #SubtitlesConfigPage .subs-set { color: #4caf50; }
+      #SubtitlesConfigPage .subs-result { flex-basis: 100%; margin: .25em 0; }
       @media (max-width: 720px) { #SubtitlesConfigPage .subs-tier { grid-template-columns: 1fr; } }
     </style>
     <div data-role="content">
@@ -68,8 +74,21 @@
           <p class="subs-muted">Empty lines are always removed. Repeated lines are merged and tidied into one, following the wording setting. Lines that overlap the next one, or show too briefly to read, are adjusted, following the timing setting. Every change can be undone.</p>
 
           <h3 class="sectionTitle" style="margin-top:2em">Speech-to-text</h3>
-          <p class="subs-muted">Used to check subtitles against what is actually said. <strong>Built-in</strong> runs on this server with no setup (slower, free); cloud services are faster but charge per minute of audio.</p>
+          <p class="subs-muted">Used to check subtitles against what is actually said. <strong>Built-in</strong> runs on this server with no setup (slower, free); a <strong>local service</strong> is free and fast with a GPU; cloud services are fast but charge per minute of audio.</p>
           <div id="Tiers"></div>
+
+          <h3 class="sectionTitle" style="margin-top:1.5em">Services</h3>
+          <p class="subs-muted">Keys are stored on this server in a file only Jellyfin can read. They are never shown again, logged or included in exports; you can replace or clear them. <strong>Test</strong> sends one second of near-silence (for a paid service, a small fraction of a cent).</p>
+          <div class="subs-service" data-service="local">
+            <div class="inputContainer">
+              <label class="inputLabel inputLabelUnfocused" for="LocalServiceUrl">Local service address</label>
+              <input id="LocalServiceUrl" type="url" is="emby-input" placeholder="http://localhost:8000/v1" />
+              <div class="fieldDescription">A speech-to-text service with an OpenAI-compatible API on this server or your network (for example a faster-whisper server, speaches, or the whisper.cpp server). Free, and fast with a GPU.</div>
+            </div>
+            <div class="subs-key"></div>
+          </div>
+          <div class="subs-service" data-service="deepgram"><h4>Deepgram</h4><div class="subs-key"></div></div>
+          <div class="subs-service" data-service="openai"><h4>OpenAI</h4><div class="subs-key"></div></div>
 
           <div id="BuiltInConsent" class="subs-warning" hidden>
             <p style="margin-top:0"><strong>The built-in speech-to-text needs your permission before its first use.</strong> It downloads a Whisper program (whisper.cpp, built by this project) and a small speech model, about 150 MB in total. They come only over HTTPS from this project's GitHub releases. Each file is checked against a checksum built into the plugin before it runs, and again each time it starts. It runs on this server's CPU with low priority and a time limit, and nothing is sent anywhere.</p>
@@ -209,6 +228,51 @@
           }).join('');
         }
 
+        var serviceNames = { local: 'Local service', deepgram: 'Deepgram', openai: 'OpenAI' };
+
+        function renderKeys(keys) {
+          Array.prototype.forEach.call(page.querySelectorAll('.subs-service'), function (box) {
+            var id = box.getAttribute('data-service');
+            var set = keys && keys[id];
+            var optional = id === 'local';
+            box.querySelector('.subs-key').innerHTML =
+              '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">API key' + (optional ? ' (only if the service needs one)' : '') + ': ' + (set ? '<span class="subs-set">set</span>' : 'not set') + '</label>' +
+              '<input is="emby-input" type="password" class="svc-key" autocomplete="off" placeholder="' + (set ? 'Enter a new key to replace it' : 'Paste the key') + '" /></div>' +
+              '<button is="emby-button" type="button" class="raised svc-savekey"><span>Save key</span></button>' +
+              (set ? '<button is="emby-button" type="button" class="raised button-alt svc-clearkey"><span>Clear</span></button>' : '') +
+              '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button>' +
+              '<div class="subs-result subs-muted"></div>';
+          });
+        }
+
+        function loadKeys() {
+          return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Keys')).then(renderKeys);
+        }
+
+        function modelFor(id) {
+          var row = Array.prototype.filter.call(page.querySelectorAll('.subs-tier'), function (r) { return r.querySelector('.tier-provider').value === id; })[0];
+          return row ? row.querySelector('.tier-model').value.trim() : '';
+        }
+
+        page.addEventListener('click', function (e) {
+          var box = e.target.closest('.subs-service');
+          if (!box) { return; }
+          var id = box.getAttribute('data-service');
+          var result = box.querySelector('.subs-result');
+          if (e.target.closest('.svc-savekey')) {
+            var key = box.querySelector('.svc-key').value.trim();
+            if (!key) { Dashboard.alert('Paste the key first.'); return; }
+            ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Keys/' + id), data: JSON.stringify({ Key: key }), contentType: 'application/json' })
+              .then(loadKeys, function () { Dashboard.alert("That doesn't look like an API key."); });
+          } else if (e.target.closest('.svc-clearkey')) {
+            ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/' + id) }).then(loadKeys);
+          } else if (e.target.closest('.svc-test')) {
+            result.textContent = 'Testing ' + serviceNames[id] + '…';
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify({ Provider: id, Model: modelFor(id), LocalServiceUrl: page.querySelector('#LocalServiceUrl').value.trim() }), contentType: 'application/json', dataType: 'json' })
+              .then(function (r) { result.textContent = (r.Ok ? '✓ ' : '✗ ') + r.Message; }, function () { result.textContent = '✗ The test couldn\'t be run.'; });
+          }
+        });
+
         function tiersFromPage() {
           return Array.prototype.map.call(page.querySelectorAll('.subs-tier'), function (row) {
             return { Enabled: row.querySelector('.tier-on').checked, Provider: row.querySelector('.tier-provider').value };
@@ -251,10 +315,11 @@
             page.querySelector('#FlashThresholdMs').value = cleanup.FlashThresholdMs;
             page.querySelector('#FlashTargetMs').value = cleanup.FlashTargetMs;
             page.querySelector('#FixTypesetTiming').checked = cleanup.FixTypesetTiming;
+            page.querySelector('#LocalServiceUrl').value = config.LocalServiceUrl || '';
             renderTiers(config);
             refreshWarnings();
-            Dashboard.hideLoadingMsg();
-          });
+            return loadKeys();
+          }).then(function () { Dashboard.hideLoadingMsg(); });
         });
 
         page.querySelector('#SubtitlesConfigForm').addEventListener('submit', function (e) {
@@ -265,6 +330,7 @@
             config.Languages = page.querySelector('#Languages').value.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(function (s) { return /^[a-z]{3}$/.test(s); });
             if (!config.Languages.length) { config.Languages = ['eng']; }
             config.TimingFixes = page.querySelector('#TimingFixes').value;
+            config.LocalServiceUrl = page.querySelector('#LocalServiceUrl').value.trim();
             config.TextChanges = page.querySelector('#TextChanges').value;
             config.Currency = page.querySelector('#Currency').value;
             config.MonthlyBudget = Math.max(0, parseFloat(page.querySelector('#MonthlyBudget').value) || 0);

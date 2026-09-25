@@ -39,6 +39,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public CleanupSettings Cleanup { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets the address of a local speech-to-text service with an OpenAI-compatible API (faster-whisper server,
+    /// speaches, the whisper.cpp server …), e.g. <c>http://localhost:8000/v1</c>. Used by tiers set to "Local service".
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Stored as entered in the XML plugin configuration; parsed and checked where it is used.")]
+    public string LocalServiceUrl { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets speech-to-text for the short snippets used to check and synchronise subtitles.
     /// </summary>
     public TranscriptionTier SyncSnippets { get; set; } = new() { Enabled = true };
