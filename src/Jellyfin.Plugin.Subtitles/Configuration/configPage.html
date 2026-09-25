@@ -50,6 +50,23 @@
             </select>
           </div>
 
+          <h3 class="sectionTitle" style="margin-top:2em">Clean-up</h3>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="RemoveAdverts" type="checkbox" is="emby-checkbox" />
+              <span>Remove adverts and credit lines</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">Subtitle-site promotions anywhere, and lines like "Subtitles by …" near the start or end. Applied automatically; this can be changed under Advanced settings.</div>
+          </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="RemoveSoundDescriptions" type="checkbox" is="emby-checkbox" />
+              <span>Remove sound descriptions</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">Removes <code>[door slams]</code>, <code>(laughs)</code>, speaker labels and music-only lines. This changes the wording, so it follows the wording setting above.</div>
+          </div>
+          <p class="subs-muted">Empty lines are always removed. Repeated lines are merged and tidied into one, following the wording setting. Lines that overlap the next one, or show too briefly to read, are adjusted, following the timing setting. Every change can be undone.</p>
+
           <h3 class="sectionTitle" style="margin-top:2em">Speech-to-text</h3>
           <p class="subs-muted">Used to check subtitles against what is actually said. <strong>Built-in</strong> runs on this server with no setup (slower, free); cloud services are faster but charge per minute of audio.</p>
           <div id="Tiers"></div>
@@ -63,6 +80,53 @@
           <details class="subs-advanced">
             <summary>Advanced settings</summary>
             <div class="subs-warning">These settings change how results are judged. The defaults are tuned for good results; changing them without understanding the effect can make matches or timing worse.</div>
+            <h3 class="sectionTitle">Clean-up</h3>
+            <div class="selectContainer">
+              <label class="selectLabel" for="AdvertRemoval">Advert and credit removal</label>
+              <select is="emby-select" id="AdvertRemoval">
+                <option value="Automatic">Apply automatically (recommended)</option>
+                <option value="Review">Hold for my review</option>
+              </select>
+            </div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="MergeDuplicateLines" type="checkbox" is="emby-checkbox" />
+                <span>Merge a line repeated back to back</span>
+              </label>
+            </div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="FixOverlaps" type="checkbox" is="emby-checkbox" />
+                <span>Shorten lines that run into the next one</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">Only overlaps of up to a second; longer ones are usually two people speaking at once and are left alone.</div>
+            </div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="LengthenFlashLines" type="checkbox" is="emby-checkbox" />
+                <span>Lengthen lines shown too briefly to read</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">Never into the next line.</div>
+            </div>
+            <div class="inputContainer">
+              <label class="inputLabel inputLabelUnfocused" for="FlashThresholdMs">Too brief below (milliseconds)</label>
+              <input id="FlashThresholdMs" type="number" min="0" max="5000" step="1" is="emby-input" />
+              <div class="fieldDescription">Default 500. Short interjections ("Hey!") often run 500–800 ms and read fine; raising this touches many more lines.</div>
+            </div>
+            <div class="inputContainer">
+              <label class="inputLabel inputLabelUnfocused" for="FlashTargetMs">Lengthen to (milliseconds)</label>
+              <input id="FlashTargetMs" type="number" min="0" max="5000" step="1" is="emby-input" />
+              <div class="fieldDescription">Default 833 (5/6 of a second, a common broadcast minimum).</div>
+            </div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="FixTypesetTiming" type="checkbox" is="emby-checkbox" />
+                <span>Also adjust ASS signs, karaoke and effects</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">Not recommended: typeset lines are brief and overlap on purpose, and adjusting them breaks signs and karaoke timing.</div>
+            </div>
+
+            <h3 class="sectionTitle">Judging results</h3>
             <div class="checkboxContainer checkboxContainer-withDescription">
               <label class="emby-checkbox-label">
                 <input id="SelfCalibration" type="checkbox" is="emby-checkbox" />
@@ -121,6 +185,16 @@
             page.querySelector('#MonthlyBudgetUsd').value = config.MonthlyBudgetUsd;
             page.querySelector('#SelfCalibration').checked = config.SelfCalibration;
             page.querySelector('#AgreementDecides').checked = config.AgreementDecides;
+            var cleanup = config.Cleanup || {};
+            page.querySelector('#RemoveAdverts').checked = cleanup.RemoveAdverts;
+            page.querySelector('#RemoveSoundDescriptions').checked = cleanup.RemoveSoundDescriptions;
+            page.querySelector('#AdvertRemoval').value = cleanup.AdvertRemoval;
+            page.querySelector('#MergeDuplicateLines').checked = cleanup.MergeDuplicateLines;
+            page.querySelector('#FixOverlaps').checked = cleanup.FixOverlaps;
+            page.querySelector('#LengthenFlashLines').checked = cleanup.LengthenFlashLines;
+            page.querySelector('#FlashThresholdMs').value = cleanup.FlashThresholdMs;
+            page.querySelector('#FlashTargetMs').value = cleanup.FlashTargetMs;
+            page.querySelector('#FixTypesetTiming').checked = cleanup.FixTypesetTiming;
             renderTiers(config);
             Dashboard.hideLoadingMsg();
           });
@@ -138,6 +212,16 @@
             config.MonthlyBudgetUsd = Math.max(0, parseFloat(page.querySelector('#MonthlyBudgetUsd').value) || 0);
             config.SelfCalibration = page.querySelector('#SelfCalibration').checked;
             config.AgreementDecides = page.querySelector('#AgreementDecides').checked;
+            var cleanup = config.Cleanup = config.Cleanup || {};
+            cleanup.RemoveAdverts = page.querySelector('#RemoveAdverts').checked;
+            cleanup.RemoveSoundDescriptions = page.querySelector('#RemoveSoundDescriptions').checked;
+            cleanup.AdvertRemoval = page.querySelector('#AdvertRemoval').value;
+            cleanup.MergeDuplicateLines = page.querySelector('#MergeDuplicateLines').checked;
+            cleanup.FixOverlaps = page.querySelector('#FixOverlaps').checked;
+            cleanup.LengthenFlashLines = page.querySelector('#LengthenFlashLines').checked;
+            cleanup.FlashThresholdMs = Math.min(5000, Math.max(0, parseInt(page.querySelector('#FlashThresholdMs').value, 10) || 500));
+            cleanup.FlashTargetMs = Math.min(5000, Math.max(cleanup.FlashThresholdMs, parseInt(page.querySelector('#FlashTargetMs').value, 10) || 833));
+            cleanup.FixTypesetTiming = page.querySelector('#FixTypesetTiming').checked;
             Array.prototype.forEach.call(page.querySelectorAll('.subs-tier'), function (row) {
               config[row.getAttribute('data-tier')] = {
                 Enabled: row.querySelector('.tier-on').checked,
