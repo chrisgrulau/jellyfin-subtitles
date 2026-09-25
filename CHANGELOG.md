@@ -16,6 +16,15 @@ All notable changes to this project are documented here. The format follows
   duplicates, small overlaps (larger ones are usually deliberate and left alone), flash cues under 0.5 s, and optional
   stripping of hearing-impaired descriptions and speaker labels.
 - Shared source from `jellyfin-plugin-common`, as a submodule compiled into the plugin.
+- Candidate sources: an `ICandidateSource` interface, and the first source, Jellyfin's own subtitle providers (e.g.
+  the OpenSubtitles plugin with the user's account), searched and fetched without saving anything.
+- Candidate scoring before download, with a readable reason for every point: fingerprint match (release-name
+  comparisons are skipped, since the subtitle was synced to this exact file), wrong episode (rejected), release group,
+  kind of source, streaming service, a different cut (heavily penalised), frame rate (e.g. 25 vs 23.976 fps), machine
+  or AI translation, forced-only (rejected), hearing-impaired preference, popularity, unsupported formats (rejected).
+- Content checks after download: coverage of the running time, cue density, and a language check of the text itself.
+- Release-name tags (group, source, service, resolution, edition, REPACK/PROPER, episode codes), avoiding title words
+  that look like tags.
 - Repository scaffolding: licence (GPL-3.0), README, design notes, contribution and security policies, CI with pinned
   actions, Dependabot, CODEOWNERS.
 - Plugin skeleton targeting Jellyfin 12.1 / net10.0, and a settings page with basic settings (languages, timing and
