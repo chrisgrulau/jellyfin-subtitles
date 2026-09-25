@@ -83,3 +83,16 @@ All notable changes to this project are documented here. The format follows
   (kept in an owner-only file outside the configuration, never shown again), and a Test button per service that sends
   one second of near-silence and reports the result in plain language. Paid services aren't used when the spending
   limit is 0; the built-in Whisper still waits for permission.
+- The pipeline, first version (timing): a daily "Check and sync subtitles" task (Scheduled Tasks → Shoal) checks text
+  subtitle files beside films and episodes in the chosen languages, up to 50 per run, skipping ones already checked and
+  unchanged. The free line-start stage runs first; free speech-to-text (a local or built-in service) settles unclear
+  cases and fine-tunes timing. Corrections follow the timing setting: applied, or held for review. The first original
+  is kept in the plugin's data folder; files are only changed if unchanged since they were checked, via a hidden
+  temporary file; undo only restores if nobody has edited the file since. Subtitles whose text doesn't match the
+  speech (another language, another version, or commentary and notes tracks) are flagged and left alone. Paid
+  speech-to-text isn't used by automatic runs until cost tracking is available.
+- The settings page shows results (newest first) with Apply and Undo, and a "Check now" button.
+
+### Fixed
+- The subtitle language list gained a duplicate "eng" on every restart (Jellyfin's XML loader adds saved items to a
+  list's default); it now starts empty (meaning English) and is de-duplicated on save.

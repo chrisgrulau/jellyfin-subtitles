@@ -33,6 +33,19 @@ public static class SpendingLimit
         => Common.Costs.CurrencyCode.IsSupported(currency) ? Common.Costs.CurrencyCode.Normalise(currency)! : DefaultCurrency;
 
     /// <summary>
+    /// The languages to check: the configured three-letter codes, lower case, each once; English when none are set.
+    /// </summary>
+    /// <param name="configured">The setting.</param>
+    /// <returns>The codes.</returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "ISO 639-2 codes are lower case by convention, as Jellyfin stores them.")]
+    public static IReadOnlyList<string> EffectiveLanguages(IEnumerable<string>? configured)
+    {
+        var codes = (configured ?? []).Select(c => (c ?? string.Empty).Trim().ToLowerInvariant())
+            .Where(c => c.Length == 3 && c.All(char.IsAsciiLetterLower)).Distinct(StringComparer.Ordinal).ToList();
+        return codes.Count > 0 ? codes : ["eng"];
+    }
+
+    /// <summary>
     /// The extra-charges percentage made safe (0 to 100).
     /// </summary>
     /// <param name="percent">The setting.</param>

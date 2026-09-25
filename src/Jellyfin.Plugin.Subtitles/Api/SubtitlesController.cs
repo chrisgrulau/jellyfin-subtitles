@@ -8,6 +8,7 @@ using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Subtitles.Configuration;
+using Jellyfin.Plugin.Subtitles.Pipeline;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -27,14 +28,17 @@ public class SubtitlesController : ControllerBase
 {
     private readonly SpeechToTextKeys _keys;
     private readonly IHttpClientFactory _http;
+    private readonly SubtitleProcessor _processor;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitlesController"/> class.
     /// </summary>
     /// <param name="keys">The key store.</param>
     /// <param name="http">HTTP client factory.</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http)
+    /// <param name="processor">Subtitle checks, results, apply and undo.</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor)
     {
+        _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _http = http ?? throw new ArgumentNullException(nameof(http));
     }
@@ -85,6 +89,55 @@ public class SubtitlesController : ControllerBase
     {
         _keys.Clear(provider);
         return NoContent();
+    }
+
+    /// <summary>
+    /// The latest results, newest first.
+    /// </summary>
+    /// <param name="limit">How many (default 200).</param>
+    /// <returns>The results.</returns>
+    [HttpGet("Results")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<IReadOnlyList<SubtitleResult>> Results([FromQuery] int limit = 200) => Ok(_processor.Recent(limit));
+
+    /// <summary>
+    /// Applies a correction that is waiting for review.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Apply")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> Apply([FromRoute] string id)
+    {
+        try
+        {
+            return _processor.Apply(id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Undoes a correction (the original comes back, unless the file was changed since).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Undo")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> Undo([FromRoute] string id)
+    {
+        try
+        {
+            return _processor.Undo(id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
     }
 
     /// <summary>

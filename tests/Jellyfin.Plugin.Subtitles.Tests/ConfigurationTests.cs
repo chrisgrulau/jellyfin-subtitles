@@ -75,4 +75,12 @@ public class ConfigurationTests
 
         Assert.Equal(Common.Costs.CurrencyCode.Supported, offered);
     }
+
+    [Fact]
+    public void Languages_are_deduplicated_and_default_to_english()
+    {
+        Assert.Equal(["eng"], SpendingLimit.EffectiveLanguages(null));
+        Assert.Equal(["eng"], SpendingLimit.EffectiveLanguages(["eng", "ENG", " eng "]));
+        Assert.Equal(["fre", "eng"], SpendingLimit.EffectiveLanguages(["fre", "eng", "bogus", "fre"]));
+    }
 }
