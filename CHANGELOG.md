@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- Subtitle files are read through one entry point (`SubtitleReader.Read`) that refuses anything over 10 MB before
+  decoding (SUB-04). Patterns that scan whole files match only spaces and tabs, not newlines, and have a time limit,
+  so long runs of blank lines can't slow parsing.
+
+### Fixed
+- A UTF-8 byte-order mark in front of text that isn't UTF-8 (common after careless conversions) falls back to the
+  legacy code page instead of throwing (SUB-01).
+- ASS files with a later malformed `Format:` line, or two different ones, no longer crash the writer or write events
+  with the wrong layout (SUB-02). Events are stored in the file's first usable format, and the writer falls back to the
+  standard v4+ layout if the format is unusable.
+- Written SubRip and WebVTT cues never contain a blank line (which would end the cue early), and `-->` in WebVTT cue
+  text is escaped (SUB-07).
+
 ### Added
 - Subtitle files: SubRip, WebVTT and ASS/SSA reading and writing. Parsing is tolerant of real-world files (wrong or
   missing cue numbers, stray blank lines, mixed line endings, either millisecond separator). WebVTT keeps its header,
