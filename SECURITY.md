@@ -13,5 +13,6 @@ their server. The plugin never logs them or includes them in alerts. Nothing sec
 ## Files and downloads
 
 The plugin writes only subtitle files (and their provenance records) next to videos, always keeping the original. The
-built-in speech-to-text program is downloaded from this project's releases and verified against a published checksum
-before it is run.
+built-in speech-to-text program is only downloaded after an administrator allows it. It comes over HTTPS from this
+project's releases only, is checked against a SHA-256 compiled into the plugin before it is ever run (and again every
+time it starts), and runs without a shell, with a time limit and low priority. See `docs/DESIGN.md` for the full list.

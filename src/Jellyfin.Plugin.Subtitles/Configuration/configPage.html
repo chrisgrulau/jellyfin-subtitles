@@ -71,11 +71,30 @@
           <p class="subs-muted">Used to check subtitles against what is actually said. <strong>Built-in</strong> runs on this server with no setup (slower, free); cloud services are faster but charge per minute of audio.</p>
           <div id="Tiers"></div>
 
+          <div id="BuiltInConsent" class="subs-warning" hidden>
+            <p style="margin-top:0"><strong>The built-in speech-to-text needs your permission before its first use.</strong> It downloads a Whisper program (whisper.cpp, built by this project) and a small speech model, about 150 MB in total. They come only over HTTPS from this project's GitHub releases. Each file is checked against a checksum built into the plugin before it runs, and again each time it starts. It runs on this server's CPU with low priority and a time limit, and nothing is sent anywhere.</p>
+            <div class="checkboxContainer" style="margin:0">
+              <label class="emby-checkbox-label">
+                <input id="AllowBuiltInDownload" type="checkbox" is="emby-checkbox" />
+                <span>Allow the built-in speech-to-text to download and run</span>
+              </label>
+            </div>
+            <div class="subs-muted">Until you allow it, anything set to Built-in waits. A local service or a cloud provider works without this.</div>
+          </div>
+
           <div class="inputContainer" style="margin-top:1.5em">
             <label class="inputLabel inputLabelUnfocused" for="MonthlyBudgetUsd">Monthly spending limit for paid services (US$)</label>
             <input id="MonthlyBudgetUsd" type="number" min="0" step="0.01" is="emby-input" />
-            <div class="fieldDescription">0 = no limit of our own. Limits you set with the provider always apply.</div>
+            <div class="fieldDescription">0 = no paid services at all: cloud providers are never called. Limits you set with the provider always apply as well.</div>
           </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="NoSpendingLimit" type="checkbox" is="emby-checkbox" />
+              <span>No spending limit</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">Not recommended.</div>
+          </div>
+          <div id="NoLimitWarning" class="subs-warning" hidden>With no limit, spending on cloud services is only capped by what you've set with each provider. A full transcript of a whole library can cost a lot.</div>
 
           <details class="subs-advanced">
             <summary>Advanced settings</summary>
@@ -175,6 +194,22 @@
           }).join('');
         }
 
+        function tiersFromPage() {
+          return Array.prototype.map.call(page.querySelectorAll('.subs-tier'), function (row) {
+            return { Enabled: row.querySelector('.tier-on').checked, Provider: row.querySelector('.tier-provider').value };
+          });
+        }
+
+        function refreshWarnings() {
+          var noLimit = page.querySelector('#NoSpendingLimit').checked;
+          page.querySelector('#NoLimitWarning').hidden = !noLimit;
+          page.querySelector('#MonthlyBudgetUsd').disabled = noLimit;
+          var needsBuiltIn = tiersFromPage().some(function (t) { return t.Enabled && t.Provider === 'builtin'; });
+          page.querySelector('#BuiltInConsent').hidden = !needsBuiltIn && !page.querySelector('#AllowBuiltInDownload').checked;
+        }
+
+        page.addEventListener('change', refreshWarnings);
+
         page.addEventListener('pageshow', function () {
           Dashboard.showLoadingMsg();
           ApiClient.getPluginConfiguration(pluginId).then(function (config) {
@@ -183,6 +218,8 @@
             page.querySelector('#TimingFixes').value = config.TimingFixes;
             page.querySelector('#TextChanges').value = config.TextChanges;
             page.querySelector('#MonthlyBudgetUsd').value = config.MonthlyBudgetUsd;
+            page.querySelector('#NoSpendingLimit').checked = !!config.NoSpendingLimit;
+            page.querySelector('#AllowBuiltInDownload').checked = !!config.AllowBuiltInDownload;
             page.querySelector('#SelfCalibration').checked = config.SelfCalibration;
             page.querySelector('#AgreementDecides').checked = config.AgreementDecides;
             var cleanup = config.Cleanup || {};
@@ -196,6 +233,7 @@
             page.querySelector('#FlashTargetMs').value = cleanup.FlashTargetMs;
             page.querySelector('#FixTypesetTiming').checked = cleanup.FixTypesetTiming;
             renderTiers(config);
+            refreshWarnings();
             Dashboard.hideLoadingMsg();
           });
         });
@@ -210,6 +248,8 @@
             config.TimingFixes = page.querySelector('#TimingFixes').value;
             config.TextChanges = page.querySelector('#TextChanges').value;
             config.MonthlyBudgetUsd = Math.max(0, parseFloat(page.querySelector('#MonthlyBudgetUsd').value) || 0);
+            config.NoSpendingLimit = page.querySelector('#NoSpendingLimit').checked;
+            config.AllowBuiltInDownload = page.querySelector('#AllowBuiltInDownload').checked;
             config.SelfCalibration = page.querySelector('#SelfCalibration').checked;
             config.AgreementDecides = page.querySelector('#AgreementDecides').checked;
             var cleanup = config.Cleanup = config.Cleanup || {};

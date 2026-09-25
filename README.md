@@ -38,7 +38,7 @@ Providers:
 
 | Provider | Setup | Cost |
 |---|---|---|
-| **Built-in** (default) | None: the plugin downloads a checksum-verified Whisper program and a small model the first time it's needed | Free; CPU, slower |
+| **Built-in** (default) | One click to allow it: the plugin then downloads a checksum-verified Whisper program and a small model (about 150 MB) the first time it's needed | Free; CPU, slower |
 | **Local service** | A local speech-to-text service (Whisper), with a guided one-line setup on the plugin page | Free; fast with a GPU |
 | **Cloud** (Deepgram, OpenAI …) | Paste an API key | Per minute of audio |
 
@@ -53,7 +53,8 @@ Providers:
   and removing sound descriptions (off by default) change the wording, so they follow the wording setting. Shortening
   overlaps and lengthening lines too brief to read follow the timing setting. ASS signs, karaoke and effects keep their
   timing unless you ask otherwise.
-- **Budgets and limits**: monthly spending limit for paid services, cost estimates before bulk runs, and respectful
+- **Budgets and limits**: monthly spending limit for paid services (US$5 by default; 0 means no paid services at all,
+  and "no limit" is an explicit choice), cost estimates before bulk runs, and respectful
   handling of provider limits (no hammering an API that has said stop).
 
 ## Settings

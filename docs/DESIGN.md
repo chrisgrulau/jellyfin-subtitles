@@ -44,12 +44,30 @@ model and time range, so no audio is paid for twice and re-runs are free.
 ### Providers
 
 - **Built-in**: a whisper.cpp CPU build that this project compiles in CI for Linux (x64, arm64), Windows and macOS and
-  publishes with checksums, plus a small model; downloaded on first use and run on demand. Zero setup.
+  publishes with checksums, plus a small model; downloaded on first use and run on demand. No setup beyond a one-time
+  permission (see below).
 - **Local service**: anything speaking the OpenAI transcription API (for example speaches, faster-whisper-server or the
   whisper.cpp server). The plugin page detects services on the usual ports, reads Jellyfin's hardware-acceleration
   setting to suggest the right GPU build, shows a copy-paste setup command, and has a Test button. The plugin never
   installs system services itself.
 - **Cloud**: Deepgram, OpenAI (and more over time), each with an API key.
+
+### Built-in speech-to-text: safety requirements
+
+Downloading and running a native program is the riskiest thing this plugin family does, so the built-in provider must
+meet all of these before it ships:
+
+- **Explicit permission first.** Nothing is downloaded until an administrator allows it on the settings page, which says
+  what will be downloaded, roughly how big it is and where it comes from (`AllowBuiltInDownload`, off by default).
+  Until then, anything set to Built-in waits.
+- **Checksums compiled in.** The SHA-256 of every program and model is a constant in the plugin DLL, never fetched
+  alongside the file.
+- **One fixed origin.** HTTPS to this project's GitHub releases only; redirects to any other host are refused.
+- **Verify before it can run.** The file is downloaded to a temporary name, verified, and only then marked executable
+  and moved into a plugin-owned folder that other users can't write to. It is verified again every time it starts.
+- **No shell.** The process is started with `ProcessStartInfo.ArgumentList`; media paths are always absolute, so a file
+  name starting with `-` can't be read as an option.
+- **Bounded.** A timeout per job, the whole process tree killed on cancel, a capped thread count and low priority.
 
 ## Decisions and confidence
 
@@ -72,6 +90,11 @@ Shared with the other plugins through
 [jellyfin-plugin-common](https://github.com/chrisgrulau/jellyfin-plugin-common): failure classes with their own retry
 behaviour, provider-stated reset times, spending caps per service and purpose, estimates before bulk runs, and
 approve-first or automatic scheduled runs.
+
+Spending limits: 0 means **no paid usage** (cloud providers are never called); unlimited is a separate, explicit choice
+with a warning; the default is a small cap (US$5 a month), so entering an API key never means open-ended spending.
+When budgets are enforced, the estimated cost of each call is reserved before it is made, atomically across concurrent
+jobs, and the actual cost is settled afterwards, so parallel jobs can't overshoot the limit together.
 
 ## Working with the other plugins
 
