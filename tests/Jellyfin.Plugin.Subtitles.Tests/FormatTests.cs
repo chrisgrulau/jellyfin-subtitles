@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using Jellyfin.Plugin.Subtitles.Formats;
@@ -123,5 +124,113 @@ public class FormatTests
         Assert.Equal(Encoding.UTF8.Preamble.ToArray(), SubtitleWriter.ToBytes(srt)[..3]);
         var vtt = srt with { Format = SubtitleFormat.WebVtt, Header = "WEBVTT" };
         Assert.Equal((byte)'W', SubtitleWriter.ToBytes(vtt)[0]);
+    }
+
+    [Fact]
+    public void A_utf8_mark_in_front_of_windows_1252_falls_back()
+    {
+        var (text, encoding) = SubtitleEncoding.Decode([0xEF, 0xBB, 0xBF, (byte)'C', (byte)'a', (byte)'f', 0xE9]);
+
+        Assert.Equal("Café", text);
+        Assert.Equal("windows-1252", encoding);
+    }
+
+    [Fact]
+    public void A_utf8_mark_in_front_of_utf8_is_utf8()
+    {
+        var (text, encoding) = SubtitleEncoding.Decode([0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("Café")]);
+
+        Assert.Equal("Café", text);
+        Assert.Equal("utf-8", encoding);
+    }
+
+    private const string TwoFormats =
+        "[Script Info]\nScriptType: v4.00+\n\n[Events]\n" +
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" +
+        "Dialogue: 0,0:00:01.00,0:00:02.00,Sign,,0,0,0,,First, with a comma\n" +
+        "Format: Foo\n" +
+        "Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,Second\n" +
+        "Format: Start, End, Style, Text\n" +
+        "Dialogue: 0:00:05.00,0:00:06.00,Top,Third\n";
+
+    [Fact]
+    public void Ass_with_a_later_malformed_or_different_format_line_round_trips()
+    {
+        var doc = SubtitleReader.Parse(TwoFormats, SubtitleFormat.Ass);
+
+        Assert.Equal(3, doc.Cues.Count);
+        Assert.Equal("Layer", doc.AssFormat[0]);
+
+        var again = SubtitleReader.Parse(SubtitleWriter.Write(doc), SubtitleFormat.Ass);
+        Assert.Equal(["First, with a comma", "Second", "Third"], again.Cues.Select(c => c.Text));
+        Assert.Equal(["Sign", "Default", "Top"], again.Cues.Select(c => c.AssFields![3]));
+        Assert.Equal("0", again.Cues[2].AssFields![0]);
+    }
+
+    [Fact]
+    public void Ass_writer_survives_an_unusable_format()
+    {
+        var doc = SubtitleReader.Parse(TwoFormats, SubtitleFormat.Ass) with { AssFormat = ["Foo"] };
+
+        var written = SubtitleWriter.Write(doc);
+
+        Assert.Contains("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text", written, StringComparison.Ordinal);
+        Assert.Equal(3, SubtitleReader.Parse(written, SubtitleFormat.Ass).Cues.Count);
+    }
+
+    [Fact]
+    public void Two_mb_of_blank_lines_is_handled_quickly()
+    {
+        var text = new string('\n', 2 * 1024 * 1024) + "x";
+        var clock = Stopwatch.StartNew();
+
+        Assert.Null(SubtitleReader.Detect("unknown", text));
+        foreach (var format in new[] { SubtitleFormat.Srt, SubtitleFormat.WebVtt, SubtitleFormat.Ass })
+        {
+            Assert.Empty(SubtitleReader.Parse(text, format).Cues);
+        }
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), clock.Elapsed.ToString());
+    }
+
+    [Fact]
+    public void Files_over_the_size_limit_are_refused_before_decoding()
+    {
+        var big = new byte[SubtitleReader.MaxBytes + 1];
+
+        Assert.Null(SubtitleReader.Read(big, "big.srt"));
+        Assert.NotNull(SubtitleReader.Read(Encoding.UTF8.GetBytes(Srt), "film.srt"));
+    }
+
+    [Fact]
+    public void Blank_lines_inside_a_cue_never_end_it_early()
+    {
+        var doc = new SubtitleDocument
+        {
+            Format = SubtitleFormat.Srt,
+            Cues = [new SubtitleCue { Start = TimeSpan.FromSeconds(1), End = TimeSpan.FromSeconds(2), Text = "Top line\n\n \nBottom line" }],
+        };
+
+        var again = SubtitleReader.Parse(SubtitleWriter.Write(doc), SubtitleFormat.Srt);
+        Assert.Equal("Top line\nBottom line", Assert.Single(again.Cues).Text);
+
+        var vtt = SubtitleWriter.Write(doc with { Format = SubtitleFormat.WebVtt, Header = "WEBVTT" });
+        Assert.Equal("Top line\nBottom line", Assert.Single(SubtitleReader.Parse(vtt, SubtitleFormat.WebVtt).Cues).Text);
+    }
+
+    [Fact]
+    public void An_arrow_in_webvtt_text_is_escaped()
+    {
+        var doc = new SubtitleDocument
+        {
+            Format = SubtitleFormat.WebVtt,
+            Header = "WEBVTT",
+            Cues = [new SubtitleCue { Start = TimeSpan.FromSeconds(1), End = TimeSpan.FromSeconds(2), Text = "Left --> right" }],
+        };
+
+        var written = SubtitleWriter.Write(doc);
+
+        Assert.Contains("Left --&gt; right", written, StringComparison.Ordinal);
+        Assert.Single(SubtitleReader.Parse(written, SubtitleFormat.WebVtt).Cues);
     }
 }

@@ -48,7 +48,7 @@ public static class SubtitleWriter
         {
             sb.Append(n++.ToString(CultureInfo.InvariantCulture)).Append("\r\n")
                 .Append(Timecode.Format(c.Start, SubtitleFormat.Srt)).Append(" --> ").Append(Timecode.Format(c.End, SubtitleFormat.Srt)).Append("\r\n")
-                .Append(c.Text.Replace("\n", "\r\n", StringComparison.Ordinal)).Append("\r\n\r\n");
+                .Append(CueText(c.Text).Replace("\n", "\r\n", StringComparison.Ordinal)).Append("\r\n\r\n");
         }
 
         return sb.ToString();
@@ -70,7 +70,8 @@ public static class SubtitleWriter
                 sb.Append(' ').Append(c.Settings);
             }
 
-            sb.Append('\n').Append(c.Text).Append("\n\n");
+            // "-->" would read as a timing line; the entity shows the same characters
+            sb.Append('\n').Append(CueText(c.Text).Replace("-->", "--&gt;", StringComparison.Ordinal)).Append("\n\n");
         }
 
         return sb.ToString();
@@ -78,9 +79,10 @@ public static class SubtitleWriter
 
     private static string WriteAss(SubtitleDocument document)
     {
-        var format = document.AssFormat.Count > 0
-            ? document.AssFormat
-            : ["Layer", "Start", "End", "Style", "Name", "MarginL", "MarginR", "MarginV", "Effect", "Text"];
+        // A missing or unusable format (no Start, End or final Text) falls back to the standard v4+ one; each event's
+        // fields are moved to it by name
+        var original = document.AssFormat;
+        var format = SubtitleReader.IsUsableAssFormat(original) ? original : SubtitleReader.DefaultEventFormat;
         int At(string name) => format.ToList().FindIndex(f => f.Equals(name, StringComparison.OrdinalIgnoreCase));
         var startAt = At("Start");
         var endAt = At("End");
@@ -96,7 +98,9 @@ public static class SubtitleWriter
 
         foreach (var c in document.Cues)
         {
-            var fields = c.AssFields is { } f && f.Count == format.Count ? f.ToArray() : Defaults(format);
+            var fields = c.AssFields is not { } f ? Defaults(format)
+                : ReferenceEquals(format, original) ? (f.Count == format.Count ? f.ToArray() : Defaults(format))
+                : f.Count == original.Count ? SubtitleReader.RemapAssFields(f, original, format) : Defaults(format);
             fields[startAt] = Timecode.Format(c.Start, SubtitleFormat.Ass);
             fields[endAt] = Timecode.Format(c.End, SubtitleFormat.Ass);
             fields[textAt] = c.Text.Replace("\n", "\\N", StringComparison.Ordinal);
@@ -112,10 +116,10 @@ public static class SubtitleWriter
     }
 
     private static string[] Defaults(System.Collections.Generic.IReadOnlyList<string> format)
-        => [.. format.Select(f => f.ToUpperInvariant() switch
-        {
-            "LAYER" or "MARGINL" or "MARGINR" or "MARGINV" => "0",
-            "STYLE" => "Default",
-            _ => string.Empty,
-        })];
+        => [.. format.Select(SubtitleReader.DefaultAssField)];
+
+    // A blank line ends a SubRip or WebVTT cue early, so blank lines inside a cue (from an ASS "\N\N" or a removed
+    // middle line) are dropped
+    private static string CueText(string text)
+        => string.Join('\n', text.Split('\n').Where(l => l.Trim().Length > 0));
 }
