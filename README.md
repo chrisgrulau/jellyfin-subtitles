@@ -11,7 +11,17 @@ they help each other.
 A [Jellyfin](https://jellyfin.org) plugin that finds subtitles for videos that are missing them, checks every candidate
 against what is actually said in the audio, and fixes the timing, so the subtitles you get are the right ones and in sync.
 
-> **Status:** early development. The design is settled ([docs/DESIGN.md](docs/DESIGN.md)); features land release by release.
+> **Status:** first alpha (0.1.0). Checking and fixing existing subtitles, and finding missing ones, work today with a
+> local speech-to-text service. The built-in speech-to-text and paid services in automatic runs come next. The design
+> is in [docs/DESIGN.md](docs/DESIGN.md).
+
+## Installing
+
+Download `jellyfin-plugin-subtitles.zip` from the [releases](https://github.com/chrisgrulau/jellyfin-subtitles/releases),
+check it against `SHA256SUMS` (and, if you like, its build provenance with
+`gh attestation verify jellyfin-plugin-subtitles.zip --repo chrisgrulau/jellyfin-subtitles`), and put
+`Jellyfin.Plugin.Subtitles.dll` in `<jellyfin data>/plugins/Subtitles_<version>/`, then restart Jellyfin. For speech-to-text,
+point **Local service address** at an OpenAI-compatible service (for example a faster-whisper server) and press **Test**.
 
 ## What it does
 

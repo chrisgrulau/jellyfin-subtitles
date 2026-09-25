@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha] - 2026-09-25
+
 ### Security
 - Subtitle files are read through one entry point (`SubtitleReader.Read`) that refuses anything over 10 MB before
   decoding (SUB-04). Patterns that scan whole files match only spaces and tabs, not newlines, and have a time limit,
@@ -18,6 +20,22 @@ All notable changes to this project are documented here. The format follows
   standard v4+ layout if the format is unusable.
 - Written SubRip and WebVTT cues never contain a blank line (which would end the cue early), and `-->` in WebVTT cue
   text is escaped (SUB-07).
+- The subtitle language list gained a duplicate "eng" on every restart (Jellyfin's XML loader adds saved items to a
+  list's default); it now starts empty (meaning English) and is de-duplicated on save.
+- The pipeline cleans subtitles too, in the same single write as any timing correction (one backup, one undo): what the
+  settings apply automatically (adverts, empty lines, overlaps, too-brief lines by default) is applied; the rest
+  (merging repeats, removing sound descriptions) waits on the plugin page with examples of each change and an Apply
+  button. Subtitles that don't match the speech only get the harmless clean-up. Files checked by an earlier version of
+  the pipeline are checked once more; a change someone undid is never redone.
+- Repeated lines are merged only when the repeat overlaps the line before (a ripping error): chants, echoes and people
+  repeating each other are dialogue. Identical overlapping lines are left for that merge rather than trimmed.
+- Missing subtitles are found: a daily "Find missing subtitles" task (Scheduled Tasks → Shoal) searches Jellyfin's
+  subtitle providers (such as the OpenSubtitles plugin) for films and episodes with no subtitle in a chosen language,
+  ranks the candidates, downloads the best few one at a time and checks each against the audio with the same two
+  stages; the first that clearly fits is added beside the video (`Name.en.srt`, `.sdh` for hearing-impaired), timing
+  corrected and cleaned. Existing files are never replaced; Undo deletes an added file (and it isn't searched for
+  again). Downloads are capped per day (default 100) and counted across restarts; a video nothing fits is searched
+  again after 30 days; specials come last, since subtitle sites rarely have them. Up to 20 videos per run.
 
 ### Added
 - Subtitle files: SubRip, WebVTT and ASS/SSA reading and writing. Parsing is tolerant of real-world files (wrong or
@@ -92,21 +110,3 @@ All notable changes to this project are documented here. The format follows
   speech (another language, another version, or commentary and notes tracks) are flagged and left alone. Paid
   speech-to-text isn't used by automatic runs until cost tracking is available.
 - The settings page shows results (newest first) with Apply and Undo, and a "Check now" button.
-
-### Fixed
-- The subtitle language list gained a duplicate "eng" on every restart (Jellyfin's XML loader adds saved items to a
-  list's default); it now starts empty (meaning English) and is de-duplicated on save.
-- The pipeline cleans subtitles too, in the same single write as any timing correction (one backup, one undo): what the
-  settings apply automatically (adverts, empty lines, overlaps, too-brief lines by default) is applied; the rest
-  (merging repeats, removing sound descriptions) waits on the plugin page with examples of each change and an Apply
-  button. Subtitles that don't match the speech only get the harmless clean-up. Files checked by an earlier version of
-  the pipeline are checked once more; a change someone undid is never redone.
-- Repeated lines are merged only when the repeat overlaps the line before (a ripping error): chants, echoes and people
-  repeating each other are dialogue. Identical overlapping lines are left for that merge rather than trimmed.
-- Missing subtitles are found: a daily "Find missing subtitles" task (Scheduled Tasks → Shoal) searches Jellyfin's
-  subtitle providers (such as the OpenSubtitles plugin) for films and episodes with no subtitle in a chosen language,
-  ranks the candidates, downloads the best few one at a time and checks each against the audio with the same two
-  stages; the first that clearly fits is added beside the video (`Name.en.srt`, `.sdh` for hearing-impaired), timing
-  corrected and cleaned. Existing files are never replaced; Undo deletes an added file (and it isn't searched for
-  again). Downloads are capped per day (default 100) and counted across restarts; a video nothing fits is searched
-  again after 30 days; specials come last, since subtitle sites rarely have them. Up to 20 videos per run.
