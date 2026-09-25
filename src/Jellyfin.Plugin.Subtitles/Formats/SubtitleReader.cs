@@ -15,6 +15,36 @@ namespace Jellyfin.Plugin.Subtitles.Formats;
 public static partial class SubtitleReader
 {
     /// <summary>
+    /// The largest subtitle file read, in bytes. Real subtitles are well under 1 MB; files come from the internet, so
+    /// anything bigger is refused before it is decoded.
+    /// </summary>
+    public const int MaxBytes = 10 * 1024 * 1024;
+
+    // Default v4+ event format, used when a file has no usable Format line
+    private static readonly string[] DefaultAssFormat = ["Layer", "Start", "End", "Style", "Name", "MarginL", "MarginR", "MarginV", "Effect", "Text"];
+
+    /// <summary>Gets the default ASS v4+ event format.</summary>
+    public static IReadOnlyList<string> DefaultEventFormat => DefaultAssFormat;
+
+    /// <summary>
+    /// Reads a subtitle file from its bytes: size check, decoding, format detection and parsing. This is the entry point
+    /// for any file that came from outside (a provider download, a file on disk).
+    /// </summary>
+    /// <param name="bytes">The file content.</param>
+    /// <param name="fileName">File name or path, for format detection (may be empty).</param>
+    /// <returns>The document, or <c>null</c> if the file is too big or not a supported text format.</returns>
+    public static SubtitleDocument? Read(ReadOnlySpan<byte> bytes, string fileName)
+    {
+        if (bytes.Length > MaxBytes)
+        {
+            return null;
+        }
+
+        var (text, _) = SubtitleEncoding.Decode(bytes);
+        return Detect(fileName, text) is { } format ? Parse(text, format) : null;
+    }
+
+    /// <summary>
     /// Works out the format from the file extension, falling back to the content.
     /// </summary>
     /// <param name="fileName">File name or path (may be empty).</param>
@@ -30,7 +60,7 @@ public static partial class SubtitleReader
             return SubtitleFormat.WebVtt;
         }
 
-        if (head.StartsWith("[Script Info]", StringComparison.OrdinalIgnoreCase) || AssEventsHeading().IsMatch(text))
+        if (head.StartsWith("[Script Info]", StringComparison.OrdinalIgnoreCase) || Matches(AssEventsHeading(), text))
         {
             return SubtitleFormat.Ass;
         }
@@ -46,7 +76,20 @@ public static partial class SubtitleReader
                 return SubtitleFormat.Srt;
         }
 
-        return TimingLine().IsMatch(text) ? SubtitleFormat.Srt : null;
+        return Matches(TimingLine(), text) ? SubtitleFormat.Srt : null;
+    }
+
+    // The patterns are linear, but content is untrusted: a match that runs out of time counts as no match
+    private static bool Matches(Regex pattern, string text)
+    {
+        try
+        {
+            return pattern.IsMatch(text);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -74,7 +117,7 @@ public static partial class SubtitleReader
         foreach (var block in Blocks(text))
         {
             var lines = block.Split('\n');
-            var t = Array.FindIndex(lines, l => TimingLine().IsMatch(l));
+            var t = Array.FindIndex(lines, l => Matches(TimingLine(), l));
             if (t < 0 || !TryTiming(lines[t], out var start, out var end, out _))
             {
                 continue;
@@ -145,8 +188,11 @@ public static partial class SubtitleReader
             header.Append(l).Append('\n');
         }
 
-        // Default v4+ event format, used if the file has no Format line
-        string[] format = ["Layer", "Start", "End", "Style", "Name", "MarginL", "MarginR", "MarginV", "Effect", "Text"];
+        // Events are read with the latest usable Format line, then stored in the document's format (the first usable
+        // one), so every event is written back with one consistent layout. A Format line without Start, End and a
+        // final Text field is ignored.
+        string[] format = DefaultAssFormat;
+        string[]? documentFormat = null;
         var cues = new List<SubtitleCue>();
         var others = new List<string>();
         var trailer = new StringBuilder();
@@ -175,7 +221,13 @@ public static partial class SubtitleReader
             var rest = trimmed[(colon + 1)..].TrimStart();
             if (kind.Equals("Format", StringComparison.OrdinalIgnoreCase))
             {
-                format = [.. rest.Split(',').Select(f => f.Trim())];
+                string[] candidate = [.. rest.Split(',').Select(f => f.Trim())];
+                if (IsUsableAssFormat(candidate))
+                {
+                    format = candidate;
+                    documentFormat ??= candidate;
+                }
+
                 continue;
             }
 
@@ -196,12 +248,13 @@ public static partial class SubtitleReader
                 continue;
             }
 
+            documentFormat ??= format;
             cues.Add(new SubtitleCue
             {
                 Start = start,
                 End = end,
                 Text = fields[textAt].Replace("\\N", "\n", StringComparison.Ordinal).Replace("\\n", "\n", StringComparison.Ordinal),
-                AssFields = fields,
+                AssFields = ReferenceEquals(format, documentFormat) ? fields : RemapAssFields(fields, format, documentFormat),
             });
         }
 
@@ -215,11 +268,59 @@ public static partial class SubtitleReader
             Format = SubtitleFormat.Ass,
             Cues = Sorted(cues),
             Header = header.ToString().TrimEnd('\n'),
-            AssFormat = format,
+            AssFormat = documentFormat ?? format,
             AssOtherEvents = others,
             AssTrailer = trailer.ToString().Trim('\n'),
         };
     }
+
+    /// <summary>
+    /// Whether an ASS event format can be used: it names Start, End and Text, with Text last (the text may contain
+    /// commas, so it must be the final field).
+    /// </summary>
+    /// <param name="format">The field names.</param>
+    /// <returns><c>true</c> if usable.</returns>
+    public static bool IsUsableAssFormat(IReadOnlyList<string> format)
+    {
+        ArgumentNullException.ThrowIfNull(format);
+        return format.Count >= 3
+            && format.Any(f => f.Equals("Start", StringComparison.OrdinalIgnoreCase))
+            && format.Any(f => f.Equals("End", StringComparison.OrdinalIgnoreCase))
+            && format[^1].Equals("Text", StringComparison.OrdinalIgnoreCase)
+            && format.Distinct(StringComparer.OrdinalIgnoreCase).Count() == format.Count;
+    }
+
+    /// <summary>
+    /// Moves an event's fields from one format's layout to another's, by name; fields the target has and the source
+    /// lacks get their usual defaults.
+    /// </summary>
+    /// <param name="fields">The fields, in the source layout.</param>
+    /// <param name="from">The source format.</param>
+    /// <param name="to">The target format.</param>
+    /// <returns>The fields in the target layout.</returns>
+    public static string[] RemapAssFields(IReadOnlyList<string> fields, IReadOnlyList<string> from, IReadOnlyList<string> to)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        ArgumentNullException.ThrowIfNull(from);
+        ArgumentNullException.ThrowIfNull(to);
+        return [.. to.Select(name =>
+        {
+            var i = from.ToList().FindIndex(f => f.Equals(name, StringComparison.OrdinalIgnoreCase));
+            return i >= 0 && i < fields.Count ? fields[i] : DefaultAssField(name);
+        })];
+    }
+
+    /// <summary>
+    /// The usual value of an ASS event field that isn't given.
+    /// </summary>
+    /// <param name="name">Field name.</param>
+    /// <returns>The default.</returns>
+    public static string DefaultAssField(string name) => (name ?? string.Empty).ToUpperInvariant() switch
+    {
+        "LAYER" or "MARGINL" or "MARGINR" or "MARGINV" => "0",
+        "STYLE" => "Default",
+        _ => string.Empty,
+    };
 
     private static IEnumerable<string> Blocks(string text)
         => BlankLines().Split(text).Select(b => b.Trim('\n')).Where(b => b.Trim().Length > 0);
@@ -228,7 +329,16 @@ public static partial class SubtitleReader
     {
         start = end = TimeSpan.Zero;
         settings = string.Empty;
-        var m = TimingLine().Match(line);
+        Match m;
+        try
+        {
+            m = TimingLine().Match(line);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+
         if (!m.Success || !Timecode.TryParse(m.Groups["a"].Value, out start) || !Timecode.TryParse(m.Groups["b"].Value, out end))
         {
             return false;
@@ -245,12 +355,14 @@ public static partial class SubtitleReader
 
     private static List<SubtitleCue> Sorted(List<SubtitleCue> cues) => [.. cues.OrderBy(c => c.Start).ThenBy(c => c.End)];
 
-    [GeneratedRegex(@"^\s*(?<a>[\d:.,]+)\s*-->\s*(?<b>[\d:.,]+)(?<rest>.*)$", RegexOptions.Multiline)]
+    // Only spaces and tabs around the parts (never \s, which also matches newlines and let a multiline match wander over
+    // runs of blank lines); a time limit on every pattern that sees whole files
+    [GeneratedRegex(@"^[ \t]*(?<a>[\d:.,]+)[ \t]*-->[ \t]*(?<b>[\d:.,]+)(?<rest>.*)$", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
     private static partial Regex TimingLine();
 
-    [GeneratedRegex(@"\n[ \t]*\n")]
+    [GeneratedRegex(@"\n[ \t]*\n", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex BlankLines();
 
-    [GeneratedRegex(@"^\s*\[Events\]\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^[ \t]*\[Events\][ \t]*$", RegexOptions.Multiline | RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
     private static partial Regex AssEventsHeading();
 }
