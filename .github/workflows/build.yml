@@ -1,0 +1,75 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  # Every pull request, including ones stacked on another feature branch
+  pull_request:
+
+# Least privilege by default; only the release job may write
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Jellyfin.Plugin.Subtitles.sln
+
+      - name: Build
+        run: dotnet build Jellyfin.Plugin.Subtitles.sln --configuration Release --no-restore
+
+      - name: Test
+        id: test
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test --solution Jellyfin.Plugin.Subtitles.sln --configuration Release --no-build 2>&1 | tee test-output.log
+
+      - name: Annotate failed tests
+        if: failure() && steps.test.outcome == 'failure'
+        shell: python
+        run: |
+          # Surface the end of the test output as an annotation (readable on the PR without opening logs)
+          tail = open("test-output.log", encoding="utf-8", errors="replace").read().splitlines()[-60:]
+          body = "%0A".join(l.replace("%", "%25").replace("\r", "") for l in tail)
+          print(f"::error title=dotnet test failed (last lines of output)::{body}")
+
+      - name: Package
+        run: |
+          mkdir -p artifacts
+          cp src/Jellyfin.Plugin.Subtitles/bin/Release/net10.0/Jellyfin.Plugin.Subtitles.dll artifacts/
+          (cd artifacts && zip -q ../jellyfin-plugin-subtitles.zip Jellyfin.Plugin.Subtitles.dll)
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jellyfin-plugin-subtitles
+          path: jellyfin-plugin-subtitles.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: jellyfin-plugin-subtitles
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Tags with a suffix (v0.1.0-alpha.2, v1.0.0-rc.1) are published as pre-releases
+        run: |
+          flags=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" jellyfin-plugin-subtitles.zip --repo "$GITHUB_REPOSITORY" --generate-notes "${flags[@]}"

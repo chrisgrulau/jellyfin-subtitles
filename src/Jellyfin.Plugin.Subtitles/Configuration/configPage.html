@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Subtitles</title>
+</head>
+<body>
+  <div id="SubtitlesConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
+    <style>
+      #SubtitlesConfigPage .subs-tier { display: grid; grid-template-columns: minmax(12em, 1.4fr) minmax(12em, 1fr) minmax(10em, 1fr); gap: .5em 1em; align-items: end; padding: .75em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
+      #SubtitlesConfigPage .subs-tier .inputContainer, #SubtitlesConfigPage .subs-tier .selectContainer, #SubtitlesConfigPage .subs-tier .checkboxContainer { margin: 0; }
+      #SubtitlesConfigPage .subs-muted { opacity: .7; font-size: .9em; }
+      #SubtitlesConfigPage details.subs-advanced { margin-top: 2em; border-top: 1px solid rgba(128,128,128,.25); padding-top: 1em; }
+      #SubtitlesConfigPage details.subs-advanced > summary { cursor: pointer; font-size: 1.1em; }
+      #SubtitlesConfigPage .subs-warning { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
+      @media (max-width: 720px) { #SubtitlesConfigPage .subs-tier { grid-template-columns: 1fr; } }
+    </style>
+    <div data-role="content">
+      <div class="content-primary">
+        <h2 class="sectionTitle">Subtitles</h2>
+        <p>Finds subtitles for videos that are missing them, checks candidates against the actual audio, and fixes their timing. Every change can be undone.</p>
+
+        <form id="SubtitlesConfigForm">
+          <div class="checkboxContainer">
+            <label class="emby-checkbox-label">
+              <input id="Enabled" type="checkbox" is="emby-checkbox" />
+              <span>Enabled</span>
+            </label>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="Languages">Subtitle languages</label>
+            <input id="Languages" type="text" is="emby-input" placeholder="eng" />
+            <div class="fieldDescription">Three-letter codes, comma separated (e.g. <code>eng, fre</code>).</div>
+          </div>
+
+          <div class="selectContainer">
+            <label class="selectLabel" for="TimingFixes">Timing corrections</label>
+            <select is="emby-select" id="TimingFixes">
+              <option value="Automatic">Apply automatically (recommended)</option>
+              <option value="Review">Hold for my review</option>
+            </select>
+          </div>
+
+          <div class="selectContainer">
+            <label class="selectLabel" for="TextChanges">Changes to subtitle wording</label>
+            <select is="emby-select" id="TextChanges">
+              <option value="Review">Hold for my review (recommended)</option>
+              <option value="Automatic">Apply automatically</option>
+            </select>
+          </div>
+
+          <h3 class="sectionTitle" style="margin-top:2em">Speech-to-text</h3>
+          <p class="subs-muted">Used to check subtitles against what is actually said. <strong>Built-in</strong> runs on this server with no setup (slower, free); cloud services are faster but charge per minute of audio.</p>
+          <div id="Tiers"></div>
+
+          <div class="inputContainer" style="margin-top:1.5em">
+            <label class="inputLabel inputLabelUnfocused" for="MonthlyBudgetUsd">Monthly spending limit for paid services (US$)</label>
+            <input id="MonthlyBudgetUsd" type="number" min="0" step="0.01" is="emby-input" />
+            <div class="fieldDescription">0 = no limit of our own. Limits you set with the provider always apply.</div>
+          </div>
+
+          <details class="subs-advanced">
+            <summary>Advanced settings</summary>
+            <div class="subs-warning">These settings change how results are judged. The defaults are tuned for good results; changing them without understanding the effect can make matches or timing worse.</div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="SelfCalibration" type="checkbox" is="emby-checkbox" />
+                <span>Tune confidence thresholds automatically</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">Uses subtitles already known to be good in your library to calibrate each speech-to-text model.</div>
+            </div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="AgreementDecides" type="checkbox" is="emby-checkbox" />
+                <span>Let agreement between sources settle disagreements</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">When off, any disagreement is held for your review, even when independent sources agree.</div>
+            </div>
+          </details>
+
+          <div style="margin-top:2em">
+            <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script type="text/javascript">
+      (function () {
+        var pluginId = '95265809-b7a4-4721-8baf-6739c8e6287b';
+        var page = document.querySelector('#SubtitlesConfigPage');
+        var tiers = [
+          ['SyncSnippets', 'Check and synchronise', 'Short snippets only: a few minutes per video at most.'],
+          ['AiContext', 'Context for AI decisions', 'A slightly longer excerpt, used only when the AI plugin is installed.'],
+          ['FullTranscript', 'Full transcript', 'The whole video: last-resort subtitles and detailed checks. Can be costly with cloud services.']
+        ];
+        var providers = [['builtin', 'Built-in (no setup)'], ['local', 'Local service'], ['deepgram', 'Deepgram'], ['openai', 'OpenAI']];
+
+        function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+        function renderTiers(config) {
+          page.querySelector('#Tiers').innerHTML = tiers.map(function (t) {
+            var v = config[t[0]] || {};
+            return '<div class="subs-tier" data-tier="' + t[0] + '">' +
+              '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="tier-on"' + (v.Enabled ? ' checked' : '') + ' /><span>' + esc(t[1]) + '</span></label>' +
+              '<div class="fieldDescription checkboxFieldDescription">' + esc(t[2]) + '</div></div>' +
+              '<div class="selectContainer"><label class="selectLabel">Provider</label><select is="emby-select" class="tier-provider">' +
+              providers.map(function (p) { return '<option value="' + p[0] + '"' + (v.Provider === p[0] ? ' selected' : '') + '>' + esc(p[1]) + '</option>'; }).join('') + '</select></div>' +
+              '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">Model</label><input is="emby-input" type="text" class="tier-model" value="' + esc(v.Model) + '" placeholder="Current recommended" /></div>' +
+              '</div>';
+          }).join('');
+        }
+
+        page.addEventListener('pageshow', function () {
+          Dashboard.showLoadingMsg();
+          ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+            page.querySelector('#Enabled').checked = config.Enabled;
+            page.querySelector('#Languages').value = (config.Languages || []).join(', ');
+            page.querySelector('#TimingFixes').value = config.TimingFixes;
+            page.querySelector('#TextChanges').value = config.TextChanges;
+            page.querySelector('#MonthlyBudgetUsd').value = config.MonthlyBudgetUsd;
+            page.querySelector('#SelfCalibration').checked = config.SelfCalibration;
+            page.querySelector('#AgreementDecides').checked = config.AgreementDecides;
+            renderTiers(config);
+            Dashboard.hideLoadingMsg();
+          });
+        });
+
+        page.querySelector('#SubtitlesConfigForm').addEventListener('submit', function (e) {
+          e.preventDefault();
+          Dashboard.showLoadingMsg();
+          ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+            config.Enabled = page.querySelector('#Enabled').checked;
+            config.Languages = page.querySelector('#Languages').value.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(function (s) { return /^[a-z]{3}$/.test(s); });
+            if (!config.Languages.length) { config.Languages = ['eng']; }
+            config.TimingFixes = page.querySelector('#TimingFixes').value;
+            config.TextChanges = page.querySelector('#TextChanges').value;
+            config.MonthlyBudgetUsd = Math.max(0, parseFloat(page.querySelector('#MonthlyBudgetUsd').value) || 0);
+            config.SelfCalibration = page.querySelector('#SelfCalibration').checked;
+            config.AgreementDecides = page.querySelector('#AgreementDecides').checked;
+            Array.prototype.forEach.call(page.querySelectorAll('.subs-tier'), function (row) {
+              config[row.getAttribute('data-tier')] = {
+                Enabled: row.querySelector('.tier-on').checked,
+                Provider: row.querySelector('.tier-provider').value,
+                Model: row.querySelector('.tier-model').value.trim()
+              };
+            });
+            ApiClient.updatePluginConfiguration(pluginId, config).then(Dashboard.processPluginConfigurationUpdateResult);
+          });
+          return false;
+        });
+      })();
+    </script>
+  </div>
+</body>
+</html>

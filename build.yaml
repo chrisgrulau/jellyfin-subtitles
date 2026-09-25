@@ -1,0 +1,17 @@
+# Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
+name: "Subtitles"
+guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
+version: "0.0.1.0"
+targetAbi: "12.1.0.0"
+framework: "net10.0"
+owner: "chrisgrulau"
+overview: "Find, check and synchronise subtitles so they match the audio."
+description: >
+  Finds subtitles for videos that are missing them (OpenSubtitles through Jellyfin, subtitles embedded in the file,
+  other providers), scores the candidates, checks them against the actual audio and synchronises their timing.
+  Speech-to-text runs locally by default (built-in Whisper), with optional cloud services. Every change is reversible.
+category: "General"
+artifacts:
+  - "Jellyfin.Plugin.Subtitles.dll"
+changelog: >
+  Initial scaffolding.
