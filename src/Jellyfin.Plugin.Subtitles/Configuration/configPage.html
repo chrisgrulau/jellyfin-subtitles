@@ -82,9 +82,14 @@
             <div class="subs-muted">Until you allow it, anything set to Built-in waits. A local service or a cloud provider works without this.</div>
           </div>
 
-          <div class="inputContainer" style="margin-top:1.5em">
-            <label class="inputLabel inputLabelUnfocused" for="MonthlyBudgetUsd">Monthly spending limit for paid services (US$)</label>
-            <input id="MonthlyBudgetUsd" type="number" min="0" step="0.01" is="emby-input" />
+          <div class="selectContainer" style="margin-top:1.5em">
+            <label class="selectLabel" for="Currency">Currency</label>
+            <select is="emby-select" id="Currency"></select>
+            <div class="fieldDescription">Costs and limits are shown and set in this currency. Most providers charge in US dollars; their charges are converted using the European Central Bank's daily rates. If current rates can't be fetched, paid services in other currencies pause rather than guess.</div>
+          </div>
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="MonthlyBudget">Monthly spending limit for paid services (<span class="subs-currency">USD</span>)</label>
+            <input id="MonthlyBudget" type="number" min="0" step="0.01" is="emby-input" />
             <div class="fieldDescription">0 = no paid services at all: cloud providers are never called. Limits you set with the provider always apply as well.</div>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
@@ -99,6 +104,13 @@
           <details class="subs-advanced">
             <summary>Advanced settings</summary>
             <div class="subs-warning">These settings change how results are judged. The defaults are tuned for good results; changing them without understanding the effect can make matches or timing worse.</div>
+            <h3 class="sectionTitle">Costs</h3>
+            <div class="inputContainer">
+              <label class="inputLabel inputLabelUnfocused" for="ExtraChargesPercent">Add to provider prices (%)</label>
+              <input id="ExtraChargesPercent" type="number" min="0" max="100" step="0.1" is="emby-input" />
+              <div class="fieldDescription">For taxes charged on overseas services (such as GST) or your card's foreign-transaction fee, so limits match what you actually pay. Default 0.</div>
+            </div>
+
             <h3 class="sectionTitle">Clean-up</h3>
             <div class="selectContainer">
               <label class="selectLabel" for="AdvertRemoval">Advert and credit removal</label>
@@ -177,6 +189,9 @@
           ['AiContext', 'Context for AI decisions', 'A slightly longer excerpt, used only when the AI plugin is installed.'],
           ['FullTranscript', 'Full transcript', 'The whole video: last-resort subtitles and detailed checks. Can be costly with cloud services.']
         ];
+        // The euro plus every currency in the European Central Bank's daily rates (as CurrencyCode.Supported)
+        var currencies = ['AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'HUF', 'IDR', 'ILS', 'INR', 'ISK',
+          'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'RON', 'SEK', 'SGD', 'THB', 'TRY', 'USD', 'ZAR'];
         var providers = [['builtin', 'Built-in (no setup)'], ['local', 'Local service'], ['deepgram', 'Deepgram'], ['openai', 'OpenAI']];
 
         function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -203,7 +218,8 @@
         function refreshWarnings() {
           var noLimit = page.querySelector('#NoSpendingLimit').checked;
           page.querySelector('#NoLimitWarning').hidden = !noLimit;
-          page.querySelector('#MonthlyBudgetUsd').disabled = noLimit;
+          page.querySelector('#MonthlyBudget').disabled = noLimit;
+          Array.prototype.forEach.call(page.querySelectorAll('.subs-currency'), function (e) { e.textContent = page.querySelector('#Currency').value; });
           var needsBuiltIn = tiersFromPage().some(function (t) { return t.Enabled && t.Provider === 'builtin'; });
           page.querySelector('#BuiltInConsent').hidden = !needsBuiltIn && !page.querySelector('#AllowBuiltInDownload').checked;
         }
@@ -217,7 +233,10 @@
             page.querySelector('#Languages').value = (config.Languages || []).join(', ');
             page.querySelector('#TimingFixes').value = config.TimingFixes;
             page.querySelector('#TextChanges').value = config.TextChanges;
-            page.querySelector('#MonthlyBudgetUsd').value = config.MonthlyBudgetUsd;
+            page.querySelector('#Currency').innerHTML = currencies.map(function (c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
+            page.querySelector('#Currency').value = currencies.indexOf(config.Currency) >= 0 ? config.Currency : 'USD';
+            page.querySelector('#MonthlyBudget').value = config.MonthlyBudget;
+            page.querySelector('#ExtraChargesPercent').value = config.ExtraChargesPercent || 0;
             page.querySelector('#NoSpendingLimit').checked = !!config.NoSpendingLimit;
             page.querySelector('#AllowBuiltInDownload').checked = !!config.AllowBuiltInDownload;
             page.querySelector('#SelfCalibration').checked = config.SelfCalibration;
@@ -247,7 +266,9 @@
             if (!config.Languages.length) { config.Languages = ['eng']; }
             config.TimingFixes = page.querySelector('#TimingFixes').value;
             config.TextChanges = page.querySelector('#TextChanges').value;
-            config.MonthlyBudgetUsd = Math.max(0, parseFloat(page.querySelector('#MonthlyBudgetUsd').value) || 0);
+            config.Currency = page.querySelector('#Currency').value;
+            config.MonthlyBudget = Math.max(0, parseFloat(page.querySelector('#MonthlyBudget').value) || 0);
+            config.ExtraChargesPercent = Math.min(100, Math.max(0, parseFloat(page.querySelector('#ExtraChargesPercent').value) || 0));
             config.NoSpendingLimit = page.querySelector('#NoSpendingLimit').checked;
             config.AllowBuiltInDownload = page.querySelector('#AllowBuiltInDownload').checked;
             config.SelfCalibration = page.querySelector('#SelfCalibration').checked;

@@ -10,16 +10,34 @@ namespace Jellyfin.Plugin.Subtitles.Configuration;
 /// </summary>
 public static class SpendingLimit
 {
-    /// <summary>The default monthly limit for paid services, in US dollars.</summary>
-    public const decimal DefaultMonthlyUsd = 5m;
+    /// <summary>The default currency (most providers charge in US dollars).</summary>
+    public const string DefaultCurrency = "USD";
+
+    /// <summary>The default monthly limit for paid services, in the chosen currency.</summary>
+    public const decimal DefaultMonthly = 5m;
 
     /// <summary>
     /// The effective monthly limit.
     /// </summary>
-    /// <param name="monthlyUsd">The configured limit.</param>
+    /// <param name="monthly">The configured limit.</param>
     /// <param name="noLimit">Whether "no limit" was chosen.</param>
-    /// <returns>The limit in US dollars (0 = no paid usage), or <c>null</c> for no limit of our own.</returns>
-    public static decimal? Monthly(decimal monthlyUsd, bool noLimit) => noLimit ? null : Math.Max(0, monthlyUsd);
+    /// <returns>The limit in the chosen currency (0 = no paid usage), or <c>null</c> for no limit of our own.</returns>
+    public static decimal? Monthly(decimal monthly, bool noLimit) => noLimit ? null : Math.Max(0, monthly);
+
+    /// <summary>
+    /// A currency setting made safe: a supported ISO 4217 code, upper case; anything else becomes <see cref="DefaultCurrency"/>.
+    /// </summary>
+    /// <param name="currency">The setting.</param>
+    /// <returns>The code.</returns>
+    public static string NormaliseCurrency(string? currency)
+        => Common.Costs.CurrencyCode.IsSupported(currency) ? Common.Costs.CurrencyCode.Normalise(currency)! : DefaultCurrency;
+
+    /// <summary>
+    /// The extra-charges percentage made safe (0 to 100).
+    /// </summary>
+    /// <param name="percent">The setting.</param>
+    /// <returns>The percentage.</returns>
+    public static decimal NormaliseExtraPercent(decimal percent) => Math.Clamp(percent, 0m, Common.Costs.CostConverter.MaxExtraPercent);
 
     /// <summary>
     /// Whether paid services may be used at all.

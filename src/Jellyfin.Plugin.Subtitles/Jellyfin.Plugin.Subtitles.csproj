@@ -8,8 +8,8 @@
 
   <ItemGroup>
     <!-- Provided by the Jellyfin server at runtime: compile against them, don't ship them -->
-    <PackageReference Include="Jellyfin.Controller" Version="12.*" ExcludeAssets="runtime" />
-    <PackageReference Include="Jellyfin.Model" Version="12.*" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.1.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Model" Version="12.1.0" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <!-- Shared source (resilience, budgets, spend tracking), compiled in as internal code; see external/common -->

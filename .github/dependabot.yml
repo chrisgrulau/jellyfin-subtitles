@@ -8,3 +8,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Shared source: a pull request whenever jellyfin-plugin-common moves on
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
