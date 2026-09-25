@@ -1,5 +1,5 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
-name: "Subtitles"
+name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
 version: "0.0.1.0"
 targetAbi: "12.1.0.0"

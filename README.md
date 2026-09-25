@@ -1,4 +1,10 @@
-# Jellyfin Subtitles
+# Shoal Subtitles
+
+Part of **Shoal**, a family of Jellyfin plugins that work together: [Shoal
+Ingest](https://github.com/chrisgrulau/jellyfin-ingest) files new media into your libraries, [Shoal
+Subtitles](https://github.com/chrisgrulau/jellyfin-subtitles) finds, checks and synchronises subtitles, and [Shoal
+AI](https://github.com/chrisgrulau/jellyfin-ai) gives both optional AI help. Each works on its own; installed together,
+they help each other.
 
 A [Jellyfin](https://jellyfin.org) plugin that finds subtitles for videos that are missing them, checks every candidate
 against what is actually said in the audio, and fixes the timing, so the subtitles you get are the right ones and in sync.

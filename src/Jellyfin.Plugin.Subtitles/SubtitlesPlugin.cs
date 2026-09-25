@@ -26,7 +26,7 @@ public class SubtitlesPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
     }
 
     /// <inheritdoc />
-    public override string Name => "Subtitles";
+    public override string Name => "Shoal Subtitles";
 
     /// <inheritdoc />
     public override Guid Id => Guid.Parse("95265809-b7a4-4721-8baf-6739c8e6287b");
