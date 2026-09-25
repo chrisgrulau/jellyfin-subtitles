@@ -24,8 +24,21 @@ machine-/AI-translated flags; hearing-impaired and forced preferences; language 
 
 ### 3. Audio check and synchronisation
 
-- **Speech/silence pattern first**: a voice-activity profile of the audio (computed locally) is aligned with the cue
-  intervals. Language-independent and free; fixes most offsets and drift.
+- **Speech starts first (free, local, any language)**: six two-minute stretches spread across the video are read
+  with Jellyfin's own ffmpeg (16 kHz mono, single-threaded, low priority, time-limited, no shell). In each, the points
+  where speech-band loudness rises sharply are compared with where subtitle lines start, at every offset within ±90 s
+  (10 ms steps, by FFT) and at each common frame-rate ratio (same rate; PAL speed-up or slow-down between 23.976, 24 and
+  25 fps). The stretches' score curves are **added up**, so all the evidence counts even when no single stretch is
+  decisive. Line starts beat a speech/silence profile: in dense dialogue subtitles cover nearly all the time, but line
+  starts still vary.
+  - A correction is made only when the combined peak clearly stands out: a margin of at least 0.03 over any offset
+    more than 2 s away, **and** at least 6 standard deviations above the curve. Calibrated on real library videos:
+    subtitles deliberately paired with the wrong episode or film never passed (48 of 48 rejected); correctly paired
+    ones that passed were always right, shifts and frame-rate changes included (27 of 27); the rest (dense comedy over
+    music or a laugh track) are left for speech-to-text rather than risk moving good subtitles.
+  - The detector registers speech starts about 0.24 s after the line starts of subtitles known to be in sync; that lag
+    is subtracted. Offsets under 0.5 s at the same frame rate are left alone: line starts don't pin timing down more
+    finely than that, and speech-to-text does.
 - **Speech-to-text when needed**: dialogue-dense windows are transcribed and unique word sequences matched against the
   subtitle text; the fit chooses between a constant shift, linear drift, or piecewise sections (cuts detected at the
   largest subtitle gaps). More windows are sampled when the results disagree.

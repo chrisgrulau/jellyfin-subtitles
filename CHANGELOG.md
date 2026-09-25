@@ -43,6 +43,11 @@ All notable changes to this project are documented here. The format follows
   actions, Dependabot, CODEOWNERS.
 - Plugin skeleton targeting Jellyfin 12.1 / net10.0, and a settings page with basic settings (languages, timing and
   wording change policies, speech-to-text per use, monthly budget) and a collapsed advanced section.
+- Audio synchronisation, first stage (free, local): six stretches of audio are read with Jellyfin's own ffmpeg, speech
+  starts found in each are matched against subtitle line starts at every offset within ±90 s and each common
+  frame-rate ratio, and the evidence is added up across stretches. A shift (and frame-rate change) is proposed only when
+  the answer clearly stands out; otherwise the subtitles are left for speech-to-text. Calibrated on real videos: 27 of
+  27 confident answers right, 48 of 48 mismatched subtitles rejected.
 
 ### Changed
 - Clean-up leaves ASS signs, karaoke and effects alone (SUB-05): timing fixes skip events with positioning, movement,
