@@ -79,6 +79,24 @@ public sealed record SubtitleResult
 
     /// <summary>Gets the backup of the original, when the file was changed.</summary>
     public string? Backup { get; init; }
+
+    /// <summary>Gets the pipeline version that produced this result (a newer version checks files again once).</summary>
+    public int Version { get; init; }
+
+    /// <summary>Gets a value indicating whether the file currently holds this plugin's changes (so it can be undone).</summary>
+    public bool Changed { get; init; }
+
+    /// <summary>Gets the clean-up changes applied, by kind.</summary>
+    public IReadOnlyDictionary<string, int> Cleaned { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>Gets the clean-up changes waiting for review, by kind.</summary>
+    public IReadOnlyDictionary<string, int> CleanupPending { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>Gets a few examples of what was (or would be) changed, for review.</summary>
+    public IReadOnlyList<string> Examples { get; init; } = [];
+
+    /// <summary>Gets a value indicating whether anything waits for review (a timing correction or clean-up).</summary>
+    public bool PendingReview => Status == ResultStatus.Proposed || CleanupPending.Count > 0;
 }
 
 /// <summary>

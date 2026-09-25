@@ -45,7 +45,7 @@ public class CleanerTests
     [Fact]
     public void Empty_and_duplicate_cues_are_removed_and_merged()
     {
-        var (doc, changes) = Clean(null, C(1, 2, "<i></i>"), C(3, 4, "Stop!"), C(4.1, 5, "<i>Stop!</i>"), C(8, 9, "Stop!"));
+        var (doc, changes) = Clean(null, C(1, 2, "<i></i>"), C(3, 4.5, "Stop!"), C(4.1, 5, "<i>Stop!</i>"), C(8, 9, "Stop!"));
         Assert.Equal(2, doc.Cues.Count);
         Assert.Equal(TimeSpan.FromSeconds(5), doc.Cues[0].End);
         Assert.Contains(changes, c => c.Kind == CleanChangeKind.RemovedEmpty);
@@ -148,10 +148,11 @@ public class CleanerTests
     [Fact]
     public void Repeated_lines_can_be_kept()
     {
-        var (doc, changes) = Clean(new CleanOptions { MergeDuplicates = false }, C(1, 2, "Again."), C(2, 3, "Again."));
+        var (doc, changes) = Clean(new CleanOptions { MergeDuplicates = false }, C(1, 2, "Again."), C(1.5, 3, "Again."));
 
         Assert.Equal(2, doc.Cues.Count);
         Assert.Empty(changes);
+        Assert.Equal(TimeSpan.FromSeconds(2), doc.Cues[0].End);
     }
 
     [Theory]
@@ -185,5 +186,14 @@ public class CleanerTests
 
         var odd = CleanupPolicy.Options(new CleanupSettings { FlashThresholdMs = 900, FlashTargetMs = 100 });
         Assert.Equal(odd.FlashThreshold, odd.MinimumDuration);
+    }
+
+    [Fact]
+    public void A_chant_or_echo_is_not_a_duplicate()
+    {
+        var (doc, changes) = Clean(null, C(1, 2, "So say we all!"), C(2, 3, "So say we all!"), C(3.1, 4, "So say we all!"));
+
+        Assert.Equal(3, doc.Cues.Count);
+        Assert.DoesNotContain(changes, c => c.Kind == CleanChangeKind.MergedDuplicate);
     }
 }

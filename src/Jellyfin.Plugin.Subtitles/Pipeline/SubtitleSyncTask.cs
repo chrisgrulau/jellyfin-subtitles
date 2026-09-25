@@ -127,7 +127,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             var job = todo[i];
             try
             {
-                var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, config.TimingFixes, cancellationToken).ConfigureAwait(false);
+                var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, PoliciesOf(config), cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
@@ -138,6 +138,17 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
             progress.Report(100.0 * (i + 1) / todo.Count);
         }
+    }
+
+    /// <summary>
+    /// The policies a configuration sets.
+    /// </summary>
+    /// <param name="config">Plugin settings.</param>
+    /// <returns>The policies.</returns>
+    public static Policies PoliciesOf(PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return new Policies(config.TimingFixes, config.TextChanges, config.Cleanup ?? new CleanupSettings());
     }
 
     private ISpeechToText? SpeechFor(PluginConfiguration config, HttpClient http)
