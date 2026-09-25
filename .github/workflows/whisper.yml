@@ -1,0 +1,219 @@
+name: Whisper
+
+# Builds the built-in speech-to-text program (whisper.cpp's command-line tool, CPU only) for each platform and publishes
+# it, with the speech models, as a release of this repository: the one place the plugin downloads them from. The plugin
+# compiles in the SHA-256 of every file listed in whisper-files.json.
+#
+# Tag whisper-v<whisper.cpp version>-<build number> (e.g. whisper-v1.9.4-1) to publish. Pull requests that change this
+# workflow build and test everything without publishing.
+
+on:
+  push:
+    tags: ['whisper-v*']
+  pull_request:
+    paths: ['.github/workflows/whisper.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # whisper.cpp v1.9.4, pinned by commit
+  WHISPER_REPO: ggml-org/whisper.cpp
+  WHISPER_COMMIT: 927cfce34f31707e17f2bff35c349632fb9e2c3a
+  # Speech models (MIT, from OpenAI via ggerganov/whisper.cpp), pinned by repository revision and SHA-256
+  MODELS_REVISION: 5359861c739e955e79d9a303bcbc70fb988958b1
+
+jobs:
+  models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download and verify the models
+        run: |
+          set -euo pipefail
+          while read -r name sha; do
+            curl -fsSL --proto '=https' -o "$name" "https://huggingface.co/ggerganov/whisper.cpp/resolve/$MODELS_REVISION/$name"
+            echo "$sha  $name" | sha256sum -c -
+          done <<'LIST'
+          ggml-base-q8_0.bin c577b9a86e7e048a0b7eada054f4dd79a56bbfa911fbdacf900ac5b567cbb7d9
+          ggml-small-q5_1.bin ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb
+          LIST
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: models
+          path: ggml-*.bin
+          retention-days: 7
+
+  build:
+    needs: models
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x64 and arm64 Linux and x64 Windows carry every CPU variant (from SSE4.2 up to AVX-512 / SVE2) and pick the
+          # best one at run time, so they also run on older CPUs and virtual machines with a basic CPU model.
+          - { platform: linux-x64, os: ubuntu-22.04, variants: true, test: true }
+          # GCC 11 on 22.04 doesn't know the newest Arm variants (armv9.2 with SME); Clang 15 does, and keeps glibc 2.35
+          - { platform: linux-arm64, os: ubuntu-22.04-arm, variants: true, test: true, cc: clang-15, cxx: clang++-15 }
+          - { platform: windows-x64, os: windows-2022, variants: true, test: true }
+          - { platform: macos-arm64, os: macos-14, variants: false, test: true }
+          - { platform: macos-x64, os: macos-14, variants: false, test: false, arch: x86_64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch whisper.cpp
+        run: |
+          set -euo pipefail
+          git init -q src && cd src
+          git fetch -q --depth 1 "https://github.com/$WHISPER_REPO.git" "$WHISPER_COMMIT"
+          git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$WHISPER_COMMIT"
+
+      - name: Install Clang
+        if: matrix.cc
+        run: sudo apt-get update -q && sudo apt-get install -y -q ${{ matrix.cc }}
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          set -euo pipefail
+          [[ -z "$CC" ]] && unset CC CXX
+          flags=(-DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_CCACHE=OFF
+                 -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_SDL2=OFF
+                 -DWHISPER_CURL=OFF -DGGML_METAL=OFF -DGGML_BLAS=OFF)
+          if [[ "${{ matrix.variants }}" == true ]]; then
+            flags+=(-DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON)
+          else
+            flags+=(-DBUILD_SHARED_LIBS=OFF)
+          fi
+          case "${{ matrix.platform }}" in
+            linux-*)
+              # Libraries next to the program; C++ runtime linked in, so only glibc (2.35+) is needed
+              flags+=(-DCMAKE_BUILD_RPATH='$ORIGIN' -DCMAKE_INSTALL_RPATH='$ORIGIN'
+                      "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
+                      "-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc") ;;
+            windows-*)
+              flags+=(-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded) ;;
+            macos-*)
+              flags+=(-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0)
+              [[ -n "${{ matrix.arch }}" ]] && flags+=(-DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}) ;;
+          esac
+          cmake -S src -B build "${flags[@]}"
+
+      - name: Build
+        run: |
+          set -o pipefail
+          # The errors are also shown as annotations, which can be read without downloading the log
+          if ! cmake --build build --config Release --target whisper-cli -j 4 2>&1 | tee build.log; then
+            grep -iE "error|fatal" build.log | head -20 | while IFS= read -r line; do echo "::error::${line:0:400}"; done
+            exit 1
+          fi
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bin=build/bin; [[ -d build/bin/Release ]] && bin=build/bin/Release
+          shopt -s nullglob
+          for f in "$bin"/whisper-cli "$bin"/whisper-cli.exe "$bin"/*.so "$bin"/*.so.* "$bin"/*.dll "$bin"/*.dylib; do
+            if [[ -f "$f" ]]; then cp -L "$f" out/; fi
+          done
+          ls -la out
+          test -e out/whisper-cli || test -e out/whisper-cli.exe
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: matrix.test
+        with:
+          name: models
+
+      - name: Test
+        if: matrix.test
+        run: |
+          set -euo pipefail
+          exe=out/whisper-cli; [[ -e out/whisper-cli.exe ]] && exe=out/whisper-cli.exe
+          "$exe" -m ggml-base-q8_0.bin -f src/samples/jfk.wav -t 2 -l en -ojf -of result -np
+          py=$(command -v python3 || command -v python)
+          "$py" - <<'PY'
+          import json
+          d = json.load(open("result.json", encoding="utf-8"))
+          text = " ".join(s["text"] for s in d["transcription"]).lower()
+          tokens = [t for s in d["transcription"] for t in s.get("tokens", [])]
+          print(text)
+          assert "ask not what your country can do for you" in text, text
+          assert tokens and all("offsets" in t for t in tokens), "no token timings"
+          PY
+
+      - name: Zip
+        run: |
+          set -euo pipefail
+          cp src/LICENSE out/LICENSE-whisper.cpp.txt
+          py=$(command -v python3 || command -v python)
+          cd out && "$py" -c "
+          import os, zipfile
+          with zipfile.ZipFile('../whisper-cli-${{ matrix.platform }}.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+              for n in sorted(os.listdir('.')):
+                  z.write(n, n)
+          "
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: whisper-cli-${{ matrix.platform }}
+          path: whisper-cli-${{ matrix.platform }}.zip
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/whisper-v')
+    needs: [models, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          merge-multiple: true
+
+      - name: List every file and its SHA-256
+        # whisper-files.json: for each zip, the SHA-256 of the zip and of every file in it, for the plugin to compile in
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, zipfile
+          out = {"tag": __import__("os").environ["GITHUB_REF_NAME"], "downloads": {}}
+          for p in sorted(pathlib.Path(".").glob("*.zip")) + sorted(pathlib.Path(".").glob("ggml-*.bin")):
+              entry = {"sha256": hashlib.sha256(p.read_bytes()).hexdigest(), "bytes": p.stat().st_size}
+              if p.suffix == ".zip":
+                  with zipfile.ZipFile(p) as z:
+                      entry["files"] = {n: hashlib.sha256(z.read(n)).hexdigest() for n in sorted(z.namelist())}
+              out["downloads"][p.name] = entry
+          pathlib.Path("whisper-files.json").write_text(json.dumps(out, indent=2) + "\n")
+          PY
+          sha256sum *.zip ggml-*.bin whisper-files.json > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            *.zip
+            ggml-*.bin
+            whisper-files.json
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # A pre-release that is never marked latest, so the plugin's own releases stay first on the releases page
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" *.zip ggml-*.bin whisper-files.json SHA256SUMS --repo "$GITHUB_REPOSITORY" \
+            --title "Built-in speech-to-text ($GITHUB_REF_NAME)" --prerelease --latest=false --draft \
+            --notes "whisper.cpp ${WHISPER_COMMIT} (CPU builds) and speech models for Shoal Subtitles' built-in speech-to-text. Downloaded by the plugin only after an administrator allows it; every file is checked against SHA-256 values compiled into the plugin."
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
