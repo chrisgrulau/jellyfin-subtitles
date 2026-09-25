@@ -49,6 +49,12 @@ All notable changes to this project are documented here. The format follows
   the answer clearly stands out; otherwise the subtitles are left for speech-to-text. Calibrated on real videos: 27 of
   27 confident answers right, 48 of 48 mismatched subtitles rejected.
 
+- Speech-to-text providers: any OpenAI-compatible service (a local faster-whisper or whisper.cpp server, or OpenAI) and
+  Deepgram, with word timings. Replies are size-limited and checked; failures are classified for retries and never
+  show the API key; a key is never sent over plain http except to this machine or the local network.
+- Audio synchronisation, second stage: three one-minute snippets are transcribed and matched word for word against the
+  subtitles, which settles dense dialogue over music and pins timing to about a tenth of a second (30 of 30 real
+  shifts and frame-rate changes recovered, 16 of 16 wrong subtitles rejected). Not yet wired to settings.
 ### Changed
 - Clean-up leaves ASS signs, karaoke and effects alone (SUB-05): timing fixes skip events with positioning, movement,
   karaoke, transform, fade, clip or drawing tags, on a layer above 0, or in a style other than the dialogue style. An
