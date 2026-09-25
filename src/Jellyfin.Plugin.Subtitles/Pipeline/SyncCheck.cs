@@ -82,7 +82,7 @@ public sealed class SyncCheck
             var heard = transcripts.Sum(t => t.Transcript.Words.Count);
             var wrongLanguage = heard >= WordsHeardForLanguageCheck && anchors.Count < TranscriptAligner.MinimumAnchors;
             return new SyncOutcome(first, "line starts", wrongLanguage, wrongLanguage
-                ? "Speech was heard but almost none of it matches this subtitle's text: it may be in another language, or for another version."
+                ? "Speech was heard but almost none of it matches this subtitle's text: it may be in another language, for another version, or not dialogue at all (commentary, storyboard or trivia notes). Left unchanged."
                 : "Speech-to-text couldn't settle it either: " + second.Explanation);
         }
         catch (SpeechToTextException ex)

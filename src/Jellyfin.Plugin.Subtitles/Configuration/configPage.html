@@ -13,6 +13,11 @@
       #SubtitlesConfigPage details.subs-advanced { margin-top: 2em; border-top: 1px solid rgba(128,128,128,.25); padding-top: 1em; }
       #SubtitlesConfigPage details.subs-advanced > summary { cursor: pointer; font-size: 1.1em; }
       #SubtitlesConfigPage .subs-warning { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
+      #SubtitlesConfigPage .subs-results { width: 100%; border-collapse: collapse; font-size: .92em; }
+      #SubtitlesConfigPage .subs-results td, #SubtitlesConfigPage .subs-results th { text-align: left; padding: .35em .5em; border-bottom: 1px solid rgba(128,128,128,.2); vertical-align: top; }
+      #SubtitlesConfigPage .subs-status { white-space: nowrap; font-weight: 600; }
+      #SubtitlesConfigPage .st-Corrected { color: #4caf50; } #SubtitlesConfigPage .st-Proposed { color: #03a9f4; }
+      #SubtitlesConfigPage .st-WrongLanguage, #SubtitlesConfigPage .st-Failed { color: #ff7043; } #SubtitlesConfigPage .st-Unreliable { color: #ffb300; }
       #SubtitlesConfigPage .subs-service { padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
       #SubtitlesConfigPage .subs-service h4 { margin: .5em 0; }
       #SubtitlesConfigPage .subs-key { display: flex; gap: .5em; align-items: end; flex-wrap: wrap; }
@@ -25,6 +30,16 @@
       <div class="content-primary">
         <h2 class="sectionTitle">Shoal Subtitles</h2>
         <p>Finds subtitles for videos that are missing them, checks candidates against the actual audio, and fixes their timing. Every change can be undone.</p>
+
+        <div id="ResultsBox" style="margin:1em 0 2em">
+          <div style="display:flex;gap:1em;align-items:center;flex-wrap:wrap">
+            <h3 class="sectionTitle" style="margin:0">Results</h3>
+            <button is="emby-button" type="button" id="RunNow" class="raised"><span>Check now</span></button>
+            <span id="ResultsSummary" class="subs-muted"></span>
+          </div>
+          <p class="subs-muted">Subtitle files beside your films and episodes are checked daily (Scheduled Tasks → Shoal). Corrections follow the timing setting below; every change keeps the original and can be undone.</p>
+          <div style="overflow-x:auto"><table id="Results" class="subs-results"></table></div>
+        </div>
 
         <form id="SubtitlesConfigForm">
           <div class="checkboxContainer">
@@ -128,6 +143,13 @@
               <label class="inputLabel inputLabelUnfocused" for="ExtraChargesPercent">Add to provider prices (%)</label>
               <input id="ExtraChargesPercent" type="number" min="0" max="100" step="0.1" is="emby-input" />
               <div class="fieldDescription">For taxes charged on overseas services (such as GST) or your card's foreign-transaction fee, so limits match what you actually pay. Default 0.</div>
+            </div>
+
+            <h3 class="sectionTitle">Checking</h3>
+            <div class="inputContainer">
+              <label class="inputLabel inputLabelUnfocused" for="MaxSubtitlesPerRun">Subtitle files checked per run</label>
+              <input id="MaxSubtitlesPerRun" type="number" min="1" max="5000" step="1" is="emby-input" />
+              <div class="fieldDescription">Default 50. The rest are checked on following runs. Each takes a few seconds, longer when speech-to-text is used.</div>
             </div>
 
             <h3 class="sectionTitle">Clean-up</h3>
@@ -273,6 +295,54 @@
           }
         });
 
+        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone' };
+
+        function change(r) {
+          if (r.Status !== 'Corrected' && r.Status !== 'Proposed') { return ''; }
+          var text = (r.Offset >= 0 ? '+' : '') + r.Offset.toFixed(2) + ' s';
+          return Math.abs(r.Scale - 1) > 1e-9 ? text + ', frame rate ×' + r.Scale.toFixed(5) : text;
+        }
+
+        function renderResults(results) {
+          var counts = {};
+          results.forEach(function (r) { counts[r.Status] = (counts[r.Status] || 0) + 1; });
+          page.querySelector('#ResultsSummary').textContent = results.length ? Object.keys(counts).map(function (k) { return (statusNames[k] || k) + ': ' + counts[k]; }).join(' · ') : 'Nothing checked yet.';
+          page.querySelector('#Results').innerHTML = results.length ? '<tr><th>When</th><th>Video</th><th>Result</th><th>Change</th><th>Details</th><th></th></tr>' + results.slice(0, 100).map(function (r) {
+            var action = r.Status === 'Proposed' ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '"><span>Apply</span></button>'
+              : r.Status === 'Corrected' ? '<button is="emby-button" type="button" class="raised button-alt res-undo" data-id="' + esc(r.Id) + '"><span>Undo</span></button>' : '';
+            return '<tr><td style="white-space:nowrap">' + esc(new Date(r.Time).toLocaleString()) + '</td><td>' + esc(r.Name) + '<div class="subs-muted">' + esc((r.SubtitlePath || '').split('/').pop()) + '</div></td>' +
+              '<td class="subs-status st-' + esc(r.Status) + '">' + esc(statusNames[r.Status] || r.Status) + '</td><td style="white-space:nowrap">' + esc(change(r)) + '</td>' +
+              '<td class="subs-muted">' + esc(r.Explanation) + '</td><td>' + action + '</td></tr>';
+          }).join('') : '';
+        }
+
+        function loadResults() {
+          return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Results', { limit: 500 })).then(renderResults);
+        }
+
+        page.querySelector('#Results').addEventListener('click', function (e) {
+          var b = e.target.closest('.res-apply, .res-undo');
+          if (!b) { return; }
+          var verb = b.classList.contains('res-apply') ? 'Apply' : 'Undo';
+          ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + b.getAttribute('data-id') + '/' + verb) })
+            .then(loadResults, function (err) {
+              var msg = err && err.responseText ? err.responseText : 'That couldn\'t be done.';
+              Dashboard.alert(msg.replace(/^"|"$/g, ''));
+              loadResults();
+            });
+        });
+
+        page.querySelector('#RunNow').addEventListener('click', function () {
+          ApiClient.getScheduledTasks().then(function (tasks) {
+            var task = tasks.filter(function (t) { return t.Key === 'ShoalSubtitlesSync'; })[0];
+            if (!task) { Dashboard.alert('The Check and sync subtitles task was not found.'); return; }
+            return ApiClient.startScheduledTask(task.Id).then(function () {
+              page.querySelector('#ResultsSummary').textContent = 'Checking… results appear here as they come in.';
+              setTimeout(loadResults, 15000);
+            });
+          });
+        });
+
         function tiersFromPage() {
           return Array.prototype.map.call(page.querySelectorAll('.subs-tier'), function (row) {
             return { Enabled: row.querySelector('.tier-on').checked, Provider: row.querySelector('.tier-provider').value };
@@ -294,7 +364,7 @@
           Dashboard.showLoadingMsg();
           ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             page.querySelector('#Enabled').checked = config.Enabled;
-            page.querySelector('#Languages').value = (config.Languages || []).join(', ');
+            page.querySelector('#Languages').value = (config.Languages || []).filter(function (l, i, a) { return a.indexOf(l) === i; }).join(', ') || 'eng';
             page.querySelector('#TimingFixes').value = config.TimingFixes;
             page.querySelector('#TextChanges').value = config.TextChanges;
             page.querySelector('#Currency').innerHTML = currencies.map(function (c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
@@ -316,6 +386,8 @@
             page.querySelector('#FlashTargetMs').value = cleanup.FlashTargetMs;
             page.querySelector('#FixTypesetTiming').checked = cleanup.FixTypesetTiming;
             page.querySelector('#LocalServiceUrl').value = config.LocalServiceUrl || '';
+            page.querySelector('#MaxSubtitlesPerRun').value = config.MaxSubtitlesPerRun || 50;
+            loadResults();
             renderTiers(config);
             refreshWarnings();
             return loadKeys();
@@ -331,6 +403,7 @@
             if (!config.Languages.length) { config.Languages = ['eng']; }
             config.TimingFixes = page.querySelector('#TimingFixes').value;
             config.LocalServiceUrl = page.querySelector('#LocalServiceUrl').value.trim();
+            config.MaxSubtitlesPerRun = Math.min(5000, Math.max(1, parseInt(page.querySelector('#MaxSubtitlesPerRun').value, 10) || 50));
             config.TextChanges = page.querySelector('#TextChanges').value;
             config.Currency = page.querySelector('#Currency').value;
             config.MonthlyBudget = Math.max(0, parseFloat(page.querySelector('#MonthlyBudget').value) || 0);

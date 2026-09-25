@@ -18,10 +18,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the subtitle languages to find and check, as ISO 639-2 codes (e.g. <c>eng</c>).
+    /// Gets or sets the subtitle languages to find and check, as ISO 639-2 codes (e.g. <c>eng</c>); empty means English
+    /// (see <see cref="SpendingLimit.EffectiveLanguages"/>). The list starts empty on purpose: Jellyfin's XML loader adds
+    /// saved items to whatever the list starts with, so a default item would be duplicated on every restart.
     /// </summary>
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "Jellyfin deserializes plugin configuration from JSON, which cannot populate a get-only collection.")]
-    public Collection<string> Languages { get; set; } = ["eng"];
+    public Collection<string> Languages { get; set; } = [];
 
     /// <summary>
     /// Gets or sets what happens to timing corrections (shift, drift, cuts).
@@ -87,6 +89,11 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AllowBuiltInDownload { get; set; }
 
     // ---- Advanced ----
+
+    /// <summary>
+    /// Gets or sets how many subtitle files one run checks at most (the rest are checked on following runs).
+    /// </summary>
+    public int MaxSubtitlesPerRun { get; set; } = 50;
 
     /// <summary>
     /// Gets or sets a percentage added to every provider charge, for taxes on overseas services (such as GST) or a card's

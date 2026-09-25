@@ -43,6 +43,13 @@ public class SubtitlesPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
             c.Currency = SpendingLimit.NormaliseCurrency(c.Currency);
             c.MonthlyBudget = Math.Max(0, c.MonthlyBudget);
             c.ExtraChargesPercent = SpendingLimit.NormaliseExtraPercent(c.ExtraChargesPercent);
+            c.MaxSubtitlesPerRun = Math.Clamp(c.MaxSubtitlesPerRun, 1, 5000);
+            var languages = SpendingLimit.EffectiveLanguages(c.Languages);
+            c.Languages.Clear();
+            foreach (var l in languages)
+            {
+                c.Languages.Add(l);
+            }
         }
 
         base.UpdateConfiguration(configuration);

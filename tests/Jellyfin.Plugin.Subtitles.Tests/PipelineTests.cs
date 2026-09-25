@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Subtitles.Audio;
+using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Formats;
 using Jellyfin.Plugin.Subtitles.Pipeline;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
@@ -144,5 +145,126 @@ public sealed class PipelineTests : IDisposable
         var outcome = await new SyncCheck(new NoAudio(), new Hears([]), refine: false).RunAsync(Dialogue(), TimeSpan.FromMinutes(25), "en", CancellationToken.None);
 
         Assert.False(outcome.WrongLanguageSuspected);
+    }
+
+    // Audio whose "speech" is the subtitle text, spoken 2.5 s later than the subtitles say: the fake speech-to-text knows
+    // which stretch was read last and returns those lines' words
+    private sealed class Shifted(SubtitleDocument said, double lateBy) : IAudioSource, ISpeechToText
+    {
+        private TimeSpan _start;
+
+        public string Id => "fake";
+
+        public Task<float[]> ReadAsync(TimeSpan start, TimeSpan length, CancellationToken cancellationToken)
+        {
+            _start = start;
+            return Task.FromResult(new float[(int)(length.TotalSeconds * AudioFormat.SampleRate)]);
+        }
+
+        public Task<Transcript> TranscribeAsync(float[] samples, string? language, CancellationToken cancellationToken)
+        {
+            var from = _start.TotalSeconds;
+            var words = new List<TranscribedWord>();
+            foreach (var cue in said.Cues)
+            {
+                var at = cue.Start.TotalSeconds + lateBy - from;
+                if (at < 0 || at > 60)
+                {
+                    continue;
+                }
+
+                var parts = cue.Text.Split(' ');
+                words.AddRange(parts.Select((w, k) => new TranscribedWord(w, at + (k * 0.25), at + (k * 0.25) + 0.2, 0.9)));
+            }
+
+            return Task.FromResult(new Transcript(words, "en", "fake", "fake", samples.Length / (double)AudioFormat.SampleRate));
+        }
+    }
+
+    private static SubtitleDocument Story()
+        => new() { Format = SubtitleFormat.Srt, Cues = [.. Enumerable.Range(0, 300).Select(i => new SubtitleCue { Start = TimeSpan.FromSeconds(10 + (i * 5)), End = TimeSpan.FromSeconds(12 + (i * 5)), Text = $"Line {i} says word{i}x and word{i}y" })] };
+
+    private (SubtitleProcessor Processor, SubtitleJob Job, string Path) Setup()
+    {
+        var path = Path.Combine(_dir, "Film.en.srt");
+        File.WriteAllBytes(path, SubtitleWriter.ToBytes(Story()));
+        var processor = new SubtitleProcessor(new ResultStore(Path.Combine(_dir, "results.json")), new SubtitleFiles(Path.Combine(_dir, "originals")));
+        return (processor, new SubtitleJob(Guid.NewGuid(), "Invented Film", Path.Combine(_dir, "Film.mkv"), path, "eng", TimeSpan.FromMinutes(25), 0), path);
+    }
+
+    [Fact]
+    public async Task A_late_subtitle_is_corrected_and_can_be_undone()
+    {
+        var (processor, job, path) = Setup();
+        var original = File.ReadAllBytes(path);
+        var fake = new Shifted(Story(), 2.5);
+
+        var result = await processor.ProcessAsync(job, fake, fake, ChangePolicy.Automatic, CancellationToken.None);
+
+        Assert.Equal(ResultStatus.Corrected, result.Status);
+        Assert.Equal(2.5, result.Offset, 0.05);
+        var corrected = SubtitleReader.Read(File.ReadAllBytes(path), path)!;
+        Assert.Equal(12.5, corrected.Cues[0].Start.TotalSeconds, 0.05);
+        Assert.False(processor.NeedsCheck(path, SubtitleFiles.Fingerprint(File.ReadAllBytes(path))));
+
+        var undone = processor.Undo(result.Id);
+
+        Assert.Equal(ResultStatus.Undone, undone.Status);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.False(processor.NeedsCheck(path, SubtitleFiles.Fingerprint(original)));
+    }
+
+    [Fact]
+    public async Task With_review_the_correction_waits_until_applied()
+    {
+        var (processor, job, path) = Setup();
+        var before = File.ReadAllBytes(path);
+        var fake = new Shifted(Story(), 2.5);
+
+        var result = await processor.ProcessAsync(job, fake, fake, ChangePolicy.Review, CancellationToken.None);
+
+        Assert.Equal(ResultStatus.Proposed, result.Status);
+        Assert.Equal(before, File.ReadAllBytes(path));
+
+        var applied = processor.Apply(result.Id);
+        Assert.Equal(ResultStatus.Corrected, applied.Status);
+        Assert.Equal(12.5, SubtitleReader.Read(File.ReadAllBytes(path), path)!.Cues[0].Start.TotalSeconds, 0.05);
+        Assert.Throws<InvalidOperationException>(() => processor.Apply(result.Id));
+    }
+
+    [Fact]
+    public async Task A_subtitle_in_sync_is_left_alone()
+    {
+        var (processor, job, path) = Setup();
+        var before = File.ReadAllBytes(path);
+        var fake = new Shifted(Story(), 0);
+
+        var result = await processor.ProcessAsync(job, fake, fake, ChangePolicy.Automatic, CancellationToken.None);
+
+        Assert.Equal(ResultStatus.InSync, result.Status);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.Null(result.Backup);
+    }
+
+    [Fact]
+    public void A_changed_or_failed_subtitle_is_checked_again()
+    {
+        var (processor, job, _) = Setup();
+        processor.RecordFailure(job, "ffmpeg failed");
+
+        Assert.True(processor.NeedsCheck(job.SubtitlePath, "anything"));
+        Assert.Equal("ffmpeg failed", processor.Recent(10)[0].Explanation);
+    }
+
+    [Theory]
+    [InlineData("eng", 1)]
+    [InlineData("fre", 2)]
+    [InlineData("ger", 0)]
+    [InlineData(null, 0)]
+    public void The_audio_in_the_subtitles_language_is_used(string? language, int expected)
+    {
+        (string?, bool)[] audio = [("jpn", true), ("eng", false), ("fra", false)];
+
+        Assert.Equal(expected, AudioChoice.For(audio, language));
     }
 }

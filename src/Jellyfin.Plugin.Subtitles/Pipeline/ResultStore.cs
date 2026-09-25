@@ -26,7 +26,7 @@ public enum ResultStatus
     /// <summary>No clear answer; left alone.</summary>
     Unreliable,
 
-    /// <summary>Speech was heard but doesn't match the text: probably another language or version.</summary>
+    /// <summary>Speech was heard but doesn't match the text: another language, another version, or not dialogue (commentary, notes).</summary>
     WrongLanguage,
 
     /// <summary>Something went wrong (reading, writing, a service).</summary>

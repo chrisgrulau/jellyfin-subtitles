@@ -50,6 +50,15 @@ Providers:
 | **Local service** | A local speech-to-text service (Whisper), with a guided one-line setup on the plugin page | Free; fast with a GPU |
 | **Cloud** (Deepgram, OpenAI …) | Paste an API key | Per minute of audio |
 
+## How it works today
+
+A daily task (**Scheduled Tasks → Shoal → Check and sync subtitles**, or **Check now** on the plugin page) checks the
+text subtitle files beside your films and episodes. Each one's timing is compared with the audio, first for free by
+matching where lines start against where speech starts, then, if that isn't clear-cut, by transcribing a few minutes
+with a free local speech-to-text service and matching the words. Corrections (a shift, and a frame-rate change if the
+subtitle was made for a PAL release) are applied or held for your review, and every change can be undone from the
+plugin page. Finding and downloading missing subtitles comes next.
+
 ## Safety
 
 - **Reversible and idempotent**: the original subtitle is always kept; every change is recorded with where it came from,
