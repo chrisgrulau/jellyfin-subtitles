@@ -34,6 +34,12 @@ public enum ResultStatus
 
     /// <summary>A correction was undone.</summary>
     Undone,
+
+    /// <summary>A missing subtitle was found, checked against the audio and added.</summary>
+    Added,
+
+    /// <summary>No subtitle that fits this video was found (searched again after a while).</summary>
+    NotFound,
 }
 
 /// <summary>
@@ -95,6 +101,9 @@ public sealed record SubtitleResult
     /// <summary>Gets a few examples of what was (or would be) changed, for review.</summary>
     public IReadOnlyList<string> Examples { get; init; } = [];
 
+    /// <summary>Gets where an added subtitle came from (source, release name, score), for provenance.</summary>
+    public string? Origin { get; init; }
+
     /// <summary>Gets a value indicating whether anything waits for review (a timing correction or clean-up).</summary>
     public bool PendingReview => Status == ResultStatus.Proposed || CleanupPending.Count > 0;
 }
@@ -153,6 +162,19 @@ public sealed class ResultStore
         lock (_lock)
         {
             return Load().FirstOrDefault(r => r.Id == id);
+        }
+    }
+
+    /// <summary>
+    /// Finds the newest result that concerns a subtitle file (including one this plugin added).
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <returns>The result, or <c>null</c>.</returns>
+    public SubtitleResult? ForPath(string subtitlePath)
+    {
+        lock (_lock)
+        {
+            return Load().Where(r => string.Equals(r.SubtitlePath, subtitlePath, StringComparison.Ordinal)).OrderByDescending(r => r.Time).FirstOrDefault();
         }
     }
 

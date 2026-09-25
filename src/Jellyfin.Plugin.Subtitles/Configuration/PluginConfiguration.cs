@@ -88,7 +88,22 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool AllowBuiltInDownload { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether subtitles are searched for films and episodes that have none in a chosen
+    /// language (and added once they fit the audio).
+    /// </summary>
+    public bool FindMissing { get; set; } = true;
+
     // ---- Advanced ----
+
+    /// <summary>Gets or sets how many videos one search run looks for subtitles for at most.</summary>
+    public int MaxFindsPerRun { get; set; } = 20;
+
+    /// <summary>
+    /// Gets or sets how many subtitles may be downloaded per day, across runs. Providers such as OpenSubtitles count
+    /// downloads against the account's daily allowance, which other apps may share; keep this well below it.
+    /// </summary>
+    public int MaxDownloadsPerDay { get; set; } = 100;
 
     /// <summary>
     /// Gets or sets how many subtitle files one run checks at most (the rest are checked on following runs).

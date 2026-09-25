@@ -102,6 +102,57 @@ public sealed class SubtitleFiles
         return Fingerprint(original);
     }
 
+    /// <summary>
+    /// Creates a new subtitle file; never replaces one that exists.
+    /// </summary>
+    /// <param name="subtitlePath">Where to create it.</param>
+    /// <param name="content">The content.</param>
+    /// <returns>The content's fingerprint.</returns>
+    /// <exception cref="IOException">A file is already there.</exception>
+    public static string Create(string subtitlePath, byte[] content)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subtitlePath);
+        ArgumentNullException.ThrowIfNull(content);
+        var temp = Path.Combine(Path.GetDirectoryName(subtitlePath)!, ".shoal-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            File.WriteAllBytes(temp, content);
+
+            // Without overwrite: if something appeared meanwhile, it stays and this fails
+            File.Move(temp, subtitlePath, overwrite: false);
+            return Fingerprint(content);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes a subtitle file this plugin added, if it is still exactly as added.
+    /// </summary>
+    /// <param name="subtitlePath">The file.</param>
+    /// <param name="written">The fingerprint of what was added.</param>
+    /// <exception cref="IOException">The file was changed since it was added.</exception>
+    public static void RemoveAdded(string subtitlePath, string written)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subtitlePath);
+        if (!File.Exists(subtitlePath))
+        {
+            return;
+        }
+
+        if (!string.Equals(Fingerprint(File.ReadAllBytes(subtitlePath)), written, StringComparison.Ordinal))
+        {
+            throw new IOException("The subtitle was changed after it was added; removing it would lose that change.");
+        }
+
+        File.Delete(subtitlePath);
+    }
+
     private static void WriteAtomically(string path, byte[] content)
     {
         var temp = Path.Combine(Path.GetDirectoryName(path)!, ".shoal-" + Guid.NewGuid().ToString("N") + ".tmp");

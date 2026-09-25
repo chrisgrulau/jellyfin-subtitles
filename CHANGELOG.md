@@ -103,3 +103,10 @@ All notable changes to this project are documented here. The format follows
   the pipeline are checked once more; a change someone undid is never redone.
 - Repeated lines are merged only when the repeat overlaps the line before (a ripping error): chants, echoes and people
   repeating each other are dialogue. Identical overlapping lines are left for that merge rather than trimmed.
+- Missing subtitles are found: a daily "Find missing subtitles" task (Scheduled Tasks → Shoal) searches Jellyfin's
+  subtitle providers (such as the OpenSubtitles plugin) for films and episodes with no subtitle in a chosen language,
+  ranks the candidates, downloads the best few one at a time and checks each against the audio with the same two
+  stages; the first that clearly fits is added beside the video (`Name.en.srt`, `.sdh` for hearing-impaired), timing
+  corrected and cleaned. Existing files are never replaced; Undo deletes an added file (and it isn't searched for
+  again). Downloads are capped per day (default 100) and counted across restarts; a video nothing fits is searched
+  again after 30 days; specials come last, since subtitle sites rarely have them. Up to 20 videos per run.

@@ -79,7 +79,14 @@ public sealed class SubtitleProcessor
     /// <returns><c>true</c> if it should be checked.</returns>
     public bool NeedsCheck(string subtitlePath, string fingerprint)
     {
-        if (_results.Get(ResultStore.IdFor(subtitlePath)) is not { } r || !string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal))
+        var r = _results.Get(ResultStore.IdFor(subtitlePath));
+        if (r is null && _results.ForPath(subtitlePath) is { Status: ResultStatus.Added or ResultStatus.Undone } added)
+        {
+            // Added by the finder (already checked and cleaned as it was added)
+            r = added;
+        }
+
+        if (r is null || !string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return true;
         }
@@ -236,6 +243,19 @@ public sealed class SubtitleProcessor
     public SubtitleResult Undo(string id)
     {
         var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        if (r.Status == ResultStatus.Added && r.Changed)
+        {
+            try
+            {
+                SubtitleFiles.RemoveAdded(r.SubtitlePath, r.Fingerprint);
+                return Save(r with { Status = ResultStatus.Undone, Changed = false, Examples = [], Time = _clock.GetUtcNow(), Explanation = "Undone: the added subtitle was removed (it won't be searched for again on its own)." });
+            }
+            catch (IOException ex)
+            {
+                throw new InvalidOperationException(ex.Message, ex);
+            }
+        }
+
         if (!r.Changed || r.Backup is null)
         {
             throw new InvalidOperationException("There's no change to undo for this subtitle.");
@@ -262,9 +282,14 @@ public sealed class SubtitleProcessor
         }
     }
 
-    // Clean-up options with every kind that waits for review switched off
-    private static CleanOptions AutomaticOptions(Policies p)
+    /// <summary>
+    /// Clean-up options with every kind that waits for review switched off.
+    /// </summary>
+    /// <param name="p">The policies.</param>
+    /// <returns>The options.</returns>
+    public static CleanOptions AutomaticOptions(Policies p)
     {
+        ArgumentNullException.ThrowIfNull(p);
         var o = CleanupPolicy.Options(p.Cleanup);
         bool Auto(CleanChangeKind kind) => CleanupPolicy.For(kind, p.Cleanup, p.Text, p.Timing) == ChangePolicy.Automatic;
         return o with

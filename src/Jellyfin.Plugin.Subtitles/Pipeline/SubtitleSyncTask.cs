@@ -93,7 +93,11 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromMinutes(3);
-        var speech = SpeechFor(config, http);
+        var speech = FreeSpeechFor(config, _keys, http, out var problem);
+        if (speech is null && problem is not null)
+        {
+            LogNoSpeech(_logger, problem);
+        }
         var wanted = SpendingLimit.EffectiveLanguages(config.Languages).Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal);
 
         var jobs = Jobs(wanted).ToList();
@@ -151,8 +155,19 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         return new Policies(config.TimingFixes, config.TextChanges, config.Cleanup ?? new CleanupSettings());
     }
 
-    private ISpeechToText? SpeechFor(PluginConfiguration config, HttpClient http)
+    /// <summary>
+    /// The speech-to-text service automatic runs may use: the snippet tier's service, if it is free (local or built-in).
+    /// Paid services wait for cost tracking.
+    /// </summary>
+    /// <param name="config">Plugin settings.</param>
+    /// <param name="keys">Speech-to-text keys.</param>
+    /// <param name="http">HTTP client.</param>
+    /// <param name="problem">Why no service is used, if none.</param>
+    /// <returns>The service, or <c>null</c>.</returns>
+    public static ISpeechToText? FreeSpeechFor(PluginConfiguration config, SpeechToTextKeys keys, HttpClient http, out string? problem)
     {
+        ArgumentNullException.ThrowIfNull(config);
+        problem = null;
         var tier = config.SyncSnippets;
         if (tier is null || !tier.Enabled)
         {
@@ -161,16 +176,12 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
         if (SpeechToTextFactory.IsPaid(tier.Provider))
         {
-            LogPaidSkipped(_logger, tier.Provider);
+            problem = "speech-to-text is set to " + tier.Provider + ", a paid service; automatic runs don't use paid services until cost tracking is available.";
             return null;
         }
 
-        var (service, problem) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, paidAllowed: false, config.AllowBuiltInDownload, _keys, http);
-        if (service is null)
-        {
-            LogNoSpeech(_logger, problem ?? string.Empty);
-        }
-
+        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, paidAllowed: false, config.AllowBuiltInDownload, keys, http);
+        problem = why;
         return service;
     }
 
@@ -223,9 +234,6 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: {Name} couldn't be checked: {Error}")]
     private static partial void LogFailed(ILogger logger, string name, string error);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: speech-to-text is set to {Provider}, a paid service; automatic runs don't use paid services until cost tracking is available")]
-    private static partial void LogPaidSkipped(ILogger logger, string provider);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: speech-to-text not used: {Problem}")]
     private static partial void LogNoSpeech(ILogger logger, string problem);
