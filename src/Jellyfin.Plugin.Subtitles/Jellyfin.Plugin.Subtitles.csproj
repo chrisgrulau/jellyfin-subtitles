@@ -12,6 +12,13 @@
     <PackageReference Include="Jellyfin.Model" Version="12.*" ExcludeAssets="runtime" />
   </ItemGroup>
 
+  <!-- Shared source (resilience, budgets, spend tracking), compiled in as internal code; see external/common -->
+  <Import Project="../../external/common/Common.props" />
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.Subtitles.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Remove="Configuration\configPage.html" />
     <EmbeddedResource Include="Configuration\configPage.html" />
