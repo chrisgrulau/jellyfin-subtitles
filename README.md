@@ -57,7 +57,13 @@ text subtitle files beside your films and episodes. Each one's timing is compare
 matching where lines start against where speech starts, then, if that isn't clear-cut, by transcribing a few minutes
 with a free local speech-to-text service and matching the words. Corrections (a shift, and a frame-rate change if the
 subtitle was made for a PAL release) are applied or held for your review, and every change can be undone from the
-plugin page. Finding and downloading missing subtitles comes next.
+plugin page.
+
+A second daily task (**Find missing subtitles**, or **Find missing now**) searches your subtitle providers, such as the
+OpenSubtitles plugin, for films and episodes that have no subtitle in your languages. The best candidates are
+downloaded one at a time and checked against the audio the same way; one is added only if it clearly fits, with its
+timing corrected. Existing subtitle files are never replaced, downloads are capped per day, and Undo removes an added
+subtitle.
 
 ## Safety
 

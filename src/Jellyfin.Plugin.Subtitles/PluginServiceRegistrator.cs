@@ -19,10 +19,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // Speech-to-text keys live in their own owner-only file in the plugin's data folder, never in the configuration
         serviceCollection.AddSingleton(sp => new SpeechToTextKeys(Path.Combine(DataFolder(sp), "keys.json")));
 
-        // Results and the originals of changed subtitles also live in the plugin's data folder
-        serviceCollection.AddSingleton(sp => new SubtitleProcessor(
-            new ResultStore(Path.Combine(DataFolder(sp), "results.json")),
-            new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"))));
+        // Results, the originals of changed subtitles and the download count also live in the plugin's data folder. One
+        // results store is shared, so the checker knows what the finder added.
+        serviceCollection.AddSingleton(sp => new ResultStore(Path.Combine(DataFolder(sp), "results.json")));
+        serviceCollection.AddSingleton(sp => new SubtitleProcessor(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"))));
+        serviceCollection.AddSingleton(sp => new SubtitleFinder(sp.GetRequiredService<ResultStore>(), new DownloadLedger(Path.Combine(DataFolder(sp), "downloads.json"))));
     }
 
     private static string DataFolder(System.IServiceProvider services)
