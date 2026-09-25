@@ -64,3 +64,5 @@ All notable changes to this project are documented here. The format follows
   pinned in `global.json`; releases carry SHA256SUMS and a build-provenance attestation and are published from a draft;
   the tag must match the plugin version; checkout without persisted credentials; job timeouts; Dependabot follows the
   common submodule and the SDK. `.gitignore` covers test audio and models. README explains the submodule.
+- `global.json` accepts any .NET 10 SDK (10.0.100 and later), so the SDKs shipped by Linux distributions (10.0.1xx)
+  build it; CI uses the newest .NET 10 SDK, and Dependabot no longer raises the minimum. Package versions stay locked.

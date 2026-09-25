@@ -24,7 +24,9 @@ jobs:
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          global-json-file: global.json
+          # The newest .NET 10 SDK; global.json only sets the floor (any .NET 10 SDK, including Linux distribution
+          # packages, which ship the 10.0.1xx series). Package versions are locked, so builds stay reproducible.
+          dotnet-version: '10.0.x'
 
       - name: Restore
         run: dotnet restore Jellyfin.Plugin.Subtitles.sln --locked-mode

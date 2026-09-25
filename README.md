@@ -89,7 +89,7 @@ git submodule update --init --recursive
 dotnet build -c Release
 ```
 
-The SDK version is pinned in `global.json`, and package versions are locked in `packages.lock.json`. The Jellyfin
+Any .NET 10 SDK builds it (`global.json` sets the floor, so Linux distribution packages work), and package versions are locked in `packages.lock.json`. The Jellyfin
 packages are pinned to the server version in `build.yaml`'s `targetAbi`; bump them together.
 
 The output `Jellyfin.Plugin.Subtitles.dll` goes in `<jellyfin data>/plugins/Subtitles_<version>/`.
