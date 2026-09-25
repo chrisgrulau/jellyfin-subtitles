@@ -1,0 +1,43 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Jellyfin.Plugin.Subtitles.Configuration;
+
+/// <summary>
+/// What the spending settings mean. A limit of 0 is "no paid usage" (people read 0 as "spend nothing"); unlimited is a
+/// separate, explicit choice.
+/// </summary>
+public static class SpendingLimit
+{
+    /// <summary>The default monthly limit for paid services, in US dollars.</summary>
+    public const decimal DefaultMonthlyUsd = 5m;
+
+    /// <summary>
+    /// The effective monthly limit.
+    /// </summary>
+    /// <param name="monthlyUsd">The configured limit.</param>
+    /// <param name="noLimit">Whether "no limit" was chosen.</param>
+    /// <returns>The limit in US dollars (0 = no paid usage), or <c>null</c> for no limit of our own.</returns>
+    public static decimal? Monthly(decimal monthlyUsd, bool noLimit) => noLimit ? null : Math.Max(0, monthlyUsd);
+
+    /// <summary>
+    /// Whether paid services may be used at all.
+    /// </summary>
+    /// <param name="limit">The effective limit (see <see cref="Monthly"/>).</param>
+    /// <returns><c>false</c> when the limit is 0.</returns>
+    public static bool AllowsPaidUsage(decimal? limit) => limit is null || limit > 0;
+
+    /// <summary>
+    /// Whether the built-in speech-to-text is chosen for a use that's switched on, but hasn't been allowed to download
+    /// yet (the settings page then asks).
+    /// </summary>
+    /// <param name="tiers">The speech-to-text uses.</param>
+    /// <param name="allowed">Whether the download has been allowed.</param>
+    /// <returns><c>true</c> if consent is still needed.</returns>
+    public static bool NeedsBuiltInConsent(IEnumerable<TranscriptionTier> tiers, bool allowed)
+    {
+        ArgumentNullException.ThrowIfNull(tiers);
+        return !allowed && tiers.Any(t => t is { Enabled: true } && string.Equals(t.Provider, TranscriptionTier.BuiltIn, StringComparison.OrdinalIgnoreCase));
+    }
+}

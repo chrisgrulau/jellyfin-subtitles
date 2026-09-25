@@ -54,10 +54,24 @@ public class PluginConfiguration : BasePluginConfiguration
     public TranscriptionTier FullTranscript { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets the monthly spending limit for paid services in US dollars; 0 means no limit of our own (limits set
-    /// with the provider still apply).
+    /// Gets or sets the monthly spending limit for paid services in US dollars. 0 means no paid usage at all (cloud
+    /// services are never called); "no limit" is a separate, explicit choice (<see cref="NoSpendingLimit"/>). A small cap
+    /// by default, so entering an API key never means open-ended spending.
     /// </summary>
-    public decimal MonthlyBudgetUsd { get; set; }
+    public decimal MonthlyBudgetUsd { get; set; } = SpendingLimit.DefaultMonthlyUsd;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether paid services may spend without a limit of our own (limits set with the
+    /// provider still apply). Off by default; the settings page warns when it's on.
+    /// </summary>
+    public bool NoSpendingLimit { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the administrator has agreed to the built-in speech-to-text downloading
+    /// and running its Whisper program and model on this server. Nothing is downloaded until they have, after being told
+    /// what, how big and from where.
+    /// </summary>
+    public bool AllowBuiltInDownload { get; set; }
 
     // ---- Advanced ----
 

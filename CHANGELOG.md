@@ -52,3 +52,8 @@ All notable changes to this project are documented here. The format follows
   empty lines are always removed, merging repeated lines and removing sound descriptions follow the wording setting,
   and timing clean-up follows the timing setting. New settings: basic (remove adverts, remove sound descriptions) and
   advanced (advert policy, merge repeats, fix overlaps, lengthen brief lines with their thresholds, typesetting).
+- Spending limit (SUB-03): 0 now means no paid usage at all; "no limit" is a separate checkbox with a warning; the
+  default is a US$5 monthly cap, so entering an API key never means open-ended spending.
+- Built-in speech-to-text (SUB-06) asks before its first download: the settings page says what is downloaded, how big it
+  is and where from, and nothing set to Built-in runs until an administrator allows it. The safety requirements for the
+  downloader are set out in `docs/DESIGN.md`.
