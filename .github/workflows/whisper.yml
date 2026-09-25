@@ -99,7 +99,13 @@ jobs:
           cmake -S src -B build "${flags[@]}"
 
       - name: Build
-        run: cmake --build build --config Release --target whisper-cli -j 4
+        run: |
+          set -o pipefail
+          # The errors are also shown as annotations, which can be read without downloading the log
+          if ! cmake --build build --config Release --target whisper-cli -j 4 2>&1 | tee build.log; then
+            grep -iE "error|fatal" build.log | head -20 | while IFS= read -r line; do echo "::error::${line:0:400}"; done
+            exit 1
+          fi
 
       - name: Package
         run: |
@@ -108,7 +114,7 @@ jobs:
           bin=build/bin; [[ -d build/bin/Release ]] && bin=build/bin/Release
           shopt -s nullglob
           for f in "$bin"/whisper-cli "$bin"/whisper-cli.exe "$bin"/*.so "$bin"/*.so.* "$bin"/*.dll "$bin"/*.dylib; do
-            cp -L "$f" out/
+            if [[ -f "$f" ]]; then cp -L "$f" out/; fi
           done
           ls -la out
           test -e out/whisper-cli || test -e out/whisper-cli.exe
