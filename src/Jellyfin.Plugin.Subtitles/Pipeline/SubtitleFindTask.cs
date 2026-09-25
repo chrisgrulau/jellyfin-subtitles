@@ -107,7 +107,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
 
         var source = new JellyfinSubtitleSource(_library, _subtitles);
         // Specials (season 0) last: subtitle sites rarely have them, and they'd use up the run
-        var jobs = Missing(SpendingLimit.EffectiveLanguages(config.Languages))
+        var jobs = Missing(SpendingLimit.EffectiveLanguages(config.Languages), config.CountImageSubtitles)
             .Where(_finder.NeedsSearch)
             .OrderBy(j => j.Video.Season == 0)
             .Take(Math.Max(1, config.MaxFindsPerRun))
@@ -132,8 +132,15 @@ public sealed partial class SubtitleFindTask : IScheduledTask
                 LogLimit(_logger, ex.Message);
                 break;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or HttpRequestException or InvalidOperationException)
+            catch (Exception ex) when (FindRules.StopsTheRun(ex))
             {
+                // The provider's own daily allowance is used up, or it can't sign in: every further search would fail too
+                LogProviderStopped(_logger, ex.Message);
+                break;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Anything else a provider throws fails only this video's search; the run carries on
                 LogFailed(_logger, job.Name, ex.Message);
             }
 
@@ -141,7 +148,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         }
     }
 
-    private IEnumerable<FindJob> Missing(IReadOnlyList<string> languages)
+    private IEnumerable<FindJob> Missing(IReadOnlyList<string> languages, bool countImages)
     {
         var items = _library.GetItemList(new InternalItemsQuery
         {
@@ -163,7 +170,8 @@ public sealed partial class SubtitleFindTask : IScheduledTask
                 continue;
             }
 
-            var have = streams.Where(s => s.Type == MediaStreamType.Subtitle).Select(s => Languages.ToTwoLetter(s.Language)).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            var have = streams.Where(s => s.Type == MediaStreamType.Subtitle && FindRules.Counts(s.IsForced, s.IsTextSubtitleStream, countImages))
+                .Select(s => Languages.ToTwoLetter(s.Language)).OfType<string>().ToHashSet(StringComparer.Ordinal);
             foreach (var language in languages)
             {
                 if (Languages.ToTwoLetter(language) is { } two && !have.Contains(two))
@@ -188,6 +196,9 @@ public sealed partial class SubtitleFindTask : IScheduledTask
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: {Message}")]
     private static partial void LogLimit(ILogger logger, string message);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: the subtitle provider stopped the search for today: {Message}")]
+    private static partial void LogProviderStopped(ILogger logger, string message);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: {Name}: the search failed: {Error}")]
     private static partial void LogFailed(ILogger logger, string name, string error);

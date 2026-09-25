@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **SUB-04 (rest):** provider downloads are read with a limit and dropped as soon as they pass 10 MB, instead of being
+  buffered in full first. A subtitle file on disk larger than 10 MB isn't read at all: it is recorded as **Too large**
+  once and not looked at again until it changes.
+- **SUB-11:** Apply and Undo errors now show the server's explanation (for example "The subtitle was changed after this
+  plugin changed it"), not just "That couldn't be done".
+- **SUB-12:** subtitle downloads per day default to 10 (a free OpenSubtitles account allows about 20, shared with
+  manual downloads). When the provider says its allowance is used up, or it can't sign in, the search stops for the
+  day. Any other provider error fails only that video's search, not the whole run.
+- **SUB-13:** a forced-only subtitle track (signs and foreign-language parts) no longer counts as having subtitles in
+  that language. A new setting decides whether picture-based tracks (PGS, VobSub) count (on by default).
+
 ## [0.1.0-alpha] - 2026-09-25
 
 ### Security

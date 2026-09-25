@@ -108,6 +108,23 @@ public sealed class SubtitleProcessor
     {
         ArgumentNullException.ThrowIfNull(job);
         ArgumentNullException.ThrowIfNull(policies);
+        var info = new FileInfo(job.SubtitlePath);
+        if (info.Length > SubtitleReader.MaxBytes)
+        {
+            return Save(new SubtitleResult
+            {
+                Id = ResultStore.IdFor(job.SubtitlePath),
+                ItemId = job.ItemId,
+                Name = job.Name,
+                SubtitlePath = job.SubtitlePath,
+                Time = _clock.GetUtcNow(),
+                Fingerprint = SubtitleFiles.TooLargeFingerprint(info),
+                Version = CurrentVersion,
+                Status = ResultStatus.TooLarge,
+                Explanation = "Too large to be a subtitle file; it isn't read again unless it changes.",
+            });
+        }
+
         var bytes = await File.ReadAllBytesAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false);
         var fingerprint = SubtitleFiles.Fingerprint(bytes);
         var previous = _results.Get(ResultStore.IdFor(job.SubtitlePath));

@@ -94,6 +94,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool FindMissing { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether a picture-based subtitle track (PGS, VobSub) counts as having subtitles in
+    /// its language. Forced-only tracks (signs and foreign-language parts) never count.
+    /// </summary>
+    public bool CountImageSubtitles { get; set; } = true;
+
     // ---- Advanced ----
 
     /// <summary>Gets or sets how many videos one search run looks for subtitles for at most.</summary>
@@ -101,9 +107,10 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// Gets or sets how many subtitles may be downloaded per day, across runs. Providers such as OpenSubtitles count
-    /// downloads against the account's daily allowance, which other apps may share; keep this well below it.
+    /// downloads against the account's daily allowance (a free OpenSubtitles account gets about 20), which manual
+    /// downloads in Jellyfin share; keep this well below it.
     /// </summary>
-    public int MaxDownloadsPerDay { get; set; } = 100;
+    public int MaxDownloadsPerDay { get; set; } = 10;
 
     /// <summary>
     /// Gets or sets how many subtitle files one run checks at most (the rest are checked on following runs).

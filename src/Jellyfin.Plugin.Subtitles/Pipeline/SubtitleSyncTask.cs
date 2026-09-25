@@ -107,7 +107,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var fingerprint = SubtitleFiles.Fingerprint(await File.ReadAllBytesAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false));
+                var fingerprint = await SubtitleFiles.FingerprintFileAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false);
                 if (_processor.NeedsCheck(job.SubtitlePath, fingerprint))
                 {
                     todo.Add(job);
