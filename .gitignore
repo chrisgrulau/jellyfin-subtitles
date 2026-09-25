@@ -1,0 +1,82 @@
+## ---------------------------------------------------------------------------
+## Secrets — never commit these. The plugin itself needs none (it uses the
+## metadata providers already configured in Jellyfin), but local tooling might.
+## ---------------------------------------------------------------------------
+*.key
+*.pem
+*.pfx
+*.p12
+*.pat
+*.token
+.env
+.env.*
+!.env.example
+secrets.json
+*.secrets.json
+appsettings.*.local.json
+
+## ---------------------------------------------------------------------------
+## .NET build output
+## ---------------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+publish/
+*.nupkg
+*.snupkg
+# Release zips produced by `dotnet publish` / JPRM
+*.zip
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+
+## ---------------------------------------------------------------------------
+## NuGet
+## ---------------------------------------------------------------------------
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+
+## ---------------------------------------------------------------------------
+## IDEs / editors
+## ---------------------------------------------------------------------------
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.sln.iml
+*.suo
+*.user
+*.userosscache
+*.userprefs
+*.DotSettings.user
+*.swp
+*~
+
+## ---------------------------------------------------------------------------
+## OS cruft
+## ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## ---------------------------------------------------------------------------
+## Local test data — never commit media or real library paths
+## ---------------------------------------------------------------------------
+/testdata/local/
+*.mkv
+*.mp4
+*.avi
+*.m4v
