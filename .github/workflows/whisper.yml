@@ -55,7 +55,8 @@ jobs:
           # x64 and arm64 Linux and x64 Windows carry every CPU variant (from SSE4.2 up to AVX-512 / SVE2) and pick the
           # best one at run time, so they also run on older CPUs and virtual machines with a basic CPU model.
           - { platform: linux-x64, os: ubuntu-22.04, variants: true, test: true }
-          - { platform: linux-arm64, os: ubuntu-22.04-arm, variants: true, test: true }
+          # GCC 11 on 22.04 doesn't know the newest Arm variants (armv9.2 with SME); Clang 15 does, and keeps glibc 2.35
+          - { platform: linux-arm64, os: ubuntu-22.04-arm, variants: true, test: true, cc: clang-15, cxx: clang++-15 }
           - { platform: windows-x64, os: windows-2022, variants: true, test: true }
           - { platform: macos-arm64, os: macos-14, variants: false, test: true }
           - { platform: macos-x64, os: macos-14, variants: false, test: false, arch: x86_64 }
@@ -73,9 +74,17 @@ jobs:
           git checkout -q FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$WHISPER_COMMIT"
 
+      - name: Install Clang
+        if: matrix.cc
+        run: sudo apt-get update -q && sudo apt-get install -y -q ${{ matrix.cc }}
+
       - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
         run: |
           set -euo pipefail
+          [[ -z "$CC" ]] && unset CC CXX
           flags=(-DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_CCACHE=OFF
                  -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_SDL2=OFF
                  -DWHISPER_CURL=OFF -DGGML_METAL=OFF -DGGML_BLAS=OFF)
