@@ -109,13 +109,18 @@ public sealed record SubtitleResult
 }
 
 /// <summary>
-/// The latest result per subtitle file, persisted as JSON in the plugin's data folder. Damaged or unreadable files never
-/// break the task; the newest <see cref="MaxResults"/> are kept.
+/// The latest result per subtitle file (and per search for a missing one), persisted as JSON in the plugin's data folder.
+/// It is also the record of what was checked, changed and can be undone, so results are not evicted by age: one is kept
+/// per file for as long as the file exists (see <see cref="Prune"/>). Only past <see cref="MaxResults"/> (far beyond a
+/// large library) are the oldest plain results dropped, never one that can be undone, was added, waits for review, or
+/// holds back a search. Damaged or unreadable files never break the task.
 /// </summary>
 public sealed class ResultStore
 {
-    /// <summary>How many results are kept.</summary>
-    public const int MaxResults = 2000;
+    /// <summary>The ceiling on kept results.</summary>
+    public const int MaxResults = 200_000;
+
+    private readonly int _maxResults;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
@@ -127,10 +132,53 @@ public sealed class ResultStore
     /// Initializes a new instance of the <see cref="ResultStore"/> class.
     /// </summary>
     /// <param name="path">Absolute path of the JSON file.</param>
-    public ResultStore(string path)
+    /// <param name="maxResults">The ceiling (for tests).</param>
+    public ResultStore(string path, int maxResults = MaxResults)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxResults, 1);
         _path = path;
+        _maxResults = maxResults;
+    }
+
+    /// <summary>
+    /// Whether a result must be kept whatever its age: it can be undone, a subtitle was added, something waits for review,
+    /// or it holds back a new search.
+    /// </summary>
+    /// <param name="r">The result.</param>
+    /// <param name="now">The current time.</param>
+    /// <returns><c>true</c> if it must be kept.</returns>
+    public static bool MustKeep(SubtitleResult r, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        return r.Changed || r.PendingReview || r.Status is ResultStatus.Added or ResultStatus.Undone
+            || (r.Status is ResultStatus.NotFound or ResultStatus.Failed && r.Id.StartsWith("find-", StringComparison.Ordinal) && now - r.Time < SubtitleFinder.SearchAgainAfter);
+    }
+
+    /// <summary>
+    /// Drops results for subtitle files that are gone, where the folder is still there (so an offline share never loses
+    /// its results). "Nothing found" results are for files that don't exist yet and are kept.
+    /// </summary>
+    /// <param name="fileExists">Whether a file exists.</param>
+    /// <param name="folderExists">Whether a folder exists.</param>
+    /// <returns>How many were dropped.</returns>
+    public int Prune(Func<string, bool> fileExists, Func<string, bool> folderExists)
+    {
+        ArgumentNullException.ThrowIfNull(fileExists);
+        ArgumentNullException.ThrowIfNull(folderExists);
+        lock (_lock)
+        {
+            var list = Load();
+            var removed = list.RemoveAll(r => r.Status != ResultStatus.NotFound
+                && !fileExists(r.SubtitlePath)
+                && Path.GetDirectoryName(r.SubtitlePath) is { } folder && folderExists(folder));
+            if (removed > 0)
+            {
+                Save(list);
+            }
+
+            return removed;
+        }
     }
 
     /// <summary>
@@ -190,10 +238,12 @@ public sealed class ResultStore
             var list = Load();
             list.RemoveAll(r => r.Id == result.Id);
             list.Add(result);
-            if (list.Count > MaxResults)
+            if (list.Count > _maxResults)
             {
-                list.Sort((a, b) => b.Time.CompareTo(a.Time));
-                list.RemoveRange(MaxResults, list.Count - MaxResults);
+                // Past the ceiling, the oldest results that nothing depends on go first
+                var now = result.Time;
+                var droppable = list.Where(r => !MustKeep(r, now) && r.Id != result.Id).OrderBy(r => r.Time).Take(list.Count - _maxResults).ToHashSet();
+                list.RemoveAll(droppable.Contains);
             }
 
             Save(list);

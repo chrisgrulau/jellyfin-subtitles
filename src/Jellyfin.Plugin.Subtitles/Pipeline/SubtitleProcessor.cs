@@ -62,7 +62,19 @@ public sealed class SubtitleProcessor
     /// </summary>
     /// <param name="limit">How many.</param>
     /// <returns>The results.</returns>
-    public IReadOnlyList<SubtitleResult> Recent(int limit) => [.. _results.All().Take(Math.Clamp(limit, 1, ResultStore.MaxResults))];
+    public IReadOnlyList<SubtitleResult> Recent(int limit)
+    {
+        // Everything waiting for review is always included, however old
+        var all = _results.All();
+        var recent = all.Take(Math.Clamp(limit, 1, 5000)).ToList();
+        return [.. recent.Concat(all.Skip(recent.Count).Where(r => r.PendingReview))];
+    }
+
+    /// <summary>
+    /// Drops results for subtitle files that were deleted (see <see cref="ResultStore.Prune"/>).
+    /// </summary>
+    /// <returns>How many were dropped.</returns>
+    public int PruneGone() => _results.Prune(File.Exists, Directory.Exists);
 
     /// <summary>The pipeline version: raised when a new stage is added, so files are checked once more.</summary>
     public const int CurrentVersion = 3;
@@ -121,9 +133,10 @@ public sealed class SubtitleProcessor
             Fingerprint = fingerprint,
             Version = CurrentVersion,
 
-            // A file this plugin already changed stays undoable to the first original
-            Backup = previous?.Changed == true ? previous.Backup : null,
-            Changed = previous?.Changed == true,
+            // A file still exactly as this plugin left it stays undoable to the original from before its first change. A
+            // file replaced from outside (another tool, a person) starts afresh: its content is the new original.
+            Backup = StillOurs(previous, fingerprint) ? previous!.Backup : null,
+            Changed = StillOurs(previous, fingerprint),
         };
 
         var document = SubtitleReader.Read(bytes, job.SubtitlePath);
@@ -220,7 +233,7 @@ public sealed class SubtitleProcessor
             return Save(r with
             {
                 Status = r.Status == ResultStatus.Proposed ? ResultStatus.Corrected : r.Status,
-                Backup = r.Backup ?? backup,
+                Backup = r.Changed ? r.Backup ?? backup : backup,
                 Fingerprint = written,
                 Changed = true,
                 Cleaned = cleanedCounts,
@@ -301,6 +314,10 @@ public sealed class SubtitleProcessor
             ExtendShortCues = o.ExtendShortCues && Auto(CleanChangeKind.ExtendedShortCue),
         };
     }
+
+    // Whether the file still holds this plugin's last change (so undo should go back to the original from before it)
+    private static bool StillOurs(SubtitleResult? previous, string fingerprint)
+        => previous is { Changed: true, Backup: not null } && string.Equals(previous.Fingerprint, fingerprint, StringComparison.Ordinal);
 
     private static Dictionary<string, int> Count(IEnumerable<CleanChange> changes)
         => changes.GroupBy(c => c.Kind.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);

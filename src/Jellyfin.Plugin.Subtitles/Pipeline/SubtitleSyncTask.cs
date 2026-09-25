@@ -100,6 +100,13 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         }
         var wanted = SpendingLimit.EffectiveLanguages(config.Languages).Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal);
 
+        // Results for subtitle files that were deleted are no longer needed
+        var pruned = _processor.PruneGone();
+        if (pruned > 0)
+        {
+            LogPruned(_logger, pruned);
+        }
+
         var jobs = Jobs(wanted).ToList();
         var todo = new List<SubtitleJob>();
         foreach (var job in jobs)
@@ -234,6 +241,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: {Name} couldn't be checked: {Error}")]
     private static partial void LogFailed(ILogger logger, string name, string error);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: dropped {Count} results for subtitle files that no longer exist")]
+    private static partial void LogPruned(ILogger logger, int count);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: speech-to-text not used: {Problem}")]
     private static partial void LogNoSpeech(ILogger logger, string problem);
