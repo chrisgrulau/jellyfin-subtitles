@@ -1,0 +1,3 @@
+[submodule "external/common"]
+	path = external/common
+	url = https://github.com/chrisgrulau/jellyfin-plugin-common.git
