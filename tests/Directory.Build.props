@@ -1,0 +1,13 @@
+<Project>
+  <!-- Inherit repo-wide settings, then relax the rules that don't make sense for test code -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+  <PropertyGroup>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AnalysisMode>Default</AnalysisMode>
+    <!-- CA1707: underscores in test names; CA1515: test classes must be public for xunit -->
+    <NoWarn>$(NoWarn);CA1707;CA1515</NoWarn>
+    <IsPackable>false</IsPackable>
+    <!-- The repo default keeps plugin output lean; test executables need their package DLLs beside them -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+</Project>
