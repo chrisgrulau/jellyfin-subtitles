@@ -39,9 +39,17 @@ machine-/AI-translated flags; hearing-impaired and forced preferences; language 
   - The detector registers speech starts about 0.24 s after the line starts of subtitles known to be in sync; that lag
     is subtracted. Offsets under 0.5 s at the same frame rate are left alone: line starts don't pin timing down more
     finely than that, and speech-to-text does.
-- **Speech-to-text when needed**: dialogue-dense windows are transcribed and unique word sequences matched against the
-  subtitle text; the fit chooses between a constant shift, linear drift, or piecewise sections (cuts detected at the
-  largest subtitle gaps). More windows are sampled when the results disagree.
+- **Speech-to-text when needed**: three one-minute snippets are transcribed with word timings, chosen where the
+  subtitles have the most dialogue and at least a tenth of the video apart. Every run of three words that occurs exactly
+  once in both the transcript and the subtitles is an anchor (subtitle time, audio time). For each frame-rate ratio the
+  anchors' offsets are clustered; the densest cluster wins, a simpler ratio being kept unless another fits clearly
+  better (24 and 23.976 fps can't be told apart over a short video). The precise offset is the median over anchors that
+  begin a cue, whose subtitle time is exact. A correction needs at least 8 agreeing anchors and 40 % of all of them;
+  shifts under 0.2 s are left alone. Calibrated on real videos with a local faster-whisper service: shifts and frame-rate
+  changes recovered in 30 of 30 cases, including every dense comedy the line-start stage had to leave; subtitles for
+  another episode or film rejected in 16 of 16; about 10 s per video on a small GPU. Word matching also catches
+  subtitles in the wrong language (nothing matches), which the language-independent stage can't.
+  Piecewise corrections (cuts) come later, when anchors split into clusters along the timeline.
 
 ### Speech-to-text tiers
 
