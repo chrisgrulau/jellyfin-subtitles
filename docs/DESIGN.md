@@ -78,6 +78,17 @@ model and time range, so no audio is paid for twice and re-runs are free.
 Downloading and running a native program is the riskiest thing this plugin family does, so the built-in provider must
 meet all of these before it ships:
 
+How it meets them: the program comes from this repository's `whisper-v*` releases (built by the **Whisper**
+workflow, whisper.cpp pinned by commit; models pinned by revision and SHA-256), and `tools/builtin_checksums.py` writes
+every file's SHA-256 into `BuiltInRelease.Checksums.cs`. `BuiltInInstaller` follows redirects itself, only over HTTPS and
+only to GitHub's download hosts; streams each file to a temporary name with a size cap while hashing it; requires a zip
+to hold exactly the listed files, as plain names; installs into a `0700` folder in the plugin's data folder; and hashes
+every file again before each run, fetching anything that no longer matches. `BuiltInSpeechToText` runs it with
+`ArgumentList`, absolute paths, half the CPUs (at most 8), below-normal priority and a time limit of 2 minutes plus 5×
+the audio length, and kills the process tree on cancel. Linux and Windows builds carry every CPU variant (SSE4.2 up to
+AVX-512 / SVE2) and pick one at run time. Word times come from whisper.cpp's DTW token timings, less 0.28 s, which
+lines them up with the local-service word times the synchroniser was calibrated on.
+
 - **Explicit permission first.** Nothing is downloaded until an administrator allows it on the settings page, which says
   what will be downloaded, roughly how big it is and where it comes from (`AllowBuiltInDownload`, off by default).
   Until then, anything set to Built-in waits.
