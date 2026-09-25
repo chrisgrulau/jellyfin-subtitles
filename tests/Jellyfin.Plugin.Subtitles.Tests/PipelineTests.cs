@@ -181,6 +181,10 @@ public sealed class PipelineTests : IDisposable
         }
     }
 
+    private static readonly Policies Auto = new(ChangePolicy.Automatic, ChangePolicy.Review, new CleanupSettings());
+
+    private static readonly Policies TimingReview = new(ChangePolicy.Review, ChangePolicy.Review, new CleanupSettings());
+
     private static SubtitleDocument Story()
         => new() { Format = SubtitleFormat.Srt, Cues = [.. Enumerable.Range(0, 300).Select(i => new SubtitleCue { Start = TimeSpan.FromSeconds(10 + (i * 5)), End = TimeSpan.FromSeconds(12 + (i * 5)), Text = $"Line {i} says word{i}x and word{i}y" })] };
 
@@ -199,7 +203,7 @@ public sealed class PipelineTests : IDisposable
         var original = File.ReadAllBytes(path);
         var fake = new Shifted(Story(), 2.5);
 
-        var result = await processor.ProcessAsync(job, fake, fake, ChangePolicy.Automatic, CancellationToken.None);
+        var result = await processor.ProcessAsync(job, fake, fake, Auto, CancellationToken.None);
 
         Assert.Equal(ResultStatus.Corrected, result.Status);
         Assert.Equal(2.5, result.Offset, 0.05);
@@ -221,15 +225,15 @@ public sealed class PipelineTests : IDisposable
         var before = File.ReadAllBytes(path);
         var fake = new Shifted(Story(), 2.5);
 
-        var result = await processor.ProcessAsync(job, fake, fake, ChangePolicy.Review, CancellationToken.None);
+        var result = await processor.ProcessAsync(job, fake, fake, TimingReview, CancellationToken.None);
 
         Assert.Equal(ResultStatus.Proposed, result.Status);
         Assert.Equal(before, File.ReadAllBytes(path));
 
-        var applied = processor.Apply(result.Id);
+        var applied = processor.Apply(result.Id, Auto);
         Assert.Equal(ResultStatus.Corrected, applied.Status);
         Assert.Equal(12.5, SubtitleReader.Read(File.ReadAllBytes(path), path)!.Cues[0].Start.TotalSeconds, 0.05);
-        Assert.Throws<InvalidOperationException>(() => processor.Apply(result.Id));
+        Assert.Throws<InvalidOperationException>(() => processor.Apply(result.Id, Auto));
     }
 
     [Fact]
@@ -239,7 +243,7 @@ public sealed class PipelineTests : IDisposable
         var before = File.ReadAllBytes(path);
         var fake = new Shifted(Story(), 0);
 
-        var result = await processor.ProcessAsync(job, fake, fake, ChangePolicy.Automatic, CancellationToken.None);
+        var result = await processor.ProcessAsync(job, fake, fake, Auto, CancellationToken.None);
 
         Assert.Equal(ResultStatus.InSync, result.Status);
         Assert.Equal(before, File.ReadAllBytes(path));
@@ -266,5 +270,98 @@ public sealed class PipelineTests : IDisposable
         (string?, bool)[] audio = [("jpn", true), ("eng", false), ("fra", false)];
 
         Assert.Equal(expected, AudioChoice.For(audio, language));
+    }
+
+    private (SubtitleProcessor Processor, SubtitleJob Job, string Path) SetupWith(SubtitleDocument document)
+    {
+        var (processor, job, path) = Setup();
+        File.WriteAllBytes(path, SubtitleWriter.ToBytes(document));
+        return (processor, job, path);
+    }
+
+    private static SubtitleDocument WithAdvertAndRepeat()
+    {
+        var story = Story();
+        var cues = story.Cues.ToList();
+        cues.Insert(0, new SubtitleCue { Start = TimeSpan.FromSeconds(1), End = TimeSpan.FromSeconds(3), Text = "Downloaded from YTS.MX" });
+        cues.Insert(5, new SubtitleCue { Start = cues[4].End - TimeSpan.FromSeconds(0.5), End = cues[4].End + TimeSpan.FromSeconds(1), Text = cues[4].Text });
+        return story with { Cues = cues };
+    }
+
+    [Fact]
+    public async Task Timing_and_automatic_clean_up_go_into_one_write_and_one_undo()
+    {
+        var (processor, job, path) = SetupWith(WithAdvertAndRepeat());
+        var original = File.ReadAllBytes(path);
+        var fake = new Shifted(Story(), 2.5);
+
+        var result = await processor.ProcessAsync(job, fake, fake, Auto, CancellationToken.None);
+
+        Assert.Equal(ResultStatus.Corrected, result.Status);
+        Assert.True(result.Changed);
+        Assert.Equal(1, result.Cleaned["RemovedAdvert"]);
+        Assert.Equal(1, result.CleanupPending["MergedDuplicate"]);
+        Assert.Contains(result.Examples, e => e.StartsWith("Removed advert", StringComparison.Ordinal) && e.Contains("YTS.MX", StringComparison.Ordinal));
+        Assert.Contains(result.Examples, e => e.StartsWith("Waiting for review: Merged repeated line", StringComparison.Ordinal));
+        var now = File.ReadAllText(path);
+        Assert.DoesNotContain("YTS.MX", now, StringComparison.Ordinal);
+        Assert.True(result.PendingReview);
+
+        var undone = processor.Undo(result.Id);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Empty(undone.Examples);
+        Assert.False(undone.Changed);
+    }
+
+    [Fact]
+    public async Task Held_back_clean_up_is_applied_on_request_and_stays_undoable_to_the_first_original()
+    {
+        var (processor, job, path) = SetupWith(WithAdvertAndRepeat());
+        var original = File.ReadAllBytes(path);
+        var fake = new Shifted(Story(), 0);
+
+        var result = await processor.ProcessAsync(job, fake, fake, Auto, CancellationToken.None);
+        Assert.Equal(ResultStatus.InSync, result.Status);
+        Assert.True(result.Changed);
+
+        var applied = processor.Apply(result.Id, Auto);
+
+        Assert.Empty(applied.CleanupPending);
+        Assert.Equal(1, applied.Cleaned["MergedDuplicate"]);
+        Assert.False(applied.PendingReview);
+        Assert.Equal(Story().Cues.Count, SubtitleReader.Read(File.ReadAllBytes(path), path)!.Cues.Count);
+
+        processor.Undo(result.Id);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public async Task Nothing_to_change_means_the_file_is_not_touched()
+    {
+        var (processor, job, path) = Setup();
+        var before = File.GetLastWriteTimeUtc(path);
+        var fake = new Shifted(Story(), 0);
+
+        var result = await processor.ProcessAsync(job, fake, fake, Auto, CancellationToken.None);
+
+        Assert.False(result.Changed);
+        Assert.Empty(result.Cleaned);
+        Assert.Equal(before, File.GetLastWriteTimeUtc(path));
+    }
+
+    [Fact]
+    public void Older_results_are_checked_again_once_but_an_undo_is_respected()
+    {
+        var file = Path.Combine(_dir, "old-results.json");
+        var store = new ResultStore(file);
+        store.Put(new SubtitleResult { Id = ResultStore.IdFor("/x/a.srt"), SubtitlePath = "/x/a.srt", Status = ResultStatus.InSync, Fingerprint = "f", Version = 1 });
+        store.Put(new SubtitleResult { Id = ResultStore.IdFor("/x/b.srt"), SubtitlePath = "/x/b.srt", Status = ResultStatus.Undone, Fingerprint = "g", Version = 1 });
+        store.Put(new SubtitleResult { Id = ResultStore.IdFor("/x/c.srt"), SubtitlePath = "/x/c.srt", Status = ResultStatus.InSync, Fingerprint = "h", Version = SubtitleProcessor.CurrentVersion });
+        var processor = new SubtitleProcessor(store, new SubtitleFiles(Path.Combine(_dir, "originals")));
+
+        Assert.True(processor.NeedsCheck("/x/a.srt", "f"));
+        Assert.False(processor.NeedsCheck("/x/b.srt", "g"));
+        Assert.False(processor.NeedsCheck("/x/c.srt", "h"));
+        Assert.True(processor.NeedsCheck("/x/c.srt", "changed"));
     }
 }

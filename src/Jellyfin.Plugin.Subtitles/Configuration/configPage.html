@@ -297,22 +297,39 @@
 
         var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone' };
 
+        var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened' };
+
+        function counts(map) {
+          return Object.keys(map || {}).map(function (k) { var n = map[k]; return n + ' ' + (kindNames[k] || k) + (n === 1 || /d$/.test(kindNames[k] || '') ? '' : 's'); }).join(', ');
+        }
+
         function change(r) {
-          if (r.Status !== 'Corrected' && r.Status !== 'Proposed') { return ''; }
-          var text = (r.Offset >= 0 ? '+' : '') + r.Offset.toFixed(2) + ' s';
-          return Math.abs(r.Scale - 1) > 1e-9 ? text + ', frame rate ×' + r.Scale.toFixed(5) : text;
+          var parts = [];
+          if (r.Status === 'Corrected' || r.Status === 'Proposed') {
+            var t = (r.Offset >= 0 ? '+' : '') + r.Offset.toFixed(2) + ' s';
+            parts.push(Math.abs(r.Scale - 1) > 1e-9 ? t + ', frame rate ×' + r.Scale.toFixed(5) : t);
+          }
+
+          var done = counts(r.Cleaned), waiting = counts(r.CleanupPending);
+          if (done) { parts.push('Cleaned: ' + done); }
+          if (waiting) { parts.push('Waiting: ' + waiting); }
+          return parts.join('<br>');
         }
 
         function renderResults(results) {
-          var counts = {};
-          results.forEach(function (r) { counts[r.Status] = (counts[r.Status] || 0) + 1; });
-          page.querySelector('#ResultsSummary').textContent = results.length ? Object.keys(counts).map(function (k) { return (statusNames[k] || k) + ': ' + counts[k]; }).join(' · ') : 'Nothing checked yet.';
-          page.querySelector('#Results').innerHTML = results.length ? '<tr><th>When</th><th>Video</th><th>Result</th><th>Change</th><th>Details</th><th></th></tr>' + results.slice(0, 100).map(function (r) {
-            var action = r.Status === 'Proposed' ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '"><span>Apply</span></button>'
-              : r.Status === 'Corrected' ? '<button is="emby-button" type="button" class="raised button-alt res-undo" data-id="' + esc(r.Id) + '"><span>Undo</span></button>' : '';
+          var tally = {};
+          results.forEach(function (r) { tally[r.Status] = (tally[r.Status] || 0) + 1; });
+          var pending = results.filter(function (r) { return r.PendingReview; }).length;
+          page.querySelector('#ResultsSummary').textContent = results.length
+            ? Object.keys(tally).map(function (k) { return (statusNames[k] || k) + ': ' + tally[k]; }).join(' · ') + (pending ? ' · waiting for review: ' + pending : '')
+            : 'Nothing checked yet.';
+          page.querySelector('#Results').innerHTML = results.length ? '<tr><th>When</th><th>Video</th><th>Timing</th><th>Changes</th><th>Details</th><th></th></tr>' + results.slice(0, 100).map(function (r) {
+            var actions = (r.PendingReview ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '"><span>Apply</span></button>' : '') +
+              (r.Changed ? '<button is="emby-button" type="button" class="raised button-alt res-undo" data-id="' + esc(r.Id) + '"><span>Undo</span></button>' : '');
+            var examples = (r.Examples || []).length ? '<details><summary>What changed</summary><ul>' + r.Examples.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>' : '';
             return '<tr><td style="white-space:nowrap">' + esc(new Date(r.Time).toLocaleString()) + '</td><td>' + esc(r.Name) + '<div class="subs-muted">' + esc((r.SubtitlePath || '').split('/').pop()) + '</div></td>' +
-              '<td class="subs-status st-' + esc(r.Status) + '">' + esc(statusNames[r.Status] || r.Status) + '</td><td style="white-space:nowrap">' + esc(change(r)) + '</td>' +
-              '<td class="subs-muted">' + esc(r.Explanation) + '</td><td>' + action + '</td></tr>';
+              '<td class="subs-status st-' + esc(r.Status) + '">' + esc(statusNames[r.Status] || r.Status) + '</td><td>' + change(r) + '</td>' +
+              '<td class="subs-muted">' + esc(r.Explanation) + examples + '</td><td style="white-space:nowrap">' + actions + '</td></tr>';
           }).join('') : '';
         }
 

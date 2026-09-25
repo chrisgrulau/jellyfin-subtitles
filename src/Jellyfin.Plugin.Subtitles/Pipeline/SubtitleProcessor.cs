@@ -6,6 +6,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Subtitles.Audio;
+using Jellyfin.Plugin.Subtitles.Cleaning;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Formats;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
@@ -24,6 +25,14 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Duration">The video's length.</param>
 /// <param name="AudioStream">Which audio stream to listen to (counting audio streams only).</param>
 public sealed record SubtitleJob(Guid ItemId, string Name, string VideoPath, string SubtitlePath, string? Language, TimeSpan Duration, int AudioStream);
+
+/// <summary>
+/// The settings that decide what is applied and what waits for review.
+/// </summary>
+/// <param name="Timing">Timing corrections (shift, frame rate, overlaps, brief lines).</param>
+/// <param name="Text">Wording changes (merged repeats, removed sound descriptions).</param>
+/// <param name="Cleanup">Clean-up settings.</param>
+public sealed record Policies(ChangePolicy Timing, ChangePolicy Text, CleanupSettings Cleanup);
 
 /// <summary>
 /// Checks one subtitle and applies (or proposes) a timing correction according to the timing policy; applies or undoes
@@ -55,30 +64,60 @@ public sealed class SubtitleProcessor
     /// <returns>The results.</returns>
     public IReadOnlyList<SubtitleResult> Recent(int limit) => [.. _results.All().Take(Math.Clamp(limit, 1, ResultStore.MaxResults))];
 
+    /// <summary>The pipeline version: raised when a new stage is added, so files are checked once more.</summary>
+    public const int CurrentVersion = 3;
+
+    /// <summary>How many change examples a result keeps.</summary>
+    public const int MaxExamples = 12;
+
     /// <summary>
-    /// Whether a subtitle needs checking: it hasn't been, or it changed since (a failed check is tried again).
+    /// Whether a subtitle needs checking: it hasn't been, it changed since, the check failed, or an older pipeline version
+    /// checked it. A correction someone undid is never redone on its own.
     /// </summary>
     /// <param name="subtitlePath">The subtitle file.</param>
     /// <param name="fingerprint">Its current content fingerprint.</param>
     /// <returns><c>true</c> if it should be checked.</returns>
     public bool NeedsCheck(string subtitlePath, string fingerprint)
-        => _results.Get(ResultStore.IdFor(subtitlePath)) is not { } r || r.Status == ResultStatus.Failed || !string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal);
+    {
+        if (_results.Get(ResultStore.IdFor(subtitlePath)) is not { } r || !string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return r.Status != ResultStatus.Undone && (r.Status == ResultStatus.Failed || r.Version < CurrentVersion);
+    }
 
     /// <summary>
-    /// Checks a subtitle and records the result.
+    /// Checks a subtitle, applies what the policies allow in one write (timing, then clean-up), holds the rest for review,
+    /// and records the result.
     /// </summary>
     /// <param name="job">The subtitle.</param>
     /// <param name="audio">The video's audio.</param>
     /// <param name="speech">Speech-to-text, if available (free services only for automatic runs).</param>
-    /// <param name="timingPolicy">Whether corrections are applied or held for review.</param>
+    /// <param name="policies">The timing, wording and clean-up settings.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result.</returns>
-    public async Task<SubtitleResult> ProcessAsync(SubtitleJob job, IAudioSource audio, ISpeechToText? speech, ChangePolicy timingPolicy, CancellationToken cancellationToken)
+    public async Task<SubtitleResult> ProcessAsync(SubtitleJob job, IAudioSource audio, ISpeechToText? speech, Policies policies, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(policies);
         var bytes = await File.ReadAllBytesAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false);
         var fingerprint = SubtitleFiles.Fingerprint(bytes);
-        var result = new SubtitleResult { Id = ResultStore.IdFor(job.SubtitlePath), ItemId = job.ItemId, Name = job.Name, SubtitlePath = job.SubtitlePath, Time = _clock.GetUtcNow(), Fingerprint = fingerprint };
+        var previous = _results.Get(ResultStore.IdFor(job.SubtitlePath));
+        var result = new SubtitleResult
+        {
+            Id = ResultStore.IdFor(job.SubtitlePath),
+            ItemId = job.ItemId,
+            Name = job.Name,
+            SubtitlePath = job.SubtitlePath,
+            Time = _clock.GetUtcNow(),
+            Fingerprint = fingerprint,
+            Version = CurrentVersion,
+
+            // A file this plugin already changed stays undoable to the first original
+            Backup = previous?.Changed == true ? previous.Backup : null,
+            Changed = previous?.Changed == true,
+        };
 
         var document = SubtitleReader.Read(bytes, job.SubtitlePath);
         if (document is null || document.Cues.Count == 0)
@@ -90,51 +129,97 @@ public sealed class SubtitleProcessor
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;
-        result = result with { Scale = model.Scale, Offset = model.Offset, Stage = outcome.Stage, Confidence = model.Confidence, Explanation = explanation };
-
-        if (outcome.WrongLanguageSuspected)
+        var status = outcome.WrongLanguageSuspected ? ResultStatus.WrongLanguage : model.Status switch
         {
-            return Save(result with { Status = ResultStatus.WrongLanguage, Scale = 1, Offset = 0 });
+            SyncStatus.InSync => ResultStatus.InSync,
+            SyncStatus.Unreliable => ResultStatus.Unreliable,
+            _ => policies.Timing == ChangePolicy.Automatic ? ResultStatus.Corrected : ResultStatus.Proposed,
+        };
+        result = result with
+        {
+            Status = status,
+            Scale = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Scale : 1,
+            Offset = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Offset : 0,
+            Stage = outcome.Stage,
+            Confidence = model.Confidence,
+            Explanation = explanation,
+        };
+
+        // Timing first (when applied), then clean-up: what the policies allow now, the rest held for review
+        // A subtitle that doesn't match the speech (another language, version, or a notes track) gets only the harmless
+        // clean-up (adverts, empty lines): its timing isn't touched and nothing is suggested
+        var timed = status == ResultStatus.Corrected ? document.Retime(model.Map) : document;
+        var fitting = status != ResultStatus.WrongLanguage;
+        var automatic = AutomaticOptions(policies);
+        var full = CleanupPolicy.Options(policies.Cleanup);
+        if (!fitting)
+        {
+            automatic = automatic with { FixOverlaps = false, ExtendShortCues = false, MergeDuplicates = false, StripHearingImpaired = false };
+            full = automatic;
         }
 
-        switch (model.Status)
+        var (cleaned, applied) = SubtitleCleaner.Clean(timed, automatic);
+        var (_, all) = SubtitleCleaner.Clean(timed, full);
+        var pending = all.Where(c => CleanupPolicy.For(c.Kind, policies.Cleanup, policies.Text, policies.Timing) == ChangePolicy.Review).ToList();
+        result = result with
         {
-            case SyncStatus.InSync:
-                return Save(result with { Status = ResultStatus.InSync });
-            case SyncStatus.Unreliable:
-                return Save(result with { Status = ResultStatus.Unreliable });
+            Cleaned = Count(applied),
+            CleanupPending = Count(pending),
+            Examples = [.. applied.Select(c => Describe(c, false)).Concat(pending.Select(c => Describe(c, true))).Take(MaxExamples)],
+        };
+
+        if (status != ResultStatus.Corrected && applied.Count == 0)
+        {
+            return Save(result);
         }
 
-        if (timingPolicy == ChangePolicy.Review)
-        {
-            return Save(result with { Status = ResultStatus.Proposed });
-        }
-
-        var (backup, written) = _files.Replace(job.SubtitlePath, fingerprint, SubtitleWriter.ToBytes(document.Retime(model.Map)));
-        return Save(result with { Status = ResultStatus.Corrected, Backup = backup, Fingerprint = written });
+        var (backup, written) = _files.Replace(job.SubtitlePath, fingerprint, SubtitleWriter.ToBytes(cleaned));
+        return Save(result with { Backup = result.Backup ?? backup, Fingerprint = written, Changed = true });
     }
 
     /// <summary>
-    /// Applies a proposed correction.
+    /// Applies everything waiting for review: the timing correction and the held-back clean-up.
     /// </summary>
     /// <param name="id">Result id.</param>
+    /// <param name="policies">The clean-up settings (held-back kinds are applied as if automatic).</param>
     /// <returns>The updated result.</returns>
-    /// <exception cref="InvalidOperationException">There's no proposal, or the file changed since.</exception>
-    public SubtitleResult Apply(string id)
+    /// <exception cref="InvalidOperationException">Nothing is waiting, or the file changed since.</exception>
+    public SubtitleResult Apply(string id, Policies policies)
     {
+        ArgumentNullException.ThrowIfNull(policies);
         var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
-        if (r.Status != ResultStatus.Proposed)
+        if (!r.PendingReview)
         {
-            throw new InvalidOperationException("There's no correction waiting for this subtitle.");
+            throw new InvalidOperationException("Nothing is waiting for review for this subtitle.");
         }
 
         var bytes = File.ReadAllBytes(r.SubtitlePath);
         var document = SubtitleReader.Read(bytes, r.SubtitlePath) ?? throw new InvalidOperationException("The subtitle can no longer be read.");
-        var model = new SyncModel(SyncStatus.Corrected, r.Scale, r.Offset, r.Confidence, [], r.Explanation);
+        if (r.Status == ResultStatus.Proposed)
+        {
+            document = document.Retime(new SyncModel(SyncStatus.Corrected, r.Scale, r.Offset, r.Confidence, [], r.Explanation).Map);
+        }
+
+        var (cleaned, changes) = SubtitleCleaner.Clean(document, CleanupPolicy.Options(policies.Cleanup));
         try
         {
-            var (backup, written) = _files.Replace(r.SubtitlePath, r.Fingerprint, SubtitleWriter.ToBytes(document.Retime(model.Map)));
-            return Save(r with { Status = ResultStatus.Corrected, Backup = backup, Fingerprint = written, Time = _clock.GetUtcNow() });
+            var (backup, written) = _files.Replace(r.SubtitlePath, r.Fingerprint, SubtitleWriter.ToBytes(cleaned));
+            var cleanedCounts = new Dictionary<string, int>(r.Cleaned, StringComparer.Ordinal);
+            foreach (var (kind, n) in Count(changes))
+            {
+                cleanedCounts[kind] = cleanedCounts.GetValueOrDefault(kind) + n;
+            }
+
+            return Save(r with
+            {
+                Status = r.Status == ResultStatus.Proposed ? ResultStatus.Corrected : r.Status,
+                Backup = r.Backup ?? backup,
+                Fingerprint = written,
+                Changed = true,
+                Cleaned = cleanedCounts,
+                CleanupPending = new Dictionary<string, int>(),
+                Time = _clock.GetUtcNow(),
+            });
         }
         catch (IOException ex)
         {
@@ -143,7 +228,7 @@ public sealed class SubtitleProcessor
     }
 
     /// <summary>
-    /// Undoes a correction: the original comes back, if the file is still as this plugin left it.
+    /// Undoes this plugin's changes to a file: the first original comes back, if the file is still as this plugin left it.
     /// </summary>
     /// <param name="id">Result id.</param>
     /// <returns>The updated result.</returns>
@@ -151,7 +236,7 @@ public sealed class SubtitleProcessor
     public SubtitleResult Undo(string id)
     {
         var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
-        if (r.Status != ResultStatus.Corrected || r.Backup is null)
+        if (!r.Changed || r.Backup is null)
         {
             throw new InvalidOperationException("There's no change to undo for this subtitle.");
         }
@@ -163,14 +248,58 @@ public sealed class SubtitleProcessor
             {
                 Status = ResultStatus.Undone,
                 Fingerprint = restored,
+                Changed = false,
+                Cleaned = new Dictionary<string, int>(),
+                CleanupPending = new Dictionary<string, int>(),
+                Examples = [],
                 Time = _clock.GetUtcNow(),
-                Explanation = string.Create(CultureInfo.InvariantCulture, $"Undone: the original timing is back (the correction was {r.Offset:+0.00;-0.00} s)."),
+                Explanation = "Undone: the original subtitle file is back.",
             });
         }
         catch (IOException ex)
         {
             throw new InvalidOperationException(ex.Message, ex);
         }
+    }
+
+    // Clean-up options with every kind that waits for review switched off
+    private static CleanOptions AutomaticOptions(Policies p)
+    {
+        var o = CleanupPolicy.Options(p.Cleanup);
+        bool Auto(CleanChangeKind kind) => CleanupPolicy.For(kind, p.Cleanup, p.Text, p.Timing) == ChangePolicy.Automatic;
+        return o with
+        {
+            RemoveAdverts = o.RemoveAdverts && Auto(CleanChangeKind.RemovedAdvert),
+            MergeDuplicates = o.MergeDuplicates && Auto(CleanChangeKind.MergedDuplicate),
+            StripHearingImpaired = o.StripHearingImpaired && Auto(CleanChangeKind.StrippedHearingImpaired),
+            FixOverlaps = o.FixOverlaps && Auto(CleanChangeKind.FixedOverlap),
+            ExtendShortCues = o.ExtendShortCues && Auto(CleanChangeKind.ExtendedShortCue),
+        };
+    }
+
+    private static Dictionary<string, int> Count(IEnumerable<CleanChange> changes)
+        => changes.GroupBy(c => c.Kind.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
+    private static string Describe(CleanChange c, bool pending)
+    {
+        static string Quote(string text)
+        {
+            var plain = SubtitleMarkup.ToPlainText(text).Replace('\n', ' ');
+            return "\u201c" + (plain.Length > 60 ? plain[..57] + "…" : plain) + "\u201d";
+        }
+
+        var at = c.At.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+        var what = c.Kind switch
+        {
+            CleanChangeKind.RemovedAdvert => "Removed advert " + Quote(c.Before),
+            CleanChangeKind.RemovedEmpty => "Removed empty line at " + at,
+            CleanChangeKind.MergedDuplicate => "Merged repeated line " + Quote(c.Before),
+            CleanChangeKind.StrippedHearingImpaired => "Removed sound description: " + Quote(c.Before) + " → " + Quote(c.After),
+            CleanChangeKind.FixedOverlap => "Shortened a line overlapping the next at " + at,
+            CleanChangeKind.ExtendedShortCue => "Lengthened a too-brief line at " + at,
+            _ => c.Kind.ToString(),
+        };
+        return pending ? "Waiting for review: " + what : what;
     }
 
     /// <summary>

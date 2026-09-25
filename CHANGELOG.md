@@ -96,3 +96,10 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - The subtitle language list gained a duplicate "eng" on every restart (Jellyfin's XML loader adds saved items to a
   list's default); it now starts empty (meaning English) and is de-duplicated on save.
+- The pipeline cleans subtitles too, in the same single write as any timing correction (one backup, one undo): what the
+  settings apply automatically (adverts, empty lines, overlaps, too-brief lines by default) is applied; the rest
+  (merging repeats, removing sound descriptions) waits on the plugin page with examples of each change and an Apply
+  button. Subtitles that don't match the speech only get the harmless clean-up. Files checked by an earlier version of
+  the pipeline are checked once more; a change someone undid is never redone.
+- Repeated lines are merged only when the repeat overlaps the line before (a ripping error): chants, echoes and people
+  repeating each other are dialogue. Identical overlapping lines are left for that merge rather than trimmed.

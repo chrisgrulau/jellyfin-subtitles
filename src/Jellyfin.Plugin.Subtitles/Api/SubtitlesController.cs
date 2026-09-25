@@ -112,7 +112,7 @@ public class SubtitlesController : ControllerBase
     {
         try
         {
-            return _processor.Apply(id);
+            return _processor.Apply(id, SubtitleSyncTask.PoliciesOf(SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()));
         }
         catch (InvalidOperationException ex)
         {

@@ -17,7 +17,7 @@ public enum CleanChangeKind
     /// <summary>A cue with no visible text was removed.</summary>
     RemovedEmpty,
 
-    /// <summary>A cue repeating the previous one back to back was merged into it.</summary>
+    /// <summary>A cue repeating the previous one while it was still showing was merged into it.</summary>
     MergedDuplicate,
 
     /// <summary>A cue that ran into the next one was shortened.</summary>
@@ -63,7 +63,7 @@ public sealed record CleanOptions
     /// <summary>Gets a value indicating whether hearing-impaired descriptions (<c>[door slams]</c>) and speaker labels are removed.</summary>
     public bool StripHearingImpaired { get; init; }
 
-    /// <summary>Gets a value indicating whether a cue repeating the previous one back to back is merged into it.</summary>
+    /// <summary>Gets a value indicating whether a cue repeating the previous one while it is still showing is merged into it.</summary>
     public bool MergeDuplicates { get; init; } = true;
 
     /// <summary>
@@ -163,14 +163,15 @@ public static partial class SubtitleCleaner
 
         cues = nonEmpty;
 
-        // 4. back-to-back duplicates (same text, touching or overlapping)
+        // 4. duplicates: the same text overlapping the line before (a ripping or merging error). A repeat that follows the
+        //    previous line, however closely, is left: chants, echoes and people repeating each other are real dialogue.
         var merged = new List<SubtitleCue>();
         foreach (var c in cues)
         {
             if (options.MergeDuplicates
                 && merged.Count > 0
                 && string.Equals(SubtitleMarkup.ToPlainText(merged[^1].Text), SubtitleMarkup.ToPlainText(c.Text), StringComparison.Ordinal)
-                && c.Start - merged[^1].End <= TimeSpan.FromMilliseconds(250))
+                && c.Start < merged[^1].End)
             {
                 var newEnd = c.End > merged[^1].End ? c.End : merged[^1].End;
                 changes.Add(new CleanChange(CleanChangeKind.MergedDuplicate, c.Start, c.Text, merged[^1].Text) { EndBefore = merged[^1].End, EndAfter = newEnd });
@@ -191,7 +192,9 @@ public static partial class SubtitleCleaner
         {
             var (c, next) = (cues[i], cues[i + 1]);
             var overlap = c.End - next.Start;
-            if (options.FixOverlaps && overlap > TimeSpan.Zero && overlap <= options.MaximumOverlapToFix && Fixable(c) && Fixable(next))
+            // Identical overlapping lines are a duplicate for the merge (or its review), not sloppy timing
+            var duplicate = string.Equals(SubtitleMarkup.ToPlainText(c.Text), SubtitleMarkup.ToPlainText(next.Text), StringComparison.Ordinal);
+            if (options.FixOverlaps && !duplicate && overlap > TimeSpan.Zero && overlap <= options.MaximumOverlapToFix && Fixable(c) && Fixable(next))
             {
                 var end = next.Start - options.MinimumGap;
                 if (end > c.Start)
