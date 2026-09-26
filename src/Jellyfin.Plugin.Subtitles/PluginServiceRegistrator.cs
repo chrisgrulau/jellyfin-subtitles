@@ -1,6 +1,7 @@
 using System.IO;
 using Jellyfin.Plugin.Subtitles.Pipeline;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
+using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
@@ -18,6 +19,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         // Speech-to-text keys live in their own owner-only file in the plugin's data folder, never in the configuration
         serviceCollection.AddSingleton(sp => new SpeechToTextKeys(Path.Combine(DataFolder(sp), "keys.json")));
+
+        // The built-in speech-to-text installs into the plugin's data folder too (only after the administrator allows it)
+        serviceCollection.AddSingleton(sp => new BuiltInHost(DataFolder(sp)));
 
         // Results, the originals of changed subtitles and the download count also live in the plugin's data folder. One
         // results store is shared, so the checker knows what the finder added.

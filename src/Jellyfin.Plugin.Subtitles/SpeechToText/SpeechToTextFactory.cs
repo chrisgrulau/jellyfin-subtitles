@@ -1,5 +1,6 @@
 using System;
 using System.Net.Http;
+using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 
 namespace Jellyfin.Plugin.Subtitles.SpeechToText;
 
@@ -37,8 +38,9 @@ public static class SpeechToTextFactory
     /// <param name="builtInAllowed">Whether the administrator has allowed the built-in download.</param>
     /// <param name="keys">The keys.</param>
     /// <param name="http">HTTP client.</param>
+    /// <param name="builtIn">The built-in speech-to-text, if available.</param>
     /// <returns>The service, or why it can't be used.</returns>
-    public static (ISpeechToText? Service, string? Problem) Create(string provider, string model, string localAddress, bool paidAllowed, bool builtInAllowed, SpeechToTextKeys keys, HttpClient http)
+    public static (ISpeechToText? Service, string? Problem) Create(string provider, string model, string localAddress, bool paidAllowed, bool builtInAllowed, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn)
     {
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(http);
@@ -69,9 +71,19 @@ public static class SpeechToTextFactory
                         ? (new DeepgramSpeechToText(http, deepgramKey, model), null)
                         : (null, "Add a Deepgram API key first.");
                 case BuiltIn:
-                    return (null, builtInAllowed
-                        ? "The built-in speech-to-text isn't available in this version yet. Choose a local service or a cloud provider for now."
-                        : "The built-in speech-to-text needs your permission to download first (see above).");
+                    if (!builtInAllowed)
+                    {
+                        return (null, "The built-in speech-to-text needs your permission to download first (see above).");
+                    }
+
+                    if (builtIn?.Platform is null)
+                    {
+                        return (null, "The built-in speech-to-text has no build for this server's system. Choose a local service or a cloud provider.");
+                    }
+
+                    return BuiltInSource.ModelName(model) is { } builtInModel
+                        ? (builtIn.Create(builtInModel), null)
+                        : (null, "Unknown built-in model; choose base or small.");
                 default:
                     return (null, "Unknown speech-to-text service.");
             }
