@@ -222,6 +222,7 @@ public sealed class SubtitleProcessor
             var (findings, note, by) = await WordingAudit.RunAsync(policies.Auditor, file, toAudio, outcome.Transcripts, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
             result = result with
             {
+                Audited = by is not null,
                 Findings = findings,
                 Examples = [.. findings.Select(WordingAudit.Describe).Concat(result.Examples).Take(MaxExamples)],
                 Explanation = result.Explanation + (findings.Count > 0
@@ -237,6 +238,77 @@ public sealed class SubtitleProcessor
 
         var (backup, written) = _files.Replace(job.SubtitlePath, fingerprint, SubtitleWriter.ToBytes(cleaned));
         return Save(result with { Backup = result.Backup ?? backup, Fingerprint = written, Changed = true });
+    }
+
+    /// <summary>
+    /// When a subtitle's result was last recorded (for ordering the nightly audit).
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <returns>The time, or the earliest time when there is no result.</returns>
+    public DateTimeOffset LastChecked(string subtitlePath) => _results.Get(ResultStore.IdFor(subtitlePath))?.Time ?? DateTimeOffset.MinValue;
+
+    /// <summary>
+    /// Whether a subtitle checked earlier can have its wording audited now: in sync or corrected by this plugin's check
+    /// (not a translation matched by meaning), not audited yet, nothing waiting, and the file unchanged since.
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <param name="fingerprint">The file's fingerprint now, or <c>null</c> to check only the stored result.</param>
+    /// <returns>Whether it can be audited.</returns>
+    public bool NeedsAudit(string subtitlePath, string? fingerprint = null)
+    {
+        var r = _results.Get(ResultStore.IdFor(subtitlePath));
+        return r is { Status: ResultStatus.InSync or ResultStatus.Corrected, Audited: false, PendingReview: false }
+            && r.Stage != SyncCheck.ByMeaningStage
+            && r.Version == CurrentVersion
+            && (fingerprint is null || string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Audits the wording of a subtitle checked earlier (see <see cref="NeedsAudit"/>): a few stretches are transcribed
+    /// again and compared with the lines, which are already on the audio's clock. If the transcript no longer finds the
+    /// subtitle in sync, it isn't audited (and isn't tried again until the file changes).
+    /// </summary>
+    /// <param name="job">The subtitle.</param>
+    /// <param name="audio">The video's audio.</param>
+    /// <param name="speech">Speech-to-text.</param>
+    /// <param name="auditor">The auditor.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated result, or <c>null</c> if it wasn't audited (not eligible, or the auditor gave no answer).</returns>
+    public async Task<SubtitleResult?> AuditAsync(SubtitleJob job, IAudioSource audio, ISpeechToText speech, ITextAuditor auditor, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(auditor);
+        var bytes = await File.ReadAllBytesAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false);
+        var fingerprint = SubtitleFiles.Fingerprint(bytes);
+        if (!NeedsAudit(job.SubtitlePath, fingerprint) || _results.Get(ResultStore.IdFor(job.SubtitlePath)) is not { } r
+            || SubtitleReader.Read(bytes, job.SubtitlePath) is not { Cues.Count: > 0 } document)
+        {
+            return null;
+        }
+
+        var language = Languages.ToTwoLetter(job.Language);
+        var (model, transcripts) = await new TranscriptSynchroniser(audio, speech).SolveAsync(document, job.Duration, language, cancellationToken).ConfigureAwait(false);
+        if (model.Status != SyncStatus.InSync)
+        {
+            return Save(r with { Audited = true, Explanation = r.Explanation + " Wording not audited: a fresh transcript didn't find it in sync (" + model.Explanation + ")." });
+        }
+
+        var (findings, note, by) = await WordingAudit.RunAsync(auditor, document, t => t, transcripts, language, cancellationToken).ConfigureAwait(false);
+        if (by is null)
+        {
+            return null;
+        }
+
+        return Save(r with
+        {
+            Audited = true,
+            Findings = findings,
+            Time = _clock.GetUtcNow(),
+            Examples = [.. findings.Select(WordingAudit.Describe).Concat(r.Examples).Take(MaxExamples)],
+            Explanation = r.Explanation + (findings.Count > 0
+                ? $" Wording audited ({by}): {findings.Count} line(s) differ in meaning from what is said{(findings.Any(f => f.Suggestion is not null) ? "; Apply uses the suggested wording" : string.Empty)}."
+                : $" Wording audited ({by}): no differences in meaning."),
+        });
     }
 
     /// <summary>
