@@ -82,7 +82,7 @@ How it meets them: the program comes from this repository's `whisper-v*` release
 workflow, whisper.cpp pinned by commit; models pinned by revision and SHA-256), and `tools/builtin_checksums.py` writes
 every file's SHA-256 into `BuiltInRelease.Checksums.cs`. `BuiltInInstaller` follows redirects itself, only over HTTPS and
 only to GitHub's download hosts; streams each file to a temporary name with a size cap while hashing it; requires a zip
-to hold exactly the listed files, as plain names; installs into a `0700` folder in the plugin's data folder; and hashes
+to hold exactly the listed files, as plain names; installs into a `0700` folder under Jellyfin's data folder (`<data>/shoal-subtitles/builtin`, never under `plugins/`, where Jellyfin would load its DLLs as a plugin; an install from an earlier version is moved there on start); and hashes
 every file again before each run, fetching anything that no longer matches. `BuiltInSpeechToText` runs it with
 `ArgumentList`, absolute paths, half the CPUs (at most 8), below-normal priority and a time limit of 2 minutes plus 5×
 the audio length, and kills the process tree on cancel. Linux and Windows builds carry every CPU variant (SSE4.2 up to

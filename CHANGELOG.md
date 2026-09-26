@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **SUB-15:** the built-in speech-to-text program now installs under Jellyfin's data folder
+  (`<data>/shoal-subtitles/builtin`), not under the plugins folder. On Windows its DLLs made Jellyfin list a broken
+  "Jellyfin.Plugin.Subtitles" plugin, whose Uninstall button would delete the keys, the results and the undo backups.
+  An existing install is moved on first start; if it can't be moved, it is removed and downloaded again, verified,
+  when next needed.
+
 ### Added
 
 - **Subtitle editor.** **Edit** on a result opens that subtitle's lines on the plugin page.
