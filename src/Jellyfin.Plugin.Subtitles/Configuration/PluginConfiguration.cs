@@ -173,6 +173,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool SetupSaved { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether subtitles waiting for review, folders that can't be written, stopped
+    /// searches and added subtitles are also written to Jellyfin's Activity log (at most once a day each).
+    /// </summary>
+    public bool WriteToActivityLog { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets a value indicating whether, with <see cref="UseAi"/>, the wording of a subtitle whose timing is settled
     /// is compared with what is said: lines whose meaning differs (names, numbers, negations, missing words) are flagged,
     /// with suggested wording that waits for review (never applied on its own).
