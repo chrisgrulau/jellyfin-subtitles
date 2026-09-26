@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0-alpha] - 2026-09-26
+
 ### Added
 
 - **FAM-05: Jellyfin's Activity log.** These are also written under Dashboard → Activity, at most once a day each, so
@@ -15,9 +17,6 @@ All notable changes to this project are documented here. The format follows
   - searches a subtitle provider stopped (not signed in, daily allowance used up).
 
   **Also write to Jellyfin's Activity log** is on by default.
-
-### Added
-
 - **SUB-20: review in the results list.**
   - Items waiting for review are listed first, however old.
   - A filter shows everything, only what's waiting for review, or one status, and a box finds a video by name.
