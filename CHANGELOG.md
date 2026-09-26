@@ -11,6 +11,14 @@ All notable changes to this project are documented here. The format follows
   - Paid speech-to-text calls are metered by the shared metered call: reserved first, settled at the actual cost, released
     when the provider failed or the call was cancelled. A call that fails in an unexpected way is now recorded at its
     estimate (before, its reservation stayed open, which counted the same).
+  - `results.json` and the download count are read and written through the shared JSON file helper, each keeping its
+    policy: a damaged results file is set aside and results start afresh, one that can't be read is never overwritten
+    (SUB-18); a damaged or unreadable download count starts from zero. Writes are now flushed to disk before the rename.
+  - Spending uses the shared spending store. Exchange rates refresh themselves when due: while they are missing or stale,
+    the European Central Bank is asked at most every 30 minutes, not at the start of every run and test. The currency
+    setting is read with the shared "setting, or USD" rule.
+  - The settings page offers the currencies the server sends with the spending summary (`Currencies`), instead of its
+    own copy of the list.
 
 ### Fixed
 

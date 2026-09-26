@@ -79,7 +79,7 @@ public static partial class SpeechBridge
         {
             using var http = s.Http.CreateClient();
             http.Timeout = TimeSpan.FromMinutes(3);
-            await s.Spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
+            await s.Spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
             var speech = SubtitleSyncTask.SpeechFor(config, config.AiContext, s.Keys, http, s.BuiltIn, s.Spending, request!.Purpose, out var why);
             if (speech is null)
             {

@@ -30,7 +30,7 @@ public static class SpendingLimit
     /// <param name="currency">The setting.</param>
     /// <returns>The code.</returns>
     public static string NormaliseCurrency(string? currency)
-        => Common.Costs.CurrencyCode.IsSupported(currency) ? Common.Costs.CurrencyCode.Normalise(currency)! : DefaultCurrency;
+        => Common.Costs.CurrencyCode.NormaliseOr(currency, DefaultCurrency);
 
     /// <summary>
     /// The languages to check: the configured three-letter codes, lower case, each once; English when none are set.

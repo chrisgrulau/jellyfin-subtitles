@@ -105,6 +105,23 @@ public sealed class FinderTests : IDisposable
         return (finder, store, job, clock);
     }
 
+    // FAM-06: the download count keeps its policy on the shared JSON file helper: a damaged file counts from zero again
+    [Fact]
+    public void A_damaged_download_count_starts_from_zero_and_is_replaced()
+    {
+        var path = Path.Combine(_dir, "downloads.json");
+        var ledger = new DownloadLedger(path, new Clock());
+        Assert.True(ledger.TryTake(2));
+        Assert.Equal(1, new DownloadLedger(path, new Clock()).Today());
+
+        File.WriteAllText(path, "{ damaged");
+        var again = new DownloadLedger(path, new Clock());
+        Assert.Equal(0, again.Today());
+        Assert.True(again.TryTake(2));
+        Assert.Equal(1, new DownloadLedger(path, new Clock()).Today());
+        Assert.False(File.Exists(path + ".tmp"));
+    }
+
     [Fact]
     public async Task A_fitting_subtitle_is_added_beside_the_video_with_its_timing_corrected()
     {

@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
+using Jellyfin.Plugin.Common.Storage;
 
 namespace Jellyfin.Plugin.Subtitles.Pipeline;
 
@@ -77,28 +77,18 @@ public sealed class DownloadLedger
 
     private Dictionary<string, int> Load()
     {
-        try
-        {
-            if (File.Exists(_path) && JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(_path)) is { } counts)
-            {
-                return new Dictionary<string, int>(counts, StringComparer.Ordinal);
-            }
-        }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
-        {
-            // A damaged ledger counts from zero again; the provider's own limit still applies
-        }
-
-        return new Dictionary<string, int>(StringComparer.Ordinal);
+        // Missing, damaged or unreadable: counting starts from zero again (a damaged file is replaced by the next count);
+        // the provider's own limit still applies
+        return JsonFile.Read<Dictionary<string, int>>(_path) is { IsLoaded: true, Value: { } counts }
+            ? new Dictionary<string, int>(counts, StringComparer.Ordinal)
+            : new Dictionary<string, int>(StringComparer.Ordinal);
     }
 
     private void Save(Dictionary<string, int> counts)
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path + ".tmp", JsonSerializer.Serialize(counts));
-            File.Move(_path + ".tmp", _path, overwrite: true);
+            JsonFile.WriteAtomic(_path, counts);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

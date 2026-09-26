@@ -117,7 +117,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromMinutes(3);
-        await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
+        await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
         var speech = SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.sync", out var problem);
         var policies = RunPolicies(config);
         if (speech is null && problem is not null)

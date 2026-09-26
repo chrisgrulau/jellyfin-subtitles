@@ -53,16 +53,14 @@ public class ConfigurationTests
     public void Extra_charges_stay_between_0_and_100_percent(int input, int expected)
         => Assert.Equal(expected, SpendingLimit.NormaliseExtraPercent(input));
 
+    // FAM-06: the page offers the currencies the server sends with the spending, not a copy of its own
     [Fact]
-    public void The_settings_page_offers_exactly_the_supported_currencies()
+    public void The_settings_page_offers_the_servers_currencies()
     {
-        using var stream = typeof(SpendingLimit).Assembly.GetManifestResourceStream("Jellyfin.Plugin.Subtitles.Configuration.configPage.html")!;
-        using var reader = new System.IO.StreamReader(stream);
-        var page = reader.ReadToEnd();
-        var list = System.Text.RegularExpressions.Regex.Match(page, @"var currencies = \[(?<list>[^\]]*)\]").Groups["list"].Value;
-        var offered = System.Text.RegularExpressions.Regex.Matches(list, "'([A-Z]{3})'").Select(m => m.Groups[1].Value);
+        var page = Page();
 
-        Assert.Equal(Common.Costs.CurrencyCode.Supported, offered);
+        Assert.Contains("s.Currencies", page, StringComparison.Ordinal);
+        Assert.DoesNotMatch("'AUD'|'EUR'|'JPY'", page);
     }
 
     private static string Page()

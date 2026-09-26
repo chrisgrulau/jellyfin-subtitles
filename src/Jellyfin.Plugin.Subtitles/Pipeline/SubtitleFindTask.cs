@@ -123,7 +123,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
 
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromMinutes(3);
-        await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
+        await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
         if (!_finder.ResultsReadable)
         {
             LogNoResults(_logger, _finder.ResultsProblem ?? "unknown");

@@ -428,7 +428,7 @@ public class SubtitlesController : ControllerBase
         var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
         var limits = Pricing.Spending.LimitsOf(config);
         var rates = _spending.Rates.Current;
-        var month = _spending.Ledger.ThisMonth(limits, rates);
+        var month = _spending.ThisMonth(limits);
         return new SpendingSummary(
             limits.Currency,
             limits.Overall,
@@ -436,7 +436,8 @@ public class SubtitlesController : ControllerBase
             month.PerProvider.ToDictionary(p => p.Key, p => decimal.Round(p.Value, 4), StringComparer.OrdinalIgnoreCase),
             rates?.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             rates is not null && rates.IsFresh(DateOnly.FromDateTime(DateTime.Now)),
-            _spending.Prices?.Version);
+            _spending.Prices?.Version,
+            Pricing.Spending.Currencies);
     }
 
     /// <summary>
@@ -478,7 +479,7 @@ public class SubtitlesController : ControllerBase
         // A paid service's test is priced and counted like any other call (a fraction of a cent)
         if (SpeechToTextFactory.IsPaid(service.Id))
         {
-            await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
+            await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
             service = new MeteredSpeechToText(service, Pipeline.SubtitleSyncTask.ModelOf(service.Id, request.Model), _spending, Pricing.Spending.LimitsOf(config), "subtitles.test");
         }
 
@@ -569,7 +570,8 @@ public sealed record BuiltInStatus(bool Available, string? Problem);
 /// <param name="RatesDate">The date of the exchange rates in use, if any.</param>
 /// <param name="RatesFresh">Whether those rates are recent enough to use.</param>
 /// <param name="PricesVersion">The version of the published prices shipped with the plugin.</param>
-public sealed record SpendingSummary(string Currency, decimal? Limit, decimal? Spent, IReadOnlyDictionary<string, decimal> PerProvider, string? RatesDate, bool RatesFresh, string? PricesVersion);
+/// <param name="Currencies">The currencies that can be chosen (the settings page offers these, rather than its own copy).</param>
+public sealed record SpendingSummary(string Currency, decimal? Limit, decimal? Spent, IReadOnlyDictionary<string, decimal> PerProvider, string? RatesDate, bool RatesFresh, string? PricesVersion, IReadOnlyList<string> Currencies);
 
 /// <summary>
 /// What the local-service helper found.

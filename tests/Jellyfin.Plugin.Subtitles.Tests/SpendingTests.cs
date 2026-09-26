@@ -44,6 +44,14 @@ public sealed class SpendingTests : IDisposable
         Assert.Equal(Money.Of(0.006m, "USD"), spending.Prices.PriceOf("openai", "whisper-1", PriceTable.AudioMinute));
     }
 
+    // FAM-06: the page offers the server's currency list, not a copy
+    [Fact]
+    public void The_currencies_offered_are_the_supported_ones()
+    {
+        Assert.Equal(CurrencyCode.Supported, Spending.Currencies);
+        Assert.Contains("AUD", Spending.Currencies);
+    }
+
     [Fact]
     public async Task Paid_calls_are_priced_recorded_and_stopped_at_the_limit()
     {
