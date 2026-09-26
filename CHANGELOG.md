@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **SUB-25:** the built-in speech-to-text downloads in the background. **Download now** (shown once the download is
+  allowed and it isn't there yet) or **Test** starts it and returns at once; the settings page shows a progress bar and
+  percentage while it runs, and tests again when it's done. Before, the first Test downloaded 90–200 MB inside the
+  request, which a reverse proxy's timeout cancelled every time. Only one download runs at a time; a nightly run that
+  needs the built-in speech-to-text still downloads it itself (or waits for the one running). A download is cancelled
+  when the server stops. New endpoints: `GET` and `POST Subtitles/BuiltIn/Download`.
+
 ## [0.11.0-alpha] - 2026-09-26
 
 ### Changed

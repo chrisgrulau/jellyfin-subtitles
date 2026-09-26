@@ -54,6 +54,11 @@ public sealed class BuiltInInstaller : IDisposable
     public TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// Gets where a download stands (SUB-25), whichever caller started it; the settings page polls it.
+    /// </summary>
+    public BuiltInProgress Progress { get; } = new();
+
+    /// <summary>
     /// Makes sure the program for a platform and a model are installed and intact, downloading what is missing.
     /// </summary>
     /// <param name="platform">Platform (see <see cref="BuiltInSource.CurrentPlatform"/>).</param>
@@ -69,31 +74,53 @@ public sealed class BuiltInInstaller : IDisposable
             ?? throw new SpeechToTextException("Unknown built-in model \"" + model + "\"; use base or small.") { Failure = FailureClass.BadRequest };
 
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var reporting = false;
         try
         {
             Directory.CreateDirectory(_folder);
             Restrict(_folder, isDirectory: true);
 
             var programDir = Path.Combine(_folder, _source.Version, platform);
-            if (!await IsIntactAsync(programDir, program, cancellationToken).ConfigureAwait(false))
+            var modelsDir = Path.Combine(_folder, "models");
+            var modelPath = Path.Combine(modelsDir, modelFile.Name);
+            var needProgram = !await IsIntactAsync(programDir, program, cancellationToken).ConfigureAwait(false);
+            var needModel = !await MatchesAsync(modelPath, modelFile, cancellationToken).ConfigureAwait(false);
+
+            // Only an actual download is shown on the settings page, not the check before every run
+            if (needProgram || needModel)
+            {
+                reporting = true;
+                Progress.Begin((needProgram ? program.Bytes : 0) + (needModel ? modelFile.Bytes : 0));
+            }
+
+            if (needProgram)
             {
                 await InstallProgramAsync(programDir, program, cancellationToken).ConfigureAwait(false);
             }
 
-            var modelsDir = Path.Combine(_folder, "models");
-            var modelPath = Path.Combine(modelsDir, modelFile.Name);
-            if (!await MatchesAsync(modelPath, modelFile, cancellationToken).ConfigureAwait(false))
+            if (needModel)
             {
                 Directory.CreateDirectory(modelsDir);
                 Restrict(modelsDir, isDirectory: true);
                 var temp = Path.Combine(modelsDir, "." + modelFile.Name + ".download");
                 await DownloadAsync(modelFile, temp, cancellationToken).ConfigureAwait(false);
+                Progress.Verify();
                 Restrict(temp, isDirectory: false);
                 File.Move(temp, modelPath, overwrite: true);
             }
 
             RemoveOldVersions();
+            if (reporting)
+            {
+                Progress.Complete();
+            }
+
             return (Path.Combine(programDir, OperatingSystem.IsWindows() ? "whisper-cli.exe" : "whisper-cli"), modelPath);
+        }
+        catch (Exception ex) when (reporting)
+        {
+            Progress.Fail(BuiltInProgress.Describe(ex));
+            throw;
         }
         finally
         {
@@ -222,6 +249,7 @@ public sealed class BuiltInInstaller : IDisposable
         try
         {
             await DownloadAsync(program, zip, cancellationToken).ConfigureAwait(false);
+            Progress.Verify();
             Directory.CreateDirectory(staging);
             Restrict(staging, isDirectory: true);
             var archive = await ZipFile.OpenReadAsync(zip, cancellationToken).ConfigureAwait(false);
@@ -309,7 +337,7 @@ public sealed class BuiltInInstaller : IDisposable
                     throw Integrity(file.Name + " isn't the expected size");
                 }
 
-                await SaveAsync(response, file, temp, IdleTimeout, cancellationToken).ConfigureAwait(false);
+                await SaveAsync(response, file, temp, IdleTimeout, Progress, cancellationToken).ConfigureAwait(false);
                 return;
             }
         }
@@ -329,21 +357,32 @@ public sealed class BuiltInInstaller : IDisposable
         => new("Downloading " + file.Name + " stalled: nothing arrived for a while. It will be tried again.") { Failure = FailureClass.Transient };
 
     // Each read must bring something within the idle time; the timer starts again after every chunk
-    private static async Task SaveAsync(HttpResponseMessage response, BuiltInDownload file, string temp, TimeSpan idleTimeout, CancellationToken cancellationToken)
+    private static async Task SaveAsync(HttpResponseMessage response, BuiltInDownload file, string temp, TimeSpan idleTimeout, BuiltInProgress progress, CancellationToken cancellationToken)
     {
         using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        long received = 0;
         try
         {
             idle.CancelAfter(idleTimeout);
-            await SaveAsync(response, file, temp, idle, idleTimeout).ConfigureAwait(false);
+            await SaveAsync(response, file, temp, idle, idleTimeout, n =>
+            {
+                received += n;
+                progress.Add(n);
+            }).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            progress.Discard(received);
             throw Stalled(file);
+        }
+        catch
+        {
+            progress.Discard(received);
+            throw;
         }
     }
 
-    private static async Task SaveAsync(HttpResponseMessage response, BuiltInDownload file, string temp, CancellationTokenSource idle, TimeSpan idleTimeout)
+    private static async Task SaveAsync(HttpResponseMessage response, BuiltInDownload file, string temp, CancellationTokenSource idle, TimeSpan idleTimeout, Action<long> received)
     {
         var cancellationToken = idle.Token;
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -367,6 +406,7 @@ public sealed class BuiltInInstaller : IDisposable
 
                     sha.AppendData(buffer, 0, read);
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    received(read);
                     idle.CancelAfter(idleTimeout);
                 }
 
