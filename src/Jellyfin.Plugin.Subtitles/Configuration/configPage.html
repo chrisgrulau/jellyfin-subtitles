@@ -307,6 +307,13 @@
               </label>
               <div class="fieldDescription checkboxFieldDescription">When speech is heard but the subtitle's words don't match it (a translation, a paraphrase, dense dialogue), the Shoal AI plugin pairs what is said with subtitle lines by meaning; those pairs must still agree on one timing. Sends a few minutes of heard phrases and nearby subtitle lines, nothing else. Only if the AI plugin is installed and allows Subtitles; its spending limits apply.</div>
             </div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="AuditWording" type="checkbox" is="emby-checkbox" />
+                <span>Audit the wording with the AI plugin</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">When a subtitle's timing is settled by speech-to-text, the AI plugin compares its lines with what is said during those few minutes and flags lines whose meaning differs (a wrong name or number, a missing "not", missing words). Suggested wording waits for your review in the results; it is never applied on its own, and Undo brings the original back.</div>
+            </div>
             <div class="inputContainer">
               <label class="inputLabel inputLabelUnfocused" for="MaxAiChecksPerRun">AI checks per run (at most)</label>
               <input id="MaxAiChecksPerRun" type="number" is="emby-input" min="0" max="500" step="1" />
@@ -492,7 +499,7 @@
 
         var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large' };
 
-        var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened' };
+        var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened', RewordedFromAudit: 'line reworded' };
 
         function counts(map) {
           return Object.keys(map || {}).map(function (k) { var n = map[k]; return n + ' ' + (kindNames[k] || k) + (n === 1 || /d$/.test(kindNames[k] || '') ? '' : 's'); }).join(', ');
@@ -508,6 +515,11 @@
           var done = counts(r.Cleaned), waiting = counts(r.CleanupPending);
           if (done) { parts.push('Cleaned: ' + done); }
           if (waiting) { parts.push('Waiting: ' + waiting); }
+          var findings = r.Findings || [];
+          if (findings.length) {
+            var suggested = findings.filter(function (f) { return f.Suggestion; }).length;
+            parts.push('Wording: ' + findings.length + ' line' + (findings.length === 1 ? '' : 's') + ' differ' + (findings.length === 1 ? 's' : '') + (suggested ? ' (' + suggested + ' with suggested wording)' : ''));
+          }
           return parts.join('<br>');
         }
 
@@ -599,6 +611,7 @@
             page.querySelector('#SelfCalibration').checked = config.SelfCalibration;
             page.querySelector('#AgreementDecides').checked = config.AgreementDecides;
             page.querySelector('#UseAi').checked = config.UseAi !== false;
+            page.querySelector('#AuditWording').checked = config.AuditWording !== false;
             page.querySelector('#MaxAiChecksPerRun').value = config.MaxAiChecksPerRun == null ? 20 : config.MaxAiChecksPerRun;
             var cleanup = config.Cleanup || {};
             page.querySelector('#RemoveAdverts').checked = cleanup.RemoveAdverts;
@@ -655,6 +668,7 @@
             config.SelfCalibration = page.querySelector('#SelfCalibration').checked;
             config.AgreementDecides = page.querySelector('#AgreementDecides').checked;
             config.UseAi = page.querySelector('#UseAi').checked;
+            config.AuditWording = page.querySelector('#AuditWording').checked;
             var aiChecks = parseInt(page.querySelector('#MaxAiChecksPerRun').value, 10);
             config.MaxAiChecksPerRun = isNaN(aiChecks) ? 20 : Math.max(0, Math.min(500, aiChecks));
             var cleanup = config.Cleanup = config.Cleanup || {};

@@ -9,6 +9,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Wording audit** (optional, with the Shoal AI plugin: **Audit the wording with the AI plugin**, on by default).
+  - **When:** after a subtitle's timing is settled by speech-to-text.
+  - **What it checks:** the AI compares its lines with what is said during those few minutes. It flags lines whose
+    meaning differs, such as a wrong name or number, a missing "not", or missing or extra words. Ordinary subtitle
+    shortening isn't flagged.
+  - **In the results:** the flagged lines appear under *What changed*, and the *Changes* column shows how many lines
+    differ.
+  - **Suggested wording:** it waits for review and is never applied on its own. **Apply** uses it (only on lines
+    still as they were found), and **Undo** brings the original back.
+  - **What is skipped:** subtitles matched by meaning (translations) aren't audited.
+  - **Limit:** it shares the run's allowance of AI checks with line matching.
+
+### Changed
+
+- **AI checks per run** now counts line matching and wording audits together.
+
+### Added
+
 - **Lines matched by meaning** (optional, with the Shoal AI plugin: **Ask the AI plugin when the wording differs from
   what is said**, on by default, at most 20 checks per run).
   - **When it's used:** speech-to-text heard plenty but the subtitle's words don't match it. Typical cases are a

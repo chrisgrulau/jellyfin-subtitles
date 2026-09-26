@@ -109,7 +109,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         http.Timeout = TimeSpan.FromMinutes(3);
         await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
         var speech = SubtitleSyncTask.SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.find", out var problem);
-        var policies = SubtitleSyncTask.PoliciesOf(config) with { Matcher = SubtitleSyncTask.MatcherFor(config) };
+        var policies = SubtitleSyncTask.RunPolicies(config) with { Auditor = null };
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
