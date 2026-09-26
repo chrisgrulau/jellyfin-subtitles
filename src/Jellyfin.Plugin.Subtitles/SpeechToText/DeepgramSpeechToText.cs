@@ -19,6 +19,7 @@ public sealed class DeepgramSpeechToText : HttpSpeechToText
     public const string DefaultModel = "nova-3";
 
     private readonly string _model;
+    private readonly bool _punctuate;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DeepgramSpeechToText"/> class.
@@ -26,11 +27,14 @@ public sealed class DeepgramSpeechToText : HttpSpeechToText
     /// <param name="http">HTTP client.</param>
     /// <param name="key">API key.</param>
     /// <param name="model">Model name; empty for <see cref="DefaultModel"/>.</param>
-    public DeepgramSpeechToText(HttpClient http, string key, string model)
+    /// <param name="punctuate">Whether to ask for punctuation and capitals (for full transcripts that become subtitles;
+    /// checks match plain words, as before).</param>
+    public DeepgramSpeechToText(HttpClient http, string key, string model, bool punctuate = false)
         : base(http, key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model.Trim();
+        _punctuate = punctuate;
     }
 
     /// <inheritdoc />
@@ -41,10 +45,11 @@ public sealed class DeepgramSpeechToText : HttpSpeechToText
     /// </summary>
     /// <param name="model">Model.</param>
     /// <param name="language">Two-letter language, or <c>null</c> to detect.</param>
+    /// <param name="punctuate">Whether to ask for punctuation and capitals.</param>
     /// <returns>The address.</returns>
-    public static Uri RequestAddress(string model, string? language)
+    public static Uri RequestAddress(string model, string? language, bool punctuate = false)
     {
-        var query = "?model=" + Uri.EscapeDataString(model) + "&punctuate=false&smart_format=false"
+        var query = "?model=" + Uri.EscapeDataString(model) + (punctuate ? "&punctuate=true" : "&punctuate=false") + "&smart_format=false"
             + (string.IsNullOrEmpty(language) ? "&detect_language=true" : "&language=" + Uri.EscapeDataString(language));
         return new Uri(Address.AbsoluteUri + query);
     }
@@ -55,7 +60,7 @@ public sealed class DeepgramSpeechToText : HttpSpeechToText
         ArgumentNullException.ThrowIfNull(samples);
         using var content = new ByteArrayContent(WavEncoder.Encode(samples));
         content.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
-        using var request = new HttpRequestMessage(HttpMethod.Post, RequestAddress(_model, language)) { Content = content };
+        using var request = new HttpRequestMessage(HttpMethod.Post, RequestAddress(_model, language, _punctuate)) { Content = content };
         request.Headers.Authorization = new AuthenticationHeaderValue("Token", Key);
 
         using var reply = await SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -73,7 +78,7 @@ public sealed class DeepgramSpeechToText : HttpSpeechToText
             if (channel.TryGetProperty("alternatives", out var alternatives) && alternatives.ValueKind == JsonValueKind.Array && alternatives.GetArrayLength() > 0
                 && alternatives[0].TryGetProperty("words", out var w))
             {
-                words = ReadWords(w, "word", "confidence");
+                words = ReadWords(w, "word", "confidence", _punctuate ? "punctuated_word" : null);
             }
         }
 

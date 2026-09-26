@@ -24,7 +24,8 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Language">The language wanted (three-letter code).</param>
 /// <param name="Duration">The video's length.</param>
 /// <param name="AudioStream">Which audio stream to listen to.</param>
-public sealed record FindJob(Guid ItemId, string Name, string VideoPath, VideoFacts Video, string Language, TimeSpan Duration, int AudioStream);
+/// <param name="AudioLanguage">That audio stream's language tag, if it has one.</param>
+public sealed record FindJob(Guid ItemId, string Name, string VideoPath, VideoFacts Video, string Language, TimeSpan Duration, int AudioStream, string? AudioLanguage = null);
 
 /// <summary>
 /// The day's download allowance is used up; searching stops until tomorrow.

@@ -50,6 +50,15 @@ public enum ResultStatus
 
     /// <summary>A proposed change was declined in review; nothing was changed, and it isn't proposed again unless the file changes.</summary>
     Declined,
+
+    /// <summary>No subtitle was found, so one was generated from a full transcript and added (labelled as generated; Undo removes it).</summary>
+    Generated,
+
+    /// <summary>A full transcript heard almost no speech, so nothing was generated; not tried again unless the service or model changes.</summary>
+    NoSpeech,
+
+    /// <summary>A generated subtitle was replaced by one found later (the generated file was removed; a copy is kept).</summary>
+    Replaced,
 }
 
 /// <summary>
@@ -78,6 +87,9 @@ public sealed record SubtitleResult
 
     /// <summary>Gets the subtitle file.</summary>
     public required string SubtitlePath { get; init; }
+
+    /// <summary>Gets the video, for results about a video rather than a file that exists (generated subtitles), if recorded.</summary>
+    public string? VideoPath { get; init; }
 
     /// <summary>Gets when it was checked.</summary>
     public DateTimeOffset Time { get; init; }
@@ -213,7 +225,7 @@ public sealed class ResultStore : IDisposable
     public static bool MustKeep(SubtitleResult r, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(r);
-        return r.Changed || r.PendingReview || r.Status is ResultStatus.Added or ResultStatus.Undone
+        return r.Changed || r.PendingReview || r.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Generated or ResultStatus.NoSpeech
             || (r.Status is ResultStatus.NotFound or ResultStatus.Failed && r.Id.StartsWith("find-", StringComparison.Ordinal) && now - r.Time < SubtitleFinder.SearchAgainAfter);
     }
 
@@ -228,12 +240,14 @@ public sealed class ResultStore : IDisposable
     {
         ArgumentNullException.ThrowIfNull(result);
         return result.Changed || previous?.Changed == true || result.PendingReview || previous?.PendingReview == true
-            || result.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Declined;
+            || result.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Declined or ResultStatus.Generated or ResultStatus.Replaced;
     }
 
     /// <summary>
     /// Drops results for subtitle files that are gone, where the folder is still there (so an offline share never loses
-    /// its results). "Nothing found" results are for files that don't exist yet and are kept.
+    /// its results). "Nothing found" results are for files that don't exist yet and are kept. Results of generating a
+    /// subtitle stand for the video (a generated file someone deleted isn't generated again), so they go only with the
+    /// video.
     /// </summary>
     /// <param name="fileExists">Whether a file exists.</param>
     /// <param name="folderExists">Whether a folder exists.</param>
@@ -250,8 +264,9 @@ public sealed class ResultStore : IDisposable
             }
 
             var gone = all.Values.Where(r => r.Status != ResultStatus.NotFound
-                && !fileExists(r.SubtitlePath)
-                && Path.GetDirectoryName(r.SubtitlePath) is { } folder && folderExists(folder)).ToList();
+                && (r.Id.StartsWith(SubtitleGenerator.IdPrefix, StringComparison.Ordinal) ? r.VideoPath : r.SubtitlePath) is { } path
+                && !fileExists(path)
+                && Path.GetDirectoryName(path) is { } folder && folderExists(folder)).ToList();
             foreach (var r in gone)
             {
                 Unindex(r);

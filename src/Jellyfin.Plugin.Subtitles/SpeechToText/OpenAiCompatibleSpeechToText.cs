@@ -23,6 +23,7 @@ public sealed class OpenAiCompatibleSpeechToText : HttpSpeechToText
     private readonly Uri _address;
     private readonly string _model;
     private readonly string _id;
+    private readonly bool _withSegments;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OpenAiCompatibleSpeechToText"/> class.
@@ -32,7 +33,9 @@ public sealed class OpenAiCompatibleSpeechToText : HttpSpeechToText
     /// <param name="address">The API base address, ending in <c>/v1/</c> (e.g. <c>http://127.0.0.1:8000/v1/</c>).</param>
     /// <param name="key">API key, if the service needs one.</param>
     /// <param name="model">Model name; empty for the service's default.</param>
-    public OpenAiCompatibleSpeechToText(HttpClient http, string id, Uri address, string? key, string model)
+    /// <param name="withSegments">Whether to ask for segments too (their text has punctuation, which OpenAI's words lack):
+    /// for full transcripts that become subtitles. Checks ask for words only, as before.</param>
+    public OpenAiCompatibleSpeechToText(HttpClient http, string id, Uri address, string? key, string model, bool withSegments = false)
         : base(http, key)
     {
         ArgumentNullException.ThrowIfNull(address);
@@ -40,6 +43,7 @@ public sealed class OpenAiCompatibleSpeechToText : HttpSpeechToText
         _address = CheckAddress(address, key);
         _id = id;
         _model = model ?? string.Empty;
+        _withSegments = withSegments;
     }
 
     /// <inheritdoc />
@@ -94,6 +98,11 @@ public sealed class OpenAiCompatibleSpeechToText : HttpSpeechToText
         using var granularityPart = new StringContent("word");
         form.Add(formatPart, "response_format");
         form.Add(granularityPart, "timestamp_granularities[]");
+        using var segmentPart = new StringContent("segment");
+        if (_withSegments)
+        {
+            form.Add(segmentPart, "timestamp_granularities[]");
+        }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_address, "audio/transcriptions")) { Content = form };
         if (!string.IsNullOrEmpty(Key))
@@ -105,6 +114,9 @@ public sealed class OpenAiCompatibleSpeechToText : HttpSpeechToText
         var root = reply.RootElement;
         var words = root.TryGetProperty("words", out var w) ? ReadWords(w, "word", "probability") : [];
         var detected = root.TryGetProperty("language", out var l) && l.ValueKind == System.Text.Json.JsonValueKind.String ? l.GetString() : language;
-        return new Transcript(words, Languages.ToTwoLetter(detected) ?? language, _id, model.Length > 0 ? model : "default", samples.Length / (double)Audio.AudioFormat.SampleRate);
+        return new Transcript(words, Languages.ToTwoLetter(detected) ?? language, _id, model.Length > 0 ? model : "default", samples.Length / (double)Audio.AudioFormat.SampleRate)
+        {
+            Segments = _withSegments && root.TryGetProperty("segments", out var segments) ? ReadSegments(segments) : [],
+        };
     }
 }

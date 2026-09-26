@@ -15,7 +15,8 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <summary>
 /// The library's films and episodes, walked once in one way for every task: the subtitle files to check, the embedded
 /// tracks to check and the subtitles to find. Only videos whose file exists, with a running time and at least one audio
-/// stream, are listed. "Has a subtitle in this language" is decided by <see cref="FindRules.Counts"/> alone.
+/// stream, are listed. "Has a subtitle in this language" is decided by <see cref="FindRules.Counts(bool, bool, bool, bool)"/>
+/// alone: a subtitle this plugin generated doesn't count, so the search for a real one goes on.
 /// </summary>
 internal sealed class LibraryVideos
 {
@@ -36,7 +37,8 @@ internal sealed class LibraryVideos
     }
 
     /// <summary>
-    /// Text subtitle files beside the videos, in the chosen languages.
+    /// Text subtitle files beside the videos, in the chosen languages. Generated subtitles aren't listed: they are
+    /// speech-to-text already, so checking their timing against speech-to-text would prove nothing.
     /// </summary>
     /// <param name="languages">The chosen languages, as two-letter codes.</param>
     /// <returns>The files to check.</returns>
@@ -48,7 +50,8 @@ internal sealed class LibraryVideos
             foreach (var sub in v.Streams.Where(s => s.Type == MediaStreamType.Subtitle && s.IsExternal && !string.IsNullOrEmpty(s.Path)))
             {
                 var ext = Path.GetExtension(sub.Path).ToUpperInvariant();
-                if (!TextExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)) || Languages.ToTwoLetter(sub.Language) is not { } lang || !languages.Contains(lang))
+                if (!TextExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)) || Languages.ToTwoLetter(sub.Language) is not { } lang || !languages.Contains(lang)
+                    || SubtitleGenerator.IsGenerated(sub.Path))
                 {
                     continue;
                 }
@@ -60,7 +63,7 @@ internal sealed class LibraryVideos
 
     /// <summary>
     /// Embedded text tracks in the chosen languages, for videos with no subtitle file of that language beside them (one
-    /// that counts, see <see cref="FindRules.Counts"/>).
+    /// that counts, see <see cref="FindRules.Counts(bool, bool, bool, bool)"/>).
     /// </summary>
     /// <param name="languages">The chosen languages, as two-letter codes.</param>
     /// <param name="countImages">Whether picture-based subtitles count as having one.</param>
@@ -86,7 +89,8 @@ internal sealed class LibraryVideos
     }
 
     /// <summary>
-    /// Videos with no subtitle (beside them or inside) that counts in a chosen language.
+    /// Videos with no subtitle (beside them or inside) that counts in a chosen language (a generated one doesn't), with the
+    /// language of the audio stream that goes with it.
     /// </summary>
     /// <param name="languages">The chosen languages, as configured (three-letter codes).</param>
     /// <param name="countImages">Whether picture-based subtitles count as having one.</param>
@@ -101,7 +105,8 @@ internal sealed class LibraryVideos
             {
                 if (Languages.ToTwoLetter(language) is { } two && !have.Contains(two))
                 {
-                    yield return new FindJob(v.Item.Id, v.Item.Name, v.Video.Path, VideoFactsReader.Read(v.Video), language, v.Duration, AudioChoice.For(v.Audio, language));
+                    var audio = AudioChoice.For(v.Audio, language);
+                    yield return new FindJob(v.Item.Id, v.Item.Name, v.Video.Path, VideoFactsReader.Read(v.Video), language, v.Duration, audio, v.Audio[audio].Language);
                 }
             }
         }
@@ -109,7 +114,7 @@ internal sealed class LibraryVideos
 
     // The languages (two-letter) that have a subtitle among these streams that counts
     private static HashSet<string> LanguagesWithSubtitles(IEnumerable<MediaStream> streams, bool countImages)
-        => streams.Where(s => s.Type == MediaStreamType.Subtitle && FindRules.Counts(s.IsForced, s.IsTextSubtitleStream, countImages))
+        => streams.Where(s => s.Type == MediaStreamType.Subtitle && FindRules.Counts(s.IsForced, s.IsTextSubtitleStream, countImages, s.IsExternal && SubtitleGenerator.IsGenerated(s.Path)))
             .Select(s => Languages.ToTwoLetter(s.Language)).OfType<string>().ToHashSet(StringComparer.Ordinal);
 
     private IEnumerable<LibraryVideo> Walk()

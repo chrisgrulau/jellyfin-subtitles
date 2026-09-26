@@ -11,9 +11,9 @@ they help each other.
 A [Jellyfin](https://jellyfin.org) plugin that finds subtitles for videos that are missing them, checks every candidate
 against what is actually said in the audio, and fixes the timing, so the subtitles you get are the right ones and in sync.
 
-> **Status:** alpha. Checking and fixing existing subtitles, and finding missing ones, work with the built-in
-> speech-to-text, a local service, or a paid service within your monthly limit. The design is in
-> [docs/DESIGN.md](docs/DESIGN.md).
+> **Status:** alpha. Checking and fixing existing subtitles, finding missing ones and, as a last resort, generating them
+> from a full transcript work with the built-in speech-to-text, a local service, or a paid service within your monthly
+> limit. The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Installing
 
@@ -41,7 +41,8 @@ find candidates → score them → check the best against the audio → synchron
 
 1. **Find candidates**: first through Jellyfin's own subtitle providers (for example the OpenSubtitles plugin, using your
    account), then SubDL (with a free API key). Text subtitles already inside the video can be checked too (optional).
-   Planned, not yet built: image tracks read with OCR, and subtitles generated from a full transcript as a last resort.
+   As a last resort (off by default), a subtitle is generated from a full transcript of the video (see
+   [Generated subtitles](#generated-subtitles)). Planned, not yet built: image tracks read with OCR.
 2. **Score them** without spending anything: release name, source and edition, frame rate, running time, uploader
    signals, machine-translation flags, language check.
 3. **Check against the audio**: short, dialogue-heavy snippets are transcribed and matched against the subtitle text.
@@ -58,7 +59,7 @@ Three uses, each switched on or off separately and each with its own provider an
 |---|---|---|
 | Check and synchronise | A few short snippets per video | On |
 | Context for AI decisions | A slightly longer excerpt, when the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) is installed. Also used for the short transcripts [Ingest](https://github.com/chrisgrulau/jellyfin-ingest) may ask for (**Let Ingest ask for short transcripts**, off by default) to tell which episode a new video is | Off |
-| Full transcript | Coming later: the whole video, for last-resort subtitles and detailed checks. Not used yet; the settings page shows it disabled | Off |
+| Full transcript | The whole video, to generate subtitles when none can be found (see [Generated subtitles](#generated-subtitles)). Its own service and model, so for example Deepgram can check and synchronise while full transcripts stay free on the built-in one | Off |
 
 Providers:
 
@@ -82,6 +83,46 @@ OpenSubtitles plugin, for films and episodes that have no subtitle in your langu
 downloaded one at a time and checked against the audio the same way; one is added only if it clearly fits, with its
 timing corrected. Existing subtitle files are never replaced, downloads are capped per day, and Undo removes an added
 subtitle.
+
+A third daily task (**Generate missing subtitles**, off until you switch on **Generate subtitles when none can be
+found**) makes subtitles from a full transcript for videos the search found nothing for; see below.
+
+## Generated subtitles
+
+When the search found nothing that fits a video in one of your languages, and **Generate subtitles when none can be
+found** is on, the whole video is transcribed and a subtitle is made from what was said.
+
+- **Which videos:** those whose result is "Nothing fitting found" (the search ran, the providers answered, nothing fitted),
+  in a language of the **Subtitle languages** setting that is also the language of the video's audio. The audio track's
+  language tag decides; a track without one is taken to be in your first subtitle language. Subtitles are never
+  generated in another language than the one spoken (translation is planned).
+- **The file:** `<video name>.<language>.generated.srt` beside the video, for example `Film (2020).en.generated.srt`.
+  Jellyfin reads the language from the name and takes the word `generated` as the track's title, so players list it as
+  **generated - English - SRT** (the exact wording depends on the client). Nothing is added to the subtitle text itself.
+- **Lines:** at most two lines of 42 characters, each shown for 1 to 7 seconds, split at pauses and sentence ends, and
+  lengthened into silence where possible so they can be read (about 20 characters a second at most).
+- **Machine-made:** names, quiet or overlapping speech and songs may be wrong. The results list shows **Generated**, with
+  the service and model that made it and how many lines it has.
+- **Found later:** a generated subtitle doesn't count as having one, so the daily search keeps looking (every 30 days
+  per video, as for any video nothing fitted). When it adds a real subtitle, the generated one is removed (a copy is
+  kept in the plugin's originals folder) and its result shows **Replaced by a found subtitle**. The timing check leaves
+  generated subtitles alone: they are speech-to-text already.
+- **Undo** removes a generated subtitle, and it isn't generated again on its own (**Generate again** in the results
+  asks for it). Deleting the file by hand has the same effect. Jellyfin's own "Download missing subtitles" task does
+  count a generated file as a subtitle, so it stops looking for that video; this plugin's search doesn't.
+- **No speech:** a video where almost nothing is said (fewer than about 20 words an hour: music, silence, sound
+  effects) gets no subtitle; its result says **No speech to transcribe**, and it isn't transcribed again unless you
+  change the Full transcript service or model.
+- **Which service, and what it costs:** the **Full transcript** row under speech-to-text, separate from the other two
+  uses. By default the built-in one, which is free but slow on a CPU (roughly as long as the video, sometimes longer);
+  a local service with a GPU is free and much faster. A paid service (Deepgram, OpenAI) is charged for every minute of
+  the video (a two-hour film is 120 minutes: about USD 0.52 on Deepgram Nova-3, USD 0.72 on OpenAI Whisper at the prices
+  shipped with this version); the whole video's cost is reserved against your monthly limit before it starts, and a
+  video that doesn't fit in what's left of the limit waits.
+- **Pace:** at most **Videos transcribed per night** (20 by default, 0 to 200), the ones waiting longest first, and no
+  new video is started after **Stop starting new videos after** (4 hours by default, 0 to 24; 0 means no limit; a video
+  already being transcribed finishes). The log's summary line says when the time ran out and how many are left for the
+  next night. The task runs at 05:00, an hour after the search; it can be run from the plugin page (**Generate now**) or Scheduled Tasks.
 
 ## Safety
 
@@ -127,7 +168,7 @@ shown there as coming later; they have no effect yet.
 2. With the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) installed: lines matched by meaning when the
    wording differs from what is said (done); wording audit of checked subtitles and, a few per night, the existing library (done);
    subtitle editor with audio playback (done).
-3. Full transcription: last-resort subtitles, discrepancy finder, automatic confidence calibration.
+3. Full transcription: last-resort subtitles (done), discrepancy finder, automatic confidence calibration.
 4. More languages; later, subtitles in a different language from the audio.
 
 ## What it stores and sends
@@ -142,7 +183,7 @@ shown there as coming later; they have no effect yet.
 | To | When | What |
 |---|---|---|
 | Your subtitle providers (through Jellyfin), SubDL | Finding missing subtitles | The video's title, year, season and episode, as Jellyfin's own search does |
-| A cloud speech-to-text service | Only if you chose one | A few one-minute audio snippets per checked file (the built-in and local services keep audio on the server) |
+| A cloud speech-to-text service | Only if you chose one | A few one-minute audio snippets per checked file; for generated subtitles, only if you chose a cloud service for full transcripts, the whole video's audio in ten-minute parts (the built-in and local services keep audio on the server) |
 | Shoal AI → your AI provider | Only if installed and allowing Subtitles | The subtitle language, a few minutes of heard phrases and the subtitle lines around them |
 
 **Needs write access** to your media folders: corrections are written beside the video.

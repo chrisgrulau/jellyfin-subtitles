@@ -93,7 +93,22 @@ public class ConfigurationTests
         Assert.Contains("id=\"AgreementDecides\" type=\"checkbox\" is=\"emby-checkbox\" disabled", page, StringComparison.Ordinal);
         Assert.DoesNotContain("config.SelfCalibration =", page, StringComparison.Ordinal);
         Assert.DoesNotContain("config.AgreementDecides =", page, StringComparison.Ordinal);
-        Assert.Contains("['FullTranscript', 'Full transcript (coming later)'", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Full transcript (coming later)", page, StringComparison.Ordinal);
+    }
+
+    // Stage 4: the page saves the generation switch and the nightly pace (0 to 200), and names the new statuses
+    [Fact]
+    public void The_page_saves_generation_settings_and_shows_its_statuses()
+    {
+        var page = Page();
+        Assert.Contains("Generate subtitles when none can be found", page, StringComparison.Ordinal);
+        Assert.Contains("config.GenerateMissing = page.querySelector('#GenerateMissing').checked;", page, StringComparison.Ordinal);
+        Assert.Contains("config.MaxGeneratedPerNight = isNaN(perNight) ? 20 : Math.max(0, Math.min(200, perNight));", page, StringComparison.Ordinal);
+        Assert.Contains("['FullTranscript', 'Full transcript',", page, StringComparison.Ordinal);
+        Assert.Contains("Generated: 'Generated', NoSpeech: 'No speech to transcribe', Replaced: 'Replaced by a found subtitle'", page, StringComparison.Ordinal);
+        Assert.Contains("runTask('ShoalSubtitlesGenerate'", page, StringComparison.Ordinal);
+        Assert.Contains("config.MaxGenerateHours = isNaN(hours) ? 4 : Math.max(0, Math.min(24, hours));", page, StringComparison.Ordinal);
+        Assert.Contains("Stop starting new videos after", page, StringComparison.Ordinal);
     }
 
     [Fact]

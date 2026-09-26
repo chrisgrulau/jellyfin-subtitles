@@ -124,6 +124,29 @@ public sealed partial class SubtitleFiles
     }
 
     /// <summary>
+    /// Keeps a copy of a subtitle's content in the backup folder (before this plugin removes a file it added, so it can
+    /// still be recovered by hand).
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle's path.</param>
+    /// <param name="content">Its content.</param>
+    /// <returns>The backup file name.</returns>
+    public string Keep(string subtitlePath, byte[] content)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subtitlePath);
+        ArgumentNullException.ThrowIfNull(content);
+        Directory.CreateDirectory(_backups);
+        var backup = BackupName(subtitlePath, Fingerprint(content));
+        var backupPath = Path.Combine(_backups, backup);
+        if (!File.Exists(backupPath))
+        {
+            File.WriteAllBytes(backupPath + ".tmp", content);
+            File.Move(backupPath + ".tmp", backupPath, overwrite: true);
+        }
+
+        return backup;
+    }
+
+    /// <summary>
     /// Puts the original back, if the file is still exactly as this plugin left it.
     /// </summary>
     /// <param name="subtitlePath">The subtitle file.</param>

@@ -42,4 +42,16 @@ public static class FindRules
     /// <param name="countImages">Whether picture-based tracks count.</param>
     /// <returns><c>true</c> if it counts.</returns>
     public static bool Counts(bool isForced, bool isText, bool countImages) => !isForced && (isText || countImages);
+
+    /// <summary>
+    /// Whether an existing subtitle track means the video already has subtitles in its language, as
+    /// <see cref="Counts(bool, bool, bool)"/>; a subtitle this plugin generated from a full transcript never does, so the
+    /// search for a real one goes on (and replaces it when one is found).
+    /// </summary>
+    /// <param name="isForced">The track is forced-only.</param>
+    /// <param name="isText">The track is text-based.</param>
+    /// <param name="countImages">Whether picture-based tracks count.</param>
+    /// <param name="isGenerated">The track is a generated subtitle file (see <see cref="SubtitleGenerator.IsGenerated"/>).</param>
+    /// <returns><c>true</c> if it counts.</returns>
+    public static bool Counts(bool isForced, bool isText, bool countImages, bool isGenerated) => !isGenerated && Counts(isForced, isText, countImages);
 }

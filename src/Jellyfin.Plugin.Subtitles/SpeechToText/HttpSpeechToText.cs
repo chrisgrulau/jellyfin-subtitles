@@ -83,8 +83,9 @@ public abstract class HttpSpeechToText : ISpeechToText
     /// <param name="words">The JSON array of words.</param>
     /// <param name="text">Property holding the word.</param>
     /// <param name="confidence">Property holding the confidence.</param>
+    /// <param name="preferredText">Property holding the word as it should be shown (with punctuation), used where present.</param>
     /// <returns>The words, in time order.</returns>
-    protected static IReadOnlyList<TranscribedWord> ReadWords(JsonElement words, string text, string confidence)
+    protected static IReadOnlyList<TranscribedWord> ReadWords(JsonElement words, string text, string confidence, string? preferredText = null)
     {
         var result = new List<TranscribedWord>();
         if (words.ValueKind != JsonValueKind.Array)
@@ -106,10 +107,48 @@ public abstract class HttpSpeechToText : ISpeechToText
                 && double.IsFinite(start) && double.IsFinite(end) && start >= 0 && end >= start)
             {
                 double? c = w.TryGetProperty(confidence, out var cv) && cv.TryGetDouble(out var conf) && conf is >= 0 and <= 1 ? conf : null;
-                var word = t.GetString()!.Trim();
+                var word = (preferredText is not null && w.TryGetProperty(preferredText, out var pt) && pt.ValueKind == JsonValueKind.String ? pt : t).GetString()!.Trim();
                 if (word.Length > 0)
                 {
                     result.Add(new TranscribedWord(word, start, end, c));
+                }
+            }
+        }
+
+        result.Sort((a, b) => a.Start.CompareTo(b.Start));
+        return result;
+    }
+
+    /// <summary>
+    /// Reads a segment list (text with start and end), checking every value.
+    /// </summary>
+    /// <param name="segments">The JSON array of segments.</param>
+    /// <returns>The segments, in time order.</returns>
+    protected static IReadOnlyList<TranscribedSegment> ReadSegments(JsonElement segments)
+    {
+        var result = new List<TranscribedSegment>();
+        if (segments.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var s in segments.EnumerateArray())
+        {
+            if (result.Count >= MaxWords)
+            {
+                break;
+            }
+
+            if (s.ValueKind == JsonValueKind.Object
+                && s.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String
+                && s.TryGetProperty("start", out var st) && st.TryGetDouble(out var start)
+                && s.TryGetProperty("end", out var e) && e.TryGetDouble(out var end)
+                && double.IsFinite(start) && double.IsFinite(end) && start >= 0 && end >= start)
+            {
+                var text = t.GetString()!.Trim();
+                if (text.Length > 0)
+                {
+                    result.Add(new TranscribedSegment(text, start, end));
                 }
             }
         }

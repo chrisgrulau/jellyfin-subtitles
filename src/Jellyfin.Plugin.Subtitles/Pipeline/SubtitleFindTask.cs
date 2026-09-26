@@ -37,6 +37,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     private readonly BuiltInHost _builtIn;
     private readonly Spending _spending;
     private readonly SubtitleFinder _finder;
+    private readonly SubtitleGenerator _generator;
     private readonly SubtitleActivity? _activity;
     private readonly ILogger<SubtitleFindTask> _logger;
 
@@ -53,9 +54,10 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     /// <param name="builtIn">The built-in speech-to-text.</param>
     /// <param name="spending">Prices, spend ledger and exchange rates.</param>
     /// <param name="finder">The finder.</param>
+    /// <param name="generator">Generated subtitles (a found subtitle replaces one).</param>
     /// <param name="logger">Logger.</param>
     /// <param name="activity">Jellyfin's Activity log, for a search a provider stopped.</param>
-    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, ILogger<SubtitleFindTask> logger, SubtitleActivity? activity = null)
+    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, SubtitleGenerator generator, ILogger<SubtitleFindTask> logger, SubtitleActivity? activity = null)
     {
         _activity = activity;
         _library = library ?? throw new ArgumentNullException(nameof(library));
@@ -68,6 +70,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
         _finder = finder ?? throw new ArgumentNullException(nameof(finder));
+        _generator = generator ?? throw new ArgumentNullException(nameof(generator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -170,6 +173,13 @@ public sealed partial class SubtitleFindTask : IScheduledTask
                 {
                     // Jellyfin picks the new file up as it would from real-time monitoring
                     _monitor.ReportFileSystemChanged(result.SubtitlePath);
+
+                    // A subtitle generated for this video and language while none could be found gives way to the real one
+                    if (_generator.ReplaceGenerated(job.VideoPath, job.Language, result.SubtitlePath) is { } replaced)
+                    {
+                        LogResult(_logger, job.Name, replaced.Status, replaced.Explanation);
+                        _monitor.ReportFileSystemChanged(replaced.SubtitlePath);
+                    }
                 }
             }
             catch (DownloadLimitReachedException ex)
