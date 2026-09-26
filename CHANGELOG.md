@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0-alpha] - 2026-09-26
+
 ### Added
 
 - **Local service helper.** On the settings page, **Find a local service** looks for OpenAI-compatible speech-to-text
