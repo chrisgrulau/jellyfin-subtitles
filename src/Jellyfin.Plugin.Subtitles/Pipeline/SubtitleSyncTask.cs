@@ -120,6 +120,13 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             return;
         }
 
+        // A new install does nothing until its settings page has been saved once (an install that has run before counts)
+        if (!config.SetupSaved && !_processor.HasResults)
+        {
+            LogNoResults(_logger, "waiting for the plugin's settings to be saved once (Dashboard → Plugins → Subtitles)");
+            return;
+        }
+
         // Results for subtitle files that were deleted are no longer needed
         var pruned = _processor.PruneGone();
         if (pruned > 0)
@@ -135,7 +142,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             try
             {
                 var fingerprint = await SubtitleFiles.FingerprintFileAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false);
-                if (_processor.NeedsCheck(job.SubtitlePath, fingerprint))
+                if (_processor.NeedsCheck(job.SubtitlePath, fingerprint, speech?.Id ?? string.Empty))
                 {
                     todo.Add(job);
                 }

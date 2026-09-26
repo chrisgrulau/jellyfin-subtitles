@@ -112,6 +112,9 @@ public sealed class SubtitleFinder
         return stem + "." + (Languages.ToTwoLetter(language) ?? language) + (hearingImpaired ? ".sdh" : string.Empty) + ext;
     }
 
+    /// <summary>Gets whether anything has been checked or searched yet (an install that has run before counts as set up).</summary>
+    public bool HasResults => _results.All().Count > 0;
+
     /// <summary>Gets whether results can be recorded now (the results file is readable).</summary>
     public bool ResultsReadable => _results.Readable;
 

@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **SUB-20: review in the results list.**
+  - Items waiting for review are listed first, however old.
+  - A filter shows everything, only what's waiting for review, or one status, and a box finds a video by name.
+  - **Decline** turns down a proposal. Nothing is changed, and it isn't proposed again unless the file changes.
+  - **Check again** checks one subtitle again on the next run. For a missing subtitle it's **Search again**, which
+    also works after an added subtitle was undone. A file holding this plugin's changes has to be undone first.
+- **SUB-19:**
+  - A subtitle the audio check couldn't settle (unclear, or not matching the speech) is checked again once the
+    speech-to-text service in use changes, for example after it has been set up.
+  - A new install does nothing (no checks, no changes, no downloads) until its settings page has been saved once. An
+    install that has already run carries on as before.
+
 ## [0.7.0-alpha] - 2026-09-26
 
 ### Fixed

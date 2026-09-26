@@ -46,6 +46,9 @@ public enum ResultStatus
 
     /// <summary>Jellyfin's account can't write there (a read-only mount, permissions); tried again after a while.</summary>
     CantWrite,
+
+    /// <summary>A proposed change was declined in review; nothing was changed, and it isn't proposed again unless the file changes.</summary>
+    Declined,
 }
 
 /// <summary>
@@ -119,6 +122,9 @@ public sealed record SubtitleResult
 
     /// <summary>Gets where an added subtitle came from (source, release name, score), for provenance.</summary>
     public string? Origin { get; init; }
+
+    /// <summary>Gets the speech-to-text service the check used (empty when none), so an unclear result is checked again once one is set up.</summary>
+    public string SpeechSetup { get; init; } = string.Empty;
 
     /// <summary>Gets a value indicating whether the wording was audited (so the nightly audit of earlier results skips it).</summary>
     public bool Audited { get; init; }
@@ -265,6 +271,26 @@ public sealed class ResultStore
         lock (_lock)
         {
             return Load().Where(r => string.Equals(r.SubtitlePath, subtitlePath, StringComparison.Ordinal)).OrderByDescending(r => r.Time).FirstOrDefault();
+        }
+    }
+
+    /// <summary>
+    /// Forgets a result, so its file is checked (or its video searched) again as new.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>Whether there was one.</returns>
+    public bool Remove(string id)
+    {
+        lock (_lock)
+        {
+            var list = Load();
+            if (list.RemoveAll(r => r.Id == id) == 0)
+            {
+                return false;
+            }
+
+            Save(list);
+            return true;
         }
     }
 
