@@ -50,7 +50,7 @@ Three uses, each switched on or off separately and each with its own provider an
 | Use | What | Default |
 |---|---|---|
 | Check and synchronise | A few short snippets per video | On |
-| Context for AI decisions | A slightly longer excerpt, when the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) is installed | Off |
+| Context for AI decisions | A slightly longer excerpt, when the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) is installed. Also used for the short transcripts [Ingest](https://github.com/chrisgrulau/jellyfin-ingest) may ask for (**Let Ingest ask for short transcripts**, off by default) to tell which episode a new video is | Off |
 | Full transcript | The whole video: last-resort subtitles, detailed checks, precise timing | Off |
 
 Providers:

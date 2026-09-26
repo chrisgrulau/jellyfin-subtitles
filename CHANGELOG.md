@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Short transcripts for Ingest** (opt-in: **Let Ingest ask for short transcripts**, off by default). When a new
+  video's name doesn't say which episode it is, Ingest can ask for a transcript of up to three minutes of it, which
+  the AI plugin compares with the episode synopses.
+  - Uses the **Context for AI decisions** speech-to-text service, which must be turned on. Built-in is the default
+    and free; a cloud service is metered against this plugin's spending limits like any other call.
+  - An in-process entry point (`SpeechBridge.TranscribeAsync`, JSON in and out, no HTTP endpoint), checked like the
+    AI plugin's: version, allowed caller, the caller's own purpose, an existing video, and a stretch of at most 180
+    seconds. One transcription runs at a time.
+
 ## [0.4.0-alpha] - 2026-09-26
 
 ### Added

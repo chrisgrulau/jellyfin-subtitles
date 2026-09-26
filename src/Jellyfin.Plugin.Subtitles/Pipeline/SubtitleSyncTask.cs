@@ -216,10 +216,27 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     /// <returns>The service, or <c>null</c>.</returns>
     public static ISpeechToText? SpeechFor(PluginConfiguration config, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, Spending spending, string purpose, out string? problem)
     {
+        ArgumentNullException.ThrowIfNull(config);
+        return SpeechFor(config, config.SyncSnippets, keys, http, builtIn, spending, purpose, out problem);
+    }
+
+    /// <summary>
+    /// The speech-to-text service a tier uses, metered like <see cref="SpeechFor(PluginConfiguration, SpeechToTextKeys, HttpClient, BuiltInHost?, Spending, string, out string?)"/>.
+    /// </summary>
+    /// <param name="config">Plugin settings.</param>
+    /// <param name="tier">The tier (for example <see cref="PluginConfiguration.AiContext"/>).</param>
+    /// <param name="keys">Speech-to-text keys.</param>
+    /// <param name="http">HTTP client.</param>
+    /// <param name="builtIn">The built-in speech-to-text.</param>
+    /// <param name="spending">Prices, ledger and exchange rates.</param>
+    /// <param name="purpose">What the calls are for.</param>
+    /// <param name="problem">Why no service is used, if none.</param>
+    /// <returns>The service, or <c>null</c>.</returns>
+    public static ISpeechToText? SpeechFor(PluginConfiguration config, TranscriptionTier? tier, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, Spending spending, string purpose, out string? problem)
+    {
         ArgumentNullException.ThrowIfNull(spending);
         ArgumentNullException.ThrowIfNull(config);
         problem = null;
-        var tier = config.SyncSnippets;
         if (tier is null || !tier.Enabled)
         {
             return null;

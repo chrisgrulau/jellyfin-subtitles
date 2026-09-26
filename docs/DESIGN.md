@@ -143,6 +143,24 @@ Plugins never share C# types. The Subtitles plugin offers a JSON-in/JSON-out ent
 to tell episodes apart), and calls the AI plugin the same way when it is installed. Without the AI plugin everything
 works, just without AI tiebreakers.
 
+`Bridge.SpeechBridge.TranscribeAsync(string json, CancellationToken)` is found by name by the shared
+`SpeechBridgeClient`, the same way as the AI plugin's entry point.
+
+- **Request (version 1):** `caller`, `purpose`, `path`, `start`, `length` (seconds) and optionally `language`.
+- **Reply:** `text`, `language` and `provider`, or `error` and a `failure` name (`not-allowed`, `not-set-up`,
+  `authentication`, `provider-limit`, `transient`, `bad-request`, `no-connection`).
+- **Checks:**
+  - The plugin must be on, and the caller must be allowed (only `ingest`, with **Let Ingest ask for short
+    transcripts**).
+  - The purpose must start with the caller's name.
+  - The "Context for AI decisions" tier must be on.
+  - The path must be absolute and the file must exist.
+  - The stretch must start at 0 or later and be longer than 0 and at most 180 seconds.
+  - The language, if given, must be a two- or three-letter code.
+- **Transcribing:** the audio is read with Jellyfin's ffmpeg (first audio track, 16 kHz mono), as for snippets. The
+  tier's service transcribes it, and a paid service is wrapped in `MeteredSpeechToText` under the caller's purpose. A
+  semaphore lets only one transcription run at a time, so the built-in service never runs twice at once.
+
 ## Settings: basic vs advanced
 
 Basic settings are the key decisions in plain language. Advanced settings (thresholds, calibration, snippet lengths,

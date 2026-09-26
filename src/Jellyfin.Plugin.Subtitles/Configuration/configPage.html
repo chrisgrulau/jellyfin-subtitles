@@ -117,6 +117,13 @@
           <h3 class="sectionTitle" style="margin-top:2em">Speech-to-text</h3>
           <p class="subs-muted">Used to check subtitles against what is actually said. <strong>Built-in</strong> runs on this server with no setup (slower, free); a <strong>local service</strong> is free and fast with a GPU; cloud services are fast but charge per minute of audio.</p>
           <div id="Tiers"></div>
+          <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:1em">
+            <label class="emby-checkbox-label">
+              <input id="AllowIngest" type="checkbox" is="emby-checkbox" />
+              <span>Let Ingest ask for short transcripts</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">When a new video's name doesn't say which episode it is, Ingest can ask for a transcript of two minutes of it, which the AI plugin compares with the episode synopses. Uses the <strong>Context for AI decisions</strong> service above (turn it on; Built-in is free), within the spending limits below.</div>
+          </div>
 
           <h3 class="sectionTitle" style="margin-top:1.5em">Services</h3>
           <p class="subs-muted">Keys are stored on this server in a file only Jellyfin can read. They are never shown again, logged or included in exports; you can replace or clear them. <strong>Test</strong> sends one second of near-silence (for a paid service, a small fraction of a cent).</p>
@@ -307,7 +314,7 @@
         var page = document.querySelector('#SubtitlesConfigPage');
         var tiers = [
           ['SyncSnippets', 'Check and synchronise', 'Short snippets only: a few minutes per video at most.'],
-          ['AiContext', 'Context for AI decisions', 'A slightly longer excerpt, used only when the AI plugin is installed.'],
+          ['AiContext', 'Context for AI decisions', 'A slightly longer excerpt (a couple of minutes), used only when the AI plugin is installed, for example to tell which episode a new video is.'],
           ['FullTranscript', 'Full transcript', 'The whole video: last-resort subtitles and detailed checks. Can be costly with cloud services.']
         ];
         // The euro plus every currency in the European Central Bank's daily rates (as CurrencyCode.Supported)
@@ -592,6 +599,7 @@
             page.querySelector('#LocalServiceUrl').value = config.LocalServiceUrl || '';
             page.querySelector('#MaxSubtitlesPerRun').value = config.MaxSubtitlesPerRun || 50;
             page.querySelector('#FindMissing').checked = config.FindMissing !== false;
+            page.querySelector('#AllowIngest').checked = config.AllowIngest === true;
             page.querySelector('#MaxFindsPerRun').value = config.MaxFindsPerRun || 20;
             page.querySelector('#MaxDownloadsPerDay').value = config.MaxDownloadsPerDay == null ? 10 : config.MaxDownloadsPerDay;
             page.querySelector('#CountImageSubtitles').checked = config.CountImageSubtitles !== false;
@@ -616,6 +624,7 @@
             config.LocalServiceUrl = page.querySelector('#LocalServiceUrl').value.trim();
             config.MaxSubtitlesPerRun = Math.min(5000, Math.max(1, parseInt(page.querySelector('#MaxSubtitlesPerRun').value, 10) || 50));
             config.FindMissing = page.querySelector('#FindMissing').checked;
+            config.AllowIngest = page.querySelector('#AllowIngest').checked;
             config.MaxFindsPerRun = Math.min(1000, Math.max(1, parseInt(page.querySelector('#MaxFindsPerRun').value, 10) || 20));
             var downloads = parseInt(page.querySelector('#MaxDownloadsPerDay').value, 10);
             config.MaxDownloadsPerDay = Math.min(10000, Math.max(0, isNaN(downloads) ? 10 : downloads));
