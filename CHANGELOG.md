@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0-alpha] - 2026-09-26
+
 ### Fixed
 
 - **FAM-01:** languages are recognised from a built-in ISO 639 table instead of the server's culture data. Before, on
