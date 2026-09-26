@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1-alpha] - 2026-09-26
+
 ### Fixed
 
 - **SUB-14:** subtitles in legacy encodings are no longer rewritten as garbled text. Before, anything that wasn't
