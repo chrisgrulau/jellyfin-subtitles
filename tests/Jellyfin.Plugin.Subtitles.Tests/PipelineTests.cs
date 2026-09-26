@@ -42,6 +42,31 @@ public sealed class PipelineTests : IDisposable
         Assert.Equal(Srt, File.ReadAllText(path));
     }
 
+    // SUB-24: a rewritten subtitle (and an undone one) keeps the original's permissions
+    [Fact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void A_replaced_or_restored_file_keeps_its_permissions()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var path = Path.Combine(_dir, "Film.fr.srt");
+        File.WriteAllText(path, Srt);
+        const UnixFileMode Shared = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite;
+        File.SetUnixFileMode(path, Shared);
+        var files = new SubtitleFiles(Path.Combine(_dir, "backups"));
+
+        var (backup, written) = files.Replace(path, SubtitleFiles.Fingerprint(File.ReadAllBytes(path)), Encoding.UTF8.GetBytes("changed"));
+        Assert.Equal(Shared, File.GetUnixFileMode(path));
+
+        File.SetUnixFileMode(path, Shared | UnixFileMode.OtherRead);
+        files.Restore(path, backup, written);
+        Assert.Equal(Shared | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
+        Assert.Equal(Srt, File.ReadAllText(path));
+    }
+
     [Fact]
     public void A_file_changed_since_it_was_checked_is_not_replaced()
     {

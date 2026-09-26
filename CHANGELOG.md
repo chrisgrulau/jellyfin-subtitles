@@ -14,6 +14,9 @@ All notable changes to this project are documented here. The format follows
   for the suggested service by name and on the host, and suggests running it on a Docker network shared with Jellyfin
   (address `http://speaches:8000/v1`), or on the host with `--add-host=host.docker.internal:host-gateway`, instead of a
   port published only on the host's loopback, which a container can't reach.
+- **SUB-24:** a rewritten subtitle, and one put back by Undo, keeps the original's permissions: on Linux and macOS its
+  mode (so group write access for other tools survives), on Windows its access list (the file is swapped in with
+  `File.Replace`). The owner and group still become Jellyfin's user where the file is written.
 
 ## [0.9.0-alpha] - 2026-09-26
 
