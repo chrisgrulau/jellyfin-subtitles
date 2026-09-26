@@ -109,6 +109,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         http.Timeout = TimeSpan.FromMinutes(3);
         await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
         var speech = SubtitleSyncTask.SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.find", out var problem);
+        var policies = SubtitleSyncTask.PoliciesOf(config) with { Matcher = SubtitleSyncTask.MatcherFor(config) };
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
@@ -134,7 +135,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             var job = jobs[i];
             try
             {
-                var result = await _finder.FindAsync(job, source, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, SubtitleSyncTask.PoliciesOf(config), config.MaxDownloadsPerDay, cancellationToken).ConfigureAwait(false);
+                var result = await _finder.FindAsync(job, source, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, policies, config.MaxDownloadsPerDay, cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
                 foreach (var p in combined?.Problems ?? [])
                 {

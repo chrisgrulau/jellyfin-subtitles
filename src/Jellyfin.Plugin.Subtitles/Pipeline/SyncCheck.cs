@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,6 +34,7 @@ public sealed class SyncCheck
     private readonly bool _refine;
     private readonly double _detectorLag;
     private readonly double _wordLag;
+    private readonly ILineMatcher? _matcher;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SyncCheck"/> class.
@@ -42,8 +44,10 @@ public sealed class SyncCheck
     /// <param name="refine">Whether to use speech-to-text even when the first stage decided (free services only).</param>
     /// <param name="detectorLag">The line-start detector's lag (0 for synthetic test audio).</param>
     /// <param name="wordLag">The word-timing lag (0 for synthetic tests).</param>
-    public SyncCheck(IAudioSource audio, ISpeechToText? speech, bool refine, double detectorLag = SyncSolver.DetectorLag, double wordLag = TranscriptAligner.WordLag)
+    /// <param name="matcher">Pairs heard phrases with subtitle lines by meaning, when exact words can't settle it (optional).</param>
+    public SyncCheck(IAudioSource audio, ISpeechToText? speech, bool refine, double detectorLag = SyncSolver.DetectorLag, double wordLag = TranscriptAligner.WordLag, ILineMatcher? matcher = null)
     {
+        _matcher = matcher;
         _audio = audio ?? throw new ArgumentNullException(nameof(audio));
         _speech = speech;
         _refine = refine;
@@ -80,14 +84,56 @@ public sealed class SyncCheck
             }
 
             var heard = transcripts.Sum(t => t.Transcript.Words.Count);
+            var byMeaning = string.Empty;
+            if (_matcher is not null && heard >= WordsHeardForLanguageCheck)
+            {
+                var (outcome, note) = await ByMeaningAsync(subtitles, transcripts, first, language, cancellationToken).ConfigureAwait(false);
+                if (outcome is not null)
+                {
+                    return outcome;
+                }
+
+                byMeaning = note;
+            }
+
             var wrongLanguage = heard >= WordsHeardForLanguageCheck && anchors.Count < TranscriptAligner.MinimumAnchors;
-            return new SyncOutcome(first, "line starts", wrongLanguage, wrongLanguage
+            return new SyncOutcome(first, "line starts", wrongLanguage, (wrongLanguage
                 ? "Speech was heard but almost none of it matches this subtitle's text: it may be in another language, for another version, or not dialogue at all (commentary, storyboard or trivia notes). Left unchanged."
-                : "Speech-to-text couldn't settle it either: " + second.Explanation);
+                : "Speech-to-text couldn't settle it either: " + second.Explanation) + byMeaning);
         }
         catch (SpeechToTextException ex)
         {
             return new SyncOutcome(first, "line starts", false, "Speech-to-text failed: " + ex.Message);
+        }
+    }
+
+    // Stage 3: exact words didn't line up, so the matcher pairs what was heard with the subtitle lines by meaning. Its
+    // pairs must still agree on one timing; "different" confirms the subtitles are for something else.
+    private async Task<(SyncOutcome? Outcome, string Note)> ByMeaningAsync(SubtitleDocument subtitles, IReadOnlyList<(double Start, Transcript Transcript)> transcripts, SyncModel first, string? language, CancellationToken ct)
+    {
+        var phrases = MeaningAligner.Phrases(transcripts);
+        var cues = MeaningAligner.Cues(subtitles, transcripts.Select(t => (t.Start, TranscriptSynchroniser.SnippetLength.TotalSeconds)));
+        if (phrases.Count < MeaningAligner.MinimumPairs || cues.Count == 0)
+        {
+            return (null, string.Empty);
+        }
+
+        var match = await _matcher!.MatchAsync(phrases, cues, language, ct).ConfigureAwait(false);
+        var by = match.By ?? "the line matcher";
+        switch (match.Verdict)
+        {
+            case LineVerdict.Different:
+                return (new SyncOutcome(first, "lines by meaning", true, $"Compared by meaning ({by}): these subtitles don't say what is said. {match.Note} Left unchanged."), string.Empty);
+            case LineVerdict.SameContent:
+                var model = MeaningAligner.Solve(MeaningAligner.Anchors(phrases, cues, match.Pairs), _wordLag);
+                if (model.Status != SyncStatus.Unreliable)
+                {
+                    return (new SyncOutcome(model, "lines by meaning", false, $"Lines matched by meaning ({by}), as the wording differs from what is said. {match.Note}".TrimEnd()), string.Empty);
+                }
+
+                return (null, $" Compared by meaning ({by}): the same content, but the matched lines don't agree on one timing.");
+            default:
+                return (null, match.Note.Length > 0 ? " " + match.Note : string.Empty);
         }
     }
 }

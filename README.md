@@ -112,8 +112,9 @@ make results worse.
 
 1. **First release:** candidate sources, scoring, audio check and synchronisation (built-in, local or cloud
    speech-to-text), subtitle clean-up, reversible changes, review screen, budgets.
-2. AI tiebreaker when the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) is installed; audit mode for existing
-   subtitles; subtitle editor.
+2. With the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) installed: lines matched by meaning when the
+   wording differs from what is said (done); AI tiebreaker between candidates; audit mode for existing subtitles;
+   subtitle editor.
 3. Full transcription: last-resort subtitles, discrepancy finder, automatic confidence calibration.
 4. More languages; later, subtitles in a different language from the audio.
 

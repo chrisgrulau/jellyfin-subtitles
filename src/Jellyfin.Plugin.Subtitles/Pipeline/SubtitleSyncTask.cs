@@ -106,6 +106,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         http.Timeout = TimeSpan.FromMinutes(3);
         await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
         var speech = SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.sync", out var problem);
+        var policies = PoliciesOf(config) with { Matcher = MatcherFor(config) };
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
@@ -150,7 +151,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             var job = todo[i];
             try
             {
-                var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, PoliciesOf(config), cancellationToken).ConfigureAwait(false);
+                var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, policies, cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
@@ -164,12 +165,12 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
         if (config.CheckEmbeddedSubtitles)
         {
-            await CheckEmbeddedAsync(config, wanted, ffmpeg, speech, cancellationToken).ConfigureAwait(false);
+            await CheckEmbeddedAsync(config, wanted, ffmpeg, speech, policies, cancellationToken).ConfigureAwait(false);
         }
     }
 
     // Text subtitle tracks inside videos, a few per run (each is copied out by reading the whole video)
-    private async Task CheckEmbeddedAsync(PluginConfiguration config, HashSet<string> wanted, string ffmpeg, ISpeechToText? speech, CancellationToken cancellationToken)
+    private async Task CheckEmbeddedAsync(PluginConfiguration config, HashSet<string> wanted, string ffmpeg, ISpeechToText? speech, Policies policies, CancellationToken cancellationToken)
     {
         var todo = EmbeddedJobs(wanted).Where(_embedded.NeedsCheck).Take(Math.Clamp(config.MaxEmbeddedPerRun, 1, 200)).ToList();
         LogEmbeddedStarting(_logger, todo.Count);
@@ -179,7 +180,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             try
             {
                 var bytes = await FfmpegSubtitleExtractor.ExtractAsync(ffmpeg, job.VideoPath, job.StreamIndex, job.Codec, cancellationToken).ConfigureAwait(false);
-                var result = await _embedded.CheckAsync(job, bytes, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, PoliciesOf(config), cancellationToken).ConfigureAwait(false);
+                var result = await _embedded.CheckAsync(job, bytes, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, policies, cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
@@ -199,6 +200,17 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     {
         ArgumentNullException.ThrowIfNull(config);
         return new Policies(config.TimingFixes, config.TextChanges, config.Cleanup ?? new CleanupSettings());
+    }
+
+    /// <summary>
+    /// The line matcher for one run: the AI plugin (if the settings allow it), limited to that run's AI checks.
+    /// </summary>
+    /// <param name="config">Plugin settings.</param>
+    /// <returns>The matcher, or <c>null</c>.</returns>
+    public static Sync.ILineMatcher? MatcherFor(PluginConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.UseAi && config.MaxAiChecksPerRun > 0 ? new Ai.AiLineMatcher(config.MaxAiChecksPerRun) : null;
     }
 
     /// <summary>

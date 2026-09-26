@@ -194,7 +194,7 @@ public sealed class SubtitleFinder
                 continue;
             }
 
-            var outcome = await new SyncCheck(audio, speech, refine: speech is not null)
+            var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
                 .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
             if (outcome.WrongLanguageSuspected || outcome.Model.Status == SyncStatus.Unreliable)
             {
