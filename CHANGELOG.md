@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **FAM-01:** languages are recognised from a built-in ISO 639 table instead of the server's culture data. Before, on
+  servers without ICU or with minimal ICU data (Alpine, some containers), no language was recognised, so nothing was
+  checked or found, and nothing said so.
+  - **Subtitle languages** now accepts codes in any form or names (`eng`, `fr`, `German`). A three-letter code is kept
+    as written.
+  - An entry that isn't a language is ignored and noted in the log.
+
 ## [0.8.0-alpha] - 2026-09-26
 
 ### Added

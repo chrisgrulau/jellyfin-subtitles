@@ -112,6 +112,10 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             LogNoSpeech(_logger, problem);
         }
         var wanted = SpendingLimit.EffectiveLanguages(config.Languages).Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal);
+        foreach (var unknown in SpendingLimit.UnknownLanguages(config.Languages))
+        {
+            LogUnknownLanguage(_logger, unknown);
+        }
 
         // The results file holds the undo records: if it can't be read, nothing runs (and nothing overwrites it)
         if (!_processor.ResultsReadable)
@@ -433,6 +437,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: dropped {Count} results for subtitle files that no longer exist")]
     private static partial void LogPruned(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: \"{Language}\" in the subtitle languages isn't a language this plugin recognises; it is ignored")]
+    private static partial void LogUnknownLanguage(ILogger logger, string language);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: speech-to-text not used: {Problem}")]
     private static partial void LogNoSpeech(ILogger logger, string problem);

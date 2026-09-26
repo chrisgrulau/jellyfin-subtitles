@@ -1,6 +1,4 @@
 using System;
-using System.Globalization;
-using System.Linq;
 
 namespace Jellyfin.Plugin.Subtitles.SpeechToText;
 
@@ -18,27 +16,7 @@ public static class Languages
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "ISO 639-1 codes are lower case by definition; only ASCII letters reach this point.")]
     public static string? ToTwoLetter(string? code)
     {
-        if (string.IsNullOrWhiteSpace(code))
-        {
-            return null;
-        }
-
-        var c = code.Trim().ToUpperInvariant();
-        var dash = c.IndexOf('-', StringComparison.Ordinal);
-        if (dash > 0)
-        {
-            c = c[..dash];
-        }
-
-        if (c.Length == 2 && c.All(char.IsAsciiLetter))
-        {
-            return c.ToLowerInvariant();
-        }
-
-        // Bibliographic codes that differ from the terminology ones .NET uses
-        c = c switch { "FRE" => "FRA", "GER" => "DEU", "DUT" => "NLD", "CHI" => "ZHO", "CZE" => "CES", "GRE" => "ELL", "PER" => "FAS", "RUM" => "RON", "SLO" => "SLK", "ALB" => "SQI", "ARM" => "HYE", "BAQ" => "EUS", "BUR" => "MYA", "GEO" => "KAT", "ICE" => "ISL", "MAC" => "MKD", "MAO" => "MRI", "MAY" => "MSA", "TIB" => "BOD", "WEL" => "CYM", _ => c };
-        var culture = CultureInfo.GetCultures(CultureTypes.NeutralCultures)
-            .FirstOrDefault(x => string.Equals(x.ThreeLetterISOLanguageName, c, StringComparison.OrdinalIgnoreCase));
-        return culture is null || culture.TwoLetterISOLanguageName.Length != 2 ? null : culture.TwoLetterISOLanguageName;
+        // A table, not the server's culture data: without ICU (or with minimal ICU data) that knows no languages (FAM-01)
+        return Common.Languages.IsoLanguages.TwoLetter(code);
     }
 }
