@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1-alpha] - 2026-09-26
+
 ### Fixed
 
 - **FAM-02:** questions to the AI plugin (lines matched by meaning, the wording audit) carry text in every script as
