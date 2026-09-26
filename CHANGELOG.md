@@ -27,16 +27,22 @@ All notable changes to this project are documented here. The format follows
   - SubDL puts the key in its download links, so the links are never logged, shown or stored.
   - A provider that is down is skipped. One whose daily allowance is used up is left out for the rest of the run
     instead of stopping it.
-
-## [0.3.0-alpha] - 2026-09-26
-
-### Added
-
 - **Local service helper.** On the settings page, **Find a local service** looks for OpenAI-compatible speech-to-text
   services on this server's usual ports (only this server, never the network). Each one found has a **Use this**
   button. The page also suggests how to run one (speaches in Docker), matched to Jellyfin's hardware acceleration
   setting: the GPU image for NVIDIA, the CPU image otherwise. It shows the commands with a copy button. Nothing is
   installed or started by the plugin.
+- **Deepgram credit balance** on the settings page ("Deepgram credit: USD 154.17").
+  - Reading it needs a Deepgram Admin or Owner key. You choose whether it's read with a separate billing key
+    (recommended) or the transcription key itself.
+  - A billing key is kept like the other keys, sent only to api.deepgram.com, used only to read the balance (never to
+    transcribe), and the balance is cached for 10 minutes.
+- **Admin key guard.** If the Deepgram key you save turns out to be an Admin key, the page says so and offers to create
+  a transcription-only key (scope `usage:write`) with it. It then either keeps the Admin key only for the balance, or
+  forgets it.
+
+
+## [0.3.0-alpha] - 2026-09-26
 
 ### Added
 
