@@ -259,7 +259,7 @@ public static partial class DeepgramAccount
         {
             HttpStatusCode.Unauthorized => "Deepgram didn't accept this key.",
             HttpStatusCode.Forbidden when ex.Failure == FailureClass.Authentication => "This key isn't allowed to do that (it needs an Admin or Owner key).",
-            _ => ex.Message,
+            _ => ProviderWording.Said("Deepgram", ex),
         };
         return new SpeechToTextException(why, ex) { Failure = ex.Failure, StatusCode = ex.StatusCode };
     }

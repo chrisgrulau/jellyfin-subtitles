@@ -98,6 +98,17 @@ public class SubDlTests
         Assert.DoesNotContain(Key, ex.Message, StringComparison.Ordinal);
     }
 
+    // Provider failures are worded with the provider's name and its own error reply
+    [Fact]
+    public void Provider_failures_quote_the_provider()
+    {
+        Assert.Equal("SubDL said: quota used", ProviderWording.Said("SubDL", new ProviderException("api.example answered HTTP 429: quota used") { StatusCode = HttpStatusCode.TooManyRequests, Detail = "quota used" }));
+        Assert.Equal("Deepgram answered HTTP 503.", ProviderWording.Said("Deepgram", new ProviderException("api.example answered HTTP 503") { StatusCode = HttpStatusCode.ServiceUnavailable }));
+        Assert.Equal("No connection.", ProviderWording.Said("SubDL", new ProviderException("No connection.")));
+        Assert.Equal("Deepgram", ProviderWording.NameOf("deepgram"));
+        Assert.Equal("The local service", ProviderWording.NameOf("local"));
+    }
+
     // SUB-26: SubDL goes through the shared provider HTTP helper, so its failures are classified
     [Fact]
     public async Task A_subdl_rate_limit_is_classified_and_stops_subdl_for_the_run()
@@ -111,6 +122,7 @@ public class SubDlTests
         Assert.Equal(TimeSpan.FromSeconds(120), ex.RetryAfter);
         Assert.True(FindRules.StopsTheRun(ex));
         Assert.DoesNotContain(Key, ex.Message, StringComparison.Ordinal);
+        Assert.StartsWith("SubDL said: ", ex.Message, StringComparison.Ordinal);
 
         // With another source answering, SubDL is asked once and then left out for the rest of the run
         var combined = new CombinedSource([new Listed("Good"), subdl]);

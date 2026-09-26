@@ -28,7 +28,7 @@ public static class FindRules
     /// <returns>The class, or <c>null</c> for an unclassified failure (only that video fails).</returns>
     internal static FailureClass? ClassOf(Exception? ex) => ex switch
     {
-        ProviderException { StatusCode: HttpStatusCode.TooManyRequests } => FailureClass.ProviderLimit,
+        ProviderException { RateLimited: true } => FailureClass.ProviderLimit,
         ProviderException p => p.Failure,
         _ => null,
     };

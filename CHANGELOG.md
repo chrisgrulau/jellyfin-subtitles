@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Uses common's follow-ups: a 429 counts as a limit through the shared `RateLimited` flag (still stopping that provider
+  for the rest of the run), and SubDL, Deepgram and speech-to-text failures quote the provider's own reply ("SubDL said:
+  …") instead of starting with its host name.
+
 - **SUB-25:** the built-in speech-to-text downloads in the background. **Download now** (shown once the download is
   allowed and it isn't there yet) or **Test** starts it and returns at once; the settings page shows a progress bar and
   percentage while it runs, and tests again when it's done. Before, the first Test downloaded 90–200 MB inside the
