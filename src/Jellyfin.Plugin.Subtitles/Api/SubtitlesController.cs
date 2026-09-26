@@ -349,7 +349,7 @@ public class SubtitlesController : ControllerBase
     [Consumes(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<TestResult>> LimitDeepgramKey([FromBody, Required] LimitKeyRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<LimitKeyResult>> LimitDeepgramKey([FromBody, Required] LimitKeyRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (_keys.Get(SpeechToTextFactory.Deepgram) is not { } admin)
@@ -357,41 +357,44 @@ public class SubtitlesController : ControllerBase
             return BadRequest("Add the Deepgram key first.");
         }
 
+        var config = SubtitlesPlugin.Instance?.Configuration;
+        var before = config?.DeepgramBalance ?? BalanceSource.Off;
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(30);
         try
         {
             if (!await DeepgramAccount.CanReadBillingAsync(http, admin, cancellationToken).ConfigureAwait(false))
             {
-                return new TestResult(false, "The Deepgram key is already a limited key; nothing to change.");
+                return new LimitKeyResult(false, "The Deepgram key is already a limited key; nothing to change.", before);
             }
 
             var limited = await DeepgramAccount.CreateTranscriptionKeyAsync(http, admin, "Shoal Subtitles (transcription only, created by the plugin)", cancellationToken).ConfigureAwait(false);
             _keys.Set(SpeechToTextFactory.Deepgram, limited);
-            var config = SubtitlesPlugin.Instance?.Configuration;
             if (request.KeepForBalance)
             {
                 _keys.Set(DeepgramAccount.BillingKey, admin);
-                if (config is not null)
-                {
-                    config.DeepgramBalance = BalanceSource.SeparateKey;
-                    SubtitlesPlugin.Instance!.SaveConfiguration();
-                }
             }
-            else if (config is { DeepgramBalance: BalanceSource.TranscriptionKey })
+
+            // The page applies the resulting setting too, so its next Save doesn't write the old one back
+            var after = DeepgramAccount.BalanceAfterLimiting(before, request.KeepForBalance);
+            if (config is not null && after != before)
             {
-                config.DeepgramBalance = BalanceSource.Off;
+                config.DeepgramBalance = after;
                 SubtitlesPlugin.Instance!.SaveConfiguration();
             }
 
             DeepgramAccount.ClearCache();
-            return new TestResult(true, request.KeepForBalance
-                ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
-                : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.");
+            const string Stays = " The new key is in your Deepgram project and stays there if this plugin is removed; delete it in Deepgram's console when no longer needed.";
+            return new LimitKeyResult(
+                true,
+                (request.KeepForBalance
+                    ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
+                    : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.") + Stays,
+                after);
         }
         catch (SpeechToTextException ex)
         {
-            return new TestResult(false, ex.Message);
+            return new LimitKeyResult(false, ex.Message, before);
         }
     }
 
@@ -580,6 +583,14 @@ public sealed record LocalServicesResult(IReadOnlyList<FoundService> Found, stri
 /// <param name="Balance">The credit balance, if read.</param>
 /// <param name="Problem">Why something couldn't be shown.</param>
 public sealed record DeepgramStatus(bool HasKey, bool HasBillingKey, BalanceSource BalanceSource, bool? KeyIsAdmin, DeepgramBalance? Balance, string? Problem);
+
+/// <summary>
+/// Result of <see cref="SubtitlesController.LimitDeepgramKey"/>.
+/// </summary>
+/// <param name="Ok">Whether the key was swapped.</param>
+/// <param name="Message">What to show.</param>
+/// <param name="BalanceSource">Which key reads the balance now (the page applies it before its next Save).</param>
+public sealed record LimitKeyResult(bool Ok, string Message, BalanceSource BalanceSource);
 
 /// <summary>
 /// Body of <see cref="SubtitlesController.LimitDeepgramKey"/>.

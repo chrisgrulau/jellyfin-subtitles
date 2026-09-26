@@ -54,6 +54,16 @@ public class DeepgramAccountTests
         Assert.Contains("\"scopes\":[\"usage:write\"]", api.CreatedWith, StringComparison.Ordinal);
     }
 
+    // SUB-27: the page is told which key reads the balance after the swap
+    [Theory]
+    [InlineData(Configuration.BalanceSource.TranscriptionKey, false, Configuration.BalanceSource.Off)]
+    [InlineData(Configuration.BalanceSource.TranscriptionKey, true, Configuration.BalanceSource.SeparateKey)]
+    [InlineData(Configuration.BalanceSource.Off, true, Configuration.BalanceSource.SeparateKey)]
+    [InlineData(Configuration.BalanceSource.Off, false, Configuration.BalanceSource.Off)]
+    [InlineData(Configuration.BalanceSource.SeparateKey, false, Configuration.BalanceSource.SeparateKey)]
+    public void The_balance_setting_follows_a_key_swap(Configuration.BalanceSource before, bool kept, Configuration.BalanceSource after)
+        => Assert.Equal(after, DeepgramAccount.BalanceAfterLimiting(before, kept));
+
     private sealed class FakeDeepgram : HttpMessageHandler
     {
         public List<Uri> Requests { get; } = [];

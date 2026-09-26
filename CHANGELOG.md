@@ -20,6 +20,10 @@ All notable changes to this project are documented here. The format follows
 - **SUB-25:** a built-in speech-to-text download that stops arriving (an expired NAT entry, flaky Wi-Fi) gives up after
   60 seconds without data and is tried again later. Before, it could wait until the server restarted, and the nightly
   tasks and Ingest's transcript requests queued behind it.
+- **SUB-27:** after **Create a transcription-only key**, the settings page shows which key now reads the Deepgram
+  balance, as the server set it. Before, the page kept its old choice and the next Save wrote it back, so reading the
+  balance failed with the limited key. The page and the result now also say the new key is created in your Deepgram
+  project and stays there if the plugin is removed.
 
 ## [0.9.0-alpha] - 2026-09-26
 

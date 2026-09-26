@@ -141,6 +141,18 @@ public static partial class DeepgramAccount
     }
 
     /// <summary>
+    /// Which key reads the balance once the transcription key has been swapped for a limited one: the kept Admin key if it
+    /// was kept, otherwise nothing when the balance was read with the transcription key (a limited key can't read it).
+    /// </summary>
+    /// <param name="current">The setting before the swap.</param>
+    /// <param name="keptForBalance">Whether the Admin key was kept, only to read the balance.</param>
+    /// <returns>The setting after the swap.</returns>
+    public static Configuration.BalanceSource BalanceAfterLimiting(Configuration.BalanceSource current, bool keptForBalance)
+        => keptForBalance ? Configuration.BalanceSource.SeparateKey
+            : current == Configuration.BalanceSource.TranscriptionKey ? Configuration.BalanceSource.Off
+            : current;
+
+    /// <summary>
     /// Forgets the cached balance (after a key changes).
     /// </summary>
     public static void ClearCache()

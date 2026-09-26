@@ -183,7 +183,7 @@
               <p style="margin-top:0"><strong>This is an Admin key.</strong> Besides transcribing, it can create and delete keys and see billing for your whole Deepgram project. It's safer to transcribe with a key that can only transcribe.</p>
               <div class="checkboxContainer" style="margin:0"><label class="emby-checkbox-label"><input id="DgKeepAdmin" type="checkbox" is="emby-checkbox" checked /><span>Keep the Admin key, only to show the credit balance</span></label></div>
               <button is="emby-button" type="button" class="raised button-submit" id="DgLimit"><span>Create a transcription-only key</span></button>
-              <div class="subs-muted">The plugin asks Deepgram for a new key with only the <code>usage:write</code> scope and uses it for transcription from then on.</div>
+              <div class="subs-muted">The plugin asks Deepgram for a new key with only the <code>usage:write</code> scope and uses it for transcription from then on. The new key is created in your Deepgram project and stays there if this plugin is removed; delete it in Deepgram's console when you no longer need it.</div>
             </div>
             <div class="selectContainer" style="margin-top:1em">
               <label class="selectLabel" for="DeepgramBalance">Credit balance</label>
@@ -504,7 +504,9 @@
               Dashboard.alert(r.Message);
               if (r.Ok) {
                 page.querySelector('#DgAdmin').hidden = true;
-                if (keep) { page.querySelector('#DeepgramBalance').value = 'SeparateKey'; dgModeChanged(); }
+                // The server may have changed which key reads the balance; mirror it so Save doesn't write the old value back
+                var source = typeof r.BalanceSource === 'number' ? ['Off', 'SeparateKey', 'TranscriptionKey'][r.BalanceSource] : r.BalanceSource;
+                if (source) { page.querySelector('#DeepgramBalance').value = source; dgModeChanged(); }
               }
               return loadDeepgram(false);
             }, function () { Dashboard.alert('That couldn\'t be done.'); });
