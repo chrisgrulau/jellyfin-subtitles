@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-alpha] - 2026-09-26
+
 ### Added
 
 - **Short transcripts for Ingest** (opt-in: **Let Ingest ask for short transcripts**, off by default). When a new
