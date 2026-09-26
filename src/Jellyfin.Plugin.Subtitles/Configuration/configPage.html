@@ -67,6 +67,11 @@
             </label>
             <div class="fieldDescription checkboxFieldDescription">Searches your subtitle providers (such as the OpenSubtitles plugin), checks the best candidates against the audio, and adds one only if it fits. Existing subtitle files are never replaced.</div>
           </div>
+          <div class="subs-service" data-service="subdl">
+            <h4>SubDL</h4>
+            <div class="fieldDescription">An extra subtitle site (the successor to Subscene), searched after Jellyfin's own providers. It needs a free API key from subdl.com. Its downloads count towards the daily limit under Advanced.</div>
+            <div class="subs-key"></div>
+          </div>
 
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
@@ -320,6 +325,7 @@
             var id = box.getAttribute('data-service');
             var set = keys && keys[id];
             var optional = id === 'local';
+            var noTest = id === 'subdl';
             if (id === 'builtin') {
               box.querySelector('.subs-key').innerHTML = '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button><div class="subs-result subs-muted"></div>';
               return;
@@ -329,7 +335,7 @@
               '<input is="emby-input" type="password" class="svc-key" autocomplete="off" placeholder="' + (set ? 'Enter a new key to replace it' : 'Paste the key') + '" /></div>' +
               '<button is="emby-button" type="button" class="raised svc-savekey"><span>Save key</span></button>' +
               (set ? '<button is="emby-button" type="button" class="raised button-alt svc-clearkey"><span>Clear</span></button>' : '') +
-              '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button>' +
+              (noTest ? '' : '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button>') +
               '<div class="subs-result subs-muted"></div>';
           });
         }

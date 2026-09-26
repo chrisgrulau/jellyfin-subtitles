@@ -33,8 +33,8 @@ find candidates → score them → check the best against the audio → synchron
 ```
 
 1. **Find candidates**: first through Jellyfin's own subtitle providers (for example the OpenSubtitles plugin, using your
-   account), then subtitles already embedded in the file (text tracks, and image tracks read with OCR), then optional
-   extra providers. As a last resort, and only if you allow it, subtitles can be generated from a transcript (clearly
+   account), then SubDL (with a free API key), then subtitles already embedded in the file (text tracks, and image
+   tracks read with OCR). As a last resort, and only if you allow it, subtitles can be generated from a transcript (clearly
    labelled as such).
 2. **Score them** without spending anything: release name, source and edition, frame rate, running time, uploader
    signals, machine-translation flags, language check.
@@ -106,6 +106,7 @@ make results worse.
 
 - Jellyfin **12.1** or newer (the plugin targets .NET 10).
 - For OpenSubtitles results: Jellyfin's OpenSubtitles plugin, signed in to your account.
+- For SubDL results: a free API key from subdl.com, entered on the plugin page.
 
 ## Roadmap
 
