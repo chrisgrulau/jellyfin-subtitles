@@ -90,13 +90,13 @@ public class SpeechToTextTests
 
         var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => stt.TranscribeAsync(new float[1600], null, TestContext.Current.CancellationToken));
 
-        Assert.True(ex.NeedsAttention);
+        Assert.Equal(Jellyfin.Plugin.Common.Resilience.FailureClass.Authentication, ex.Failure);
         Assert.DoesNotContain(Key, ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(Key[^12..], ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task A_rate_limit_carries_the_providers_wait()
+    public async Task A_rate_limit_is_transient()
     {
         using var handler = new FakeHandler(HttpStatusCode.TooManyRequests, """{"error":"slow down"}""");
         using var http = new HttpClient(handler);
@@ -104,8 +104,7 @@ public class SpeechToTextTests
 
         var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => stt.TranscribeAsync(new float[1600], null, TestContext.Current.CancellationToken));
 
-        Assert.False(ex.NeedsAttention);
-        Assert.Equal(TimeSpan.FromSeconds(42), ex.RetryAfter);
+        Assert.Equal(Jellyfin.Plugin.Common.Resilience.FailureClass.Transient, ex.Failure);
     }
 
     [Theory]

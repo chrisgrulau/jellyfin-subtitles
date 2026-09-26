@@ -26,19 +26,16 @@ public abstract class HttpSpeechToText : ISpeechToText
 
     private readonly HttpClient _http;
     private readonly string? _key;
-    private readonly TimeProvider _clock;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HttpSpeechToText"/> class.
     /// </summary>
     /// <param name="http">HTTP client.</param>
     /// <param name="key">API key, if the service needs one.</param>
-    /// <param name="clock">Clock (for reading retry dates).</param>
-    protected HttpSpeechToText(HttpClient http, string? key, TimeProvider? clock)
+    protected HttpSpeechToText(HttpClient http, string? key)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _key = key;
-        _clock = clock ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -78,7 +75,6 @@ public abstract class HttpSpeechToText : ISpeechToText
                 throw new SpeechToTextException(string.Create(CultureInfo.InvariantCulture, $"{Id}: HTTP {status}: {Redaction.Redact(body, [_key])}"))
                 {
                     Failure = HttpFailure.Classify(response.StatusCode, body),
-                    RetryAfter = HttpFailure.RetryAfter(response, _clock.GetUtcNow()),
                 };
             }
 

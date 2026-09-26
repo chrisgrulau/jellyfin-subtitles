@@ -40,9 +40,6 @@ internal sealed class MeteredSpeechToText : ISpeechToText
     /// <inheritdoc />
     public string Id => _inner.Id;
 
-    /// <summary>Gets why the last call was refused, if it was (so a run can stop using this service).</summary>
-    public string? Refused { get; private set; }
-
     /// <inheritdoc />
     public async Task<Transcript> TranscribeAsync(float[] samples, string? language, CancellationToken cancellationToken)
     {
@@ -74,9 +71,5 @@ internal sealed class MeteredSpeechToText : ISpeechToText
         }
     }
 
-    private SpeechToTextException Refuse(string why)
-    {
-        Refused = why;
-        return new SpeechToTextException(why) { Failure = FailureClass.ProviderLimit };
-    }
+    private static SpeechToTextException Refuse(string why) => new(why) { Failure = FailureClass.ProviderLimit };
 }

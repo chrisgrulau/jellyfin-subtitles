@@ -58,7 +58,7 @@ Three uses, each switched on or off separately and each with its own provider an
 |---|---|---|
 | Check and synchronise | A few short snippets per video | On |
 | Context for AI decisions | A slightly longer excerpt, when the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) is installed. Also used for the short transcripts [Ingest](https://github.com/chrisgrulau/jellyfin-ingest) may ask for (**Let Ingest ask for short transcripts**, off by default) to tell which episode a new video is | Off |
-| Full transcript | The whole video: last-resort subtitles, detailed checks, precise timing | Off |
+| Full transcript | Coming later: the whole video, for last-resort subtitles and detailed checks. Not used yet; the settings page shows it disabled | Off |
 
 Providers:
 
@@ -106,8 +106,9 @@ subtitle.
 ## Settings
 
 **Dashboard → Plugins → Subtitles.** Basic settings cover the key decisions in plain language; an **Advanced settings**
-section holds finer controls (confidence thresholds, calibration, matching weights) with warnings where a change could
-make results worse.
+section holds finer controls (costs, how much is checked per run, clean-up details, AI checks) with warnings where a
+change could make results worse. Automatic threshold tuning and "Let agreement between sources settle disagreements" are
+shown there as coming later; they have no effect yet.
 
 ## Requirements
 

@@ -324,17 +324,17 @@
             <h3 class="sectionTitle">Judging results</h3>
             <div class="checkboxContainer checkboxContainer-withDescription">
               <label class="emby-checkbox-label">
-                <input id="SelfCalibration" type="checkbox" is="emby-checkbox" />
-                <span>Tune confidence thresholds automatically</span>
+                <input id="SelfCalibration" type="checkbox" is="emby-checkbox" disabled />
+                <span>Tune confidence thresholds automatically (coming later)</span>
               </label>
-              <div class="fieldDescription checkboxFieldDescription">Uses subtitles already known to be good in your library to calibrate each speech-to-text model.</div>
+              <div class="fieldDescription checkboxFieldDescription">Not available yet: this setting has no effect in this version. It will use subtitles already known to be good in your library to calibrate each speech-to-text model.</div>
             </div>
             <div class="checkboxContainer checkboxContainer-withDescription">
               <label class="emby-checkbox-label">
-                <input id="AgreementDecides" type="checkbox" is="emby-checkbox" />
-                <span>Let agreement between sources settle disagreements</span>
+                <input id="AgreementDecides" type="checkbox" is="emby-checkbox" disabled />
+                <span>Let agreement between sources settle disagreements (coming later)</span>
               </label>
-              <div class="fieldDescription checkboxFieldDescription">When off, any disagreement is held for your review, even when independent sources agree.</div>
+              <div class="fieldDescription checkboxFieldDescription">Not available yet: this setting has no effect in this version.</div>
             </div>
             <div class="checkboxContainer checkboxContainer-withDescription">
               <label class="emby-checkbox-label">
@@ -375,7 +375,7 @@
         var tiers = [
           ['SyncSnippets', 'Check and synchronise', 'Short snippets only: a few minutes per video at most.'],
           ['AiContext', 'Context for AI decisions', 'A slightly longer excerpt (a couple of minutes), used only when the AI plugin is installed, for example to tell which episode a new video is.'],
-          ['FullTranscript', 'Full transcript', 'The whole video: last-resort subtitles and detailed checks. Can be costly with cloud services.']
+          ['FullTranscript', 'Full transcript (coming later)', 'Not available yet: nothing uses it in this version. It will transcribe the whole video for last-resort subtitles and detailed checks.', true]
         ];
         // The euro plus every currency in the European Central Bank's daily rates (as CurrencyCode.Supported)
         var currencies = ['AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'HUF', 'IDR', 'ILS', 'INR', 'ISK',
@@ -387,12 +387,14 @@
         function renderTiers(config) {
           page.querySelector('#Tiers').innerHTML = tiers.map(function (t) {
             var v = config[t[0]] || {};
-            return '<div class="subs-tier" data-tier="' + t[0] + '">' +
-              '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="tier-on"' + (v.Enabled ? ' checked' : '') + ' /><span>' + esc(t[1]) + '</span></label>' +
+            // A use that isn't built yet is shown, but can't be switched on (and isn't saved)
+            var soon = t[3] === true, off = soon ? ' disabled' : '';
+            return '<div class="subs-tier" data-tier="' + t[0] + '"' + (soon ? ' data-soon="true"' : '') + '>' +
+              '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="tier-on"' + (v.Enabled && !soon ? ' checked' : '') + off + ' /><span>' + esc(t[1]) + '</span></label>' +
               '<div class="fieldDescription checkboxFieldDescription">' + esc(t[2]) + '</div></div>' +
-              '<div class="selectContainer"><label class="selectLabel">Provider</label><select is="emby-select" class="tier-provider">' +
+              '<div class="selectContainer"><label class="selectLabel">Provider</label><select is="emby-select" class="tier-provider"' + off + '>' +
               providers.map(function (p) { return '<option value="' + p[0] + '"' + (v.Provider === p[0] ? ' selected' : '') + '>' + esc(p[1]) + '</option>'; }).join('') + '</select></div>' +
-              '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">Model</label><input is="emby-input" type="text" class="tier-model" value="' + esc(v.Model) + '" placeholder="Current recommended" /></div>' +
+              '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">Model</label><input is="emby-input" type="text" class="tier-model" value="' + esc(v.Model) + '" placeholder="Current recommended"' + off + ' /></div>' +
               '</div>';
           }).join('');
         }
@@ -529,7 +531,7 @@
         }
 
         function modelFor(id) {
-          var row = Array.prototype.filter.call(page.querySelectorAll('.subs-tier'), function (r) { return r.querySelector('.tier-provider').value === id; })[0];
+          var row = Array.prototype.filter.call(page.querySelectorAll('.subs-tier:not([data-soon])'), function (r) { return r.querySelector('.tier-provider').value === id; })[0];
           return row ? row.querySelector('.tier-model').value.trim() : '';
         }
 
@@ -771,7 +773,7 @@
         page.querySelector('#FindNow').addEventListener('click', function () { runTask('ShoalSubtitlesFind', 'Finding missing subtitles'); });
 
         function tiersFromPage() {
-          return Array.prototype.map.call(page.querySelectorAll('.subs-tier'), function (row) {
+          return Array.prototype.map.call(page.querySelectorAll('.subs-tier:not([data-soon])'), function (row) {
             return { Enabled: row.querySelector('.tier-on').checked, Provider: row.querySelector('.tier-provider').value };
           });
         }
@@ -803,8 +805,6 @@
             page.querySelector('#DeepgramBalance').value = config.DeepgramBalance || 'Off';
             dgModeChanged();
             loadDeepgram(false);
-            page.querySelector('#SelfCalibration').checked = config.SelfCalibration;
-            page.querySelector('#AgreementDecides').checked = config.AgreementDecides;
             page.querySelector('#UseAi').checked = config.UseAi !== false;
             page.querySelector('#AuditWording').checked = config.AuditWording !== false;
             page.querySelector('#MaxAuditsOfEarlierPerRun').value = config.MaxAuditsOfEarlierPerRun == null ? 5 : config.MaxAuditsOfEarlierPerRun;
@@ -865,8 +865,6 @@
             config.NoSpendingLimit = page.querySelector('#NoSpendingLimit').checked;
             config.AllowBuiltInDownload = page.querySelector('#AllowBuiltInDownload').checked;
             config.DeepgramBalance = page.querySelector('#DeepgramBalance').value;
-            config.SelfCalibration = page.querySelector('#SelfCalibration').checked;
-            config.AgreementDecides = page.querySelector('#AgreementDecides').checked;
             config.UseAi = page.querySelector('#UseAi').checked;
             config.AuditWording = page.querySelector('#AuditWording').checked;
             var earlier = parseInt(page.querySelector('#MaxAuditsOfEarlierPerRun').value, 10);
@@ -883,7 +881,7 @@
             cleanup.FlashThresholdMs = Math.min(5000, Math.max(0, parseInt(page.querySelector('#FlashThresholdMs').value, 10) || 500));
             cleanup.FlashTargetMs = Math.min(5000, Math.max(cleanup.FlashThresholdMs, parseInt(page.querySelector('#FlashTargetMs').value, 10) || 833));
             cleanup.FixTypesetTiming = page.querySelector('#FixTypesetTiming').checked;
-            Array.prototype.forEach.call(page.querySelectorAll('.subs-tier'), function (row) {
+            Array.prototype.forEach.call(page.querySelectorAll('.subs-tier:not([data-soon])'), function (row) {
               config[row.getAttribute('data-tier')] = {
                 Enabled: row.querySelector('.tier-on').checked,
                 Provider: row.querySelector('.tier-provider').value,

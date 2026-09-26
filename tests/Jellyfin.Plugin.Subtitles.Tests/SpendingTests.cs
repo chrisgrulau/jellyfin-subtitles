@@ -61,7 +61,7 @@ public sealed class SpendingTests : IDisposable
 
         Assert.Equal(3, inner.Calls);
         Assert.Contains("monthly limit", ex.Message, StringComparison.Ordinal);
-        Assert.NotNull(metered.Refused);
+        Assert.Equal(Jellyfin.Plugin.Common.Resilience.FailureClass.ProviderLimit, ex.Failure);
         Assert.Equal(0.01935m, spending.Ledger.ThisMonth(Aud(0.02m), spending.Rates.Current).Total);
     }
 

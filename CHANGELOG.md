@@ -11,6 +11,11 @@ All notable changes to this project are documented here. The format follows
   25 results or 5 seconds, and when a run ends or the server stops); a result that records a change to a file or its
   undo, a review decision or an added subtitle is still written at once. Results are indexed by id and by path, so large
   libraries don't search the whole list for each file.
+- **FAM-08:** settings that did nothing are shown disabled as "coming later" instead of looking active: the **Full
+  transcript** use, **Tune confidence thresholds automatically** and **Let agreement between sources settle
+  disagreements**. Saving the page no longer changes them. The README and design notes say they're planned. Unused code
+  was removed (`SpeechToTextException.RetryAfter` and `NeedsAttention`, `MeteredSpeechToText.Refused`,
+  `SpendingLimit.NeedsBuiltInConsent`).
 
 ### Fixed
 

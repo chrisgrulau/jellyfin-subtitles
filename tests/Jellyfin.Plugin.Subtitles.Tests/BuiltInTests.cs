@@ -76,7 +76,7 @@ public sealed class BuiltInTests : IDisposable
         var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => installer.EnsureAsync("linux-x64", "base", CancellationToken.None));
 
         Assert.Contains("checksum", ex.Message, StringComparison.Ordinal);
-        Assert.True(ex.NeedsAttention);
+        Assert.Equal(Jellyfin.Plugin.Common.Resilience.FailureClass.BadRequest, ex.Failure);
         Assert.False(File.Exists(Path.Combine(_dir, "models", "ggml-base-q8_0.bin")));
         Assert.Empty(Directory.GetFiles(Path.Combine(_dir, "models")));
     }

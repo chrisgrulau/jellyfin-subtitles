@@ -80,10 +80,4 @@ public sealed class SpeechToTextException : Exception
 
     /// <summary>Gets the HTTP status the provider answered with, if the failure was an HTTP error.</summary>
     public System.Net.HttpStatusCode? StatusCode { get; init; }
-
-    /// <summary>Gets how long the provider asked us to wait, if it said.</summary>
-    public TimeSpan? RetryAfter { get; init; }
-
-    /// <summary>Gets a value indicating whether the problem is the configuration (key, address) rather than the service.</summary>
-    public bool NeedsAttention => Failure is FailureClass.Authentication or FailureClass.BadRequest;
 }

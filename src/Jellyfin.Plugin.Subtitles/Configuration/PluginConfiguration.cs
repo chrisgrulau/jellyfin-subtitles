@@ -65,7 +65,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AllowIngest { get; set; }
 
     /// <summary>
-    /// Gets or sets speech-to-text of the whole video (last-resort subtitles, discrepancy checks, precise timing).
+    /// Gets or sets speech-to-text of the whole video (last-resort subtitles, discrepancy checks, precise timing). Not
+    /// used yet: kept so a setting saved now carries over when it is built; the settings page shows it as coming later.
     /// </summary>
     public TranscriptionTier FullTranscript { get; set; } = new();
 
@@ -148,13 +149,13 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// Gets or sets a value indicating whether confidence thresholds are tuned automatically against subtitles already
-    /// known to be good.
+    /// known to be good. Not used yet (coming later); the settings page shows it disabled.
     /// </summary>
     public bool SelfCalibration { get; set; } = true;
 
     /// <summary>
     /// Gets or sets a value indicating whether agreement between independent sources decides a disagreement on its own;
-    /// when off, such disagreements go to review.
+    /// when off, such disagreements go to review. Not used yet (coming later); the settings page shows it disabled.
     /// </summary>
     public bool AgreementDecides { get; set; } = true;
 

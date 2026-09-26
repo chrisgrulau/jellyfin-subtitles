@@ -36,18 +36,6 @@ public class ConfigurationTests
     public void The_default_limit_is_a_small_cap()
         => Assert.InRange(SpendingLimit.DefaultMonthly, 0.01m, 10m);
 
-    [Fact]
-    public void Built_in_speech_to_text_needs_consent_only_when_it_would_be_used()
-    {
-        var builtIn = new TranscriptionTier { Enabled = true };
-        var off = new TranscriptionTier { Enabled = false };
-        var cloud = new TranscriptionTier { Enabled = true, Provider = "deepgram" };
-
-        Assert.True(SpendingLimit.NeedsBuiltInConsent([builtIn, off], allowed: false));
-        Assert.False(SpendingLimit.NeedsBuiltInConsent([builtIn], allowed: true));
-        Assert.False(SpendingLimit.NeedsBuiltInConsent([off, cloud], allowed: false));
-    }
-
     [Theory]
     [InlineData("aud", "AUD")]
     [InlineData(" EUR ", "EUR")]

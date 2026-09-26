@@ -57,7 +57,7 @@ machine-/AI-translated flags; hearing-impaired and forced preferences; language 
 |---|---|---|
 | A: sync snippets | Check and synchronise | A few minutes per video at most |
 | B: AI context | Excerpt handed to the AI plugin | Extends tier A's snippets to a target length rather than transcribing afresh |
-| C: full transcript | Last-resort subtitles, discrepancy finder, precise timing | Opt-in; costly with cloud providers |
+| C: full transcript | Last-resort subtitles, discrepancy finder, precise timing | Planned, not built: the setting is shown disabled ("coming later") |
 
 Each tier has its own on/off switch, provider, model and budget. Transcripts are cached by file fingerprint, provider,
 model and time range, so no audio is paid for twice and re-runs are free.
@@ -136,10 +136,11 @@ lines them up with the local-service word times the synchroniser was calibrated 
       result is marked audited with a note.
     - No answer, such as when the allowance is used up, leaves the result for a later run. Attempts are capped, so an
       exhausted allowance doesn't keep transcribing.
-- Agreement between independent sources outweighs a single model's confidence (default; can be switched to review).
+- Planned, not built: agreement between independent sources outweighing a single model's confidence (with a switch to
+  send such cases to review instead). The setting is shown disabled ("coming later").
 - Confidence is not comparable across models, so thresholds are per model (starting points: Deepgram word confidence
-  ≥ 0.90 over a line; Whisper average log-probability ≥ −0.3 with compression-ratio and no-speech guards) and
-  self-calibrated by default against subtitles already known to be good.
+  ≥ 0.90 over a line; Whisper average log-probability ≥ −0.3 with compression-ratio and no-speech guards). Planned, not
+  built: calibrating them against subtitles already known to be good (the setting is shown disabled).
 
 ## Editor
 
@@ -222,8 +223,8 @@ works, just without AI tiebreakers.
 
 ## Settings: basic vs advanced
 
-Basic settings are the key decisions in plain language. Advanced settings (thresholds, calibration, snippet lengths,
-matching weights) sit behind a collapsed section with a warning; risky values show their own warning.
+Basic settings are the key decisions in plain language. Advanced settings (costs, per-run limits, clean-up details, AI
+checks) sit behind a collapsed section with a warning; risky values show their own warning.
 
 ## Languages
 
