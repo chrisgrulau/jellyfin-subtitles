@@ -7,29 +7,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Stage 4: generated subtitles.** When the search finds nothing that fits a video in one of your languages, the
-  plugin can transcribe the whole video and add a subtitle made from it: **Generate subtitles when none can be found**
-  (off by default) and a new nightly task, **Generate missing subtitles and check whole files** (05:00; **Run full
-  transcripts now** on the plugin page).
-  - Only in the language spoken: the audio track's language must be the subtitle's (a track without a tag counts as
-    your first subtitle language).
-  - Written as `<video>.<language>.generated.srt`; Jellyfin lists it with the title "generated". Lines follow common
-    subtitling rules: two lines of 42 characters at most, 1–7 seconds, split at pauses and sentence ends, lengthened for
-    reading where there's room, never overlapping.
-  - It uses the **Full transcript** speech-to-text (no longer "coming later"), with its own service and model: the
-    built-in one by default (free); a paid one is charged for the whole video, reserved against the monthly limit
-    before it starts. Audio goes in 10-minute parts with a short overlap, joined without repeating words.
-  - A generated subtitle doesn't stop the search: a real one found later replaces it (the generated file is removed; a
-    copy is kept in the originals folder). Undo removes it. The timing check leaves generated subtitles alone.
-  - Almost no speech (music, silence) makes no subtitle and records **No speech to transcribe**, not retried unless the
-    service or model changes.
-  - At most **Videos transcribed per night** (20 by default, 0 to 200), those waiting longest first, and no new video
-    is started after **Stop starting new videos after** hours (4 by default, 0 to 24, 0 = no limit); a video in
-    progress finishes, and the summary line says how many are left for tomorrow.
-  - New result statuses: **Generated**, **No speech to transcribe**, **Replaced by a found subtitle**; generated
-    subtitles also go to the Activity log.
-  - Deepgram is asked for punctuation, and OpenAI-compatible services for segments, only for full transcripts; the
-    sync check's requests are unchanged.
 - **Stage 4: whole-file check.** A doubtful subtitle is compared line by line with a full transcript of its video, and
   the lines that differ wait for your review: **Check whole file for doubtful subtitles** (off by default), and **Check
   whole file** on any subtitle in the results (checked on the next run, even with the switch off; a subtitle that
@@ -52,6 +29,41 @@ All notable changes to this project are documented here. The format follows
 - **Tune confidence thresholds automatically** now works (off by default): each speech-to-text service and model learns
   a stricter threshold from subtitles already found in sync, so that at most 2 % of their words would be flagged; it
   never goes below the starting points.
+
+### Changed
+
+- The nightly task **Generate missing subtitles** is now **Generate missing subtitles and check whole files**, and
+  **Generate now** is **Run full transcripts now**. **Stop starting new videos after** is shared by generating and
+  checking whole files. Generated subtitles reuse a transcript already made for the same video.
+- The unused **Tune confidence thresholds automatically** setting is stored under a new name, so it starts off on
+  every install.
+
+## [0.13.0-alpha] - 2026-09-27
+
+### Added
+
+- **Stage 4: generated subtitles.** When the search finds nothing that fits a video in one of your languages, the
+  plugin can transcribe the whole video and add a subtitle made from it: **Generate subtitles when none can be found**
+  (off by default) and a new nightly task, **Generate missing subtitles** (05:00; **Generate now** on the plugin page).
+  - Only in the language spoken: the audio track's language must be the subtitle's (a track without a tag counts as
+    your first subtitle language).
+  - Written as `<video>.<language>.generated.srt`; Jellyfin lists it with the title "generated". Lines follow common
+    subtitling rules: two lines of 42 characters at most, 1–7 seconds, split at pauses and sentence ends, lengthened for
+    reading where there's room, never overlapping.
+  - It uses the **Full transcript** speech-to-text (no longer "coming later"), with its own service and model: the
+    built-in one by default (free); a paid one is charged for the whole video, reserved against the monthly limit
+    before it starts. Audio goes in 10-minute parts with a short overlap, joined without repeating words.
+  - A generated subtitle doesn't stop the search: a real one found later replaces it (the generated file is removed; a
+    copy is kept in the originals folder). Undo removes it. The timing check leaves generated subtitles alone.
+  - Almost no speech (music, silence) makes no subtitle and records **No speech to transcribe**, not retried unless the
+    service or model changes.
+  - At most **Videos transcribed per night** (20 by default, 0 to 200), those waiting longest first, and no new video
+    is started after **Stop starting new videos after** hours (4 by default, 0 to 24, 0 = no limit); a video in
+    progress finishes, and the summary line says how many are left for tomorrow.
+  - New result statuses: **Generated**, **No speech to transcribe**, **Replaced by a found subtitle**; generated
+    subtitles also go to the Activity log.
+  - Deepgram is asked for punctuation, and OpenAI-compatible services for segments, only for full transcripts; the
+    sync check's requests are unchanged.
 
 ## [0.12.0-alpha] - 2026-09-26
 
