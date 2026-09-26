@@ -66,15 +66,15 @@ internal static class SpeechSelection
     /// </summary>
     /// <param name="service">The service.</param>
     /// <param name="model">The model setting.</param>
-    /// <param name="config">Plugin settings (for the limits).</param>
+    /// <param name="limits">The spending limits (the page's unsaved values for Test, SUB-29).</param>
     /// <param name="spending">Prices, ledger and exchange rates.</param>
     /// <param name="purpose">What the calls are for.</param>
     /// <returns>The service to call.</returns>
-    public static ISpeechToText Metered(ISpeechToText service, string? model, PluginConfiguration config, Spending spending, string purpose)
+    public static ISpeechToText Metered(ISpeechToText service, string? model, Jellyfin.Plugin.Common.Costs.SpendLimits limits, Spending spending, string purpose)
     {
         ArgumentNullException.ThrowIfNull(service);
         return SpeechToTextFactory.IsPaid(service.Id)
-            ? new MeteredSpeechToText(service, ModelOf(service.Id, model), spending, Spending.LimitsOf(config), purpose)
+            ? new MeteredSpeechToText(service, ModelOf(service.Id, model), spending, limits, purpose)
             : service;
     }
 

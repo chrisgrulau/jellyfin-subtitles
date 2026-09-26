@@ -66,7 +66,11 @@ model and time range, so no audio is paid for twice and re-runs are free.
 
 - **Built-in**: a whisper.cpp CPU build that this project compiles in CI for Linux (x64, arm64), Windows and macOS and
   publishes with checksums, plus a small model; downloaded on first use and run on demand. No setup beyond a one-time
-  permission (see below).
+  permission (see below). On the settings page, **Download now** or **Test** starts the download in the background
+  (`POST Subtitles/BuiltIn/Download`; one at a time, sharing the installer's lock) and the page polls its progress
+  (`GET Subtitles/BuiltIn/Download`: idle, downloading, verifying, installed or failed, with bytes and percent); Test
+  answers at once while it runs. A nightly run that needs it downloads it inline instead (or waits for the download
+  already running, then uses it); its progress shows on the page too. A download is cancelled when the server stops.
 - **Local service**: anything speaking the OpenAI transcription API (for example speaches, faster-whisper-server or the
   whisper.cpp server). The plugin page detects services on the usual ports, reads Jellyfin's hardware-acceleration
   setting to suggest the right GPU build, shows a copy-paste setup command, and has a Test button. The plugin never

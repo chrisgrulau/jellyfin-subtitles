@@ -436,8 +436,57 @@ public class SubtitlesController : ControllerBase
                 : _builtIn.Problem);
 
     /// <summary>
+    /// Where the built-in speech-to-text's download stands (SUB-25): <c>idle</c>, <c>downloading</c>, <c>verifying</c>,
+    /// <c>installed</c> or <c>failed</c>, with bytes and percent while it runs. The settings page polls it.
+    /// </summary>
+    /// <param name="model">The model chosen on the page (empty for the default), to say whether it is installed.</param>
+    /// <returns>The status.</returns>
+    [HttpGet("BuiltIn/Download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<BuiltInInstallStatus> BuiltInDownloadStatus([FromQuery] string? model)
+        => _builtIn.Status(BuiltInSource.ModelName(model) ?? "base");
+
+    /// <summary>
+    /// Starts downloading the built-in speech-to-text in the background (SUB-25) and returns at once; poll
+    /// <see cref="BuiltInDownloadStatus"/> for progress. Pressing it while a download runs joins that download.
+    /// </summary>
+    /// <param name="request">The model and the consent box, as on the page (not yet saved).</param>
+    /// <returns>The status.</returns>
+    [HttpPost("BuiltIn/Download")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult<BuiltInInstallStatus> StartBuiltInDownload([FromBody, Required] BuiltInDownloadRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
+        if (!(request.AllowBuiltInDownload ?? config.AllowBuiltInDownload))
+        {
+            return BadRequest("Tick \"Allow the built-in speech-to-text to download and run\" first.");
+        }
+
+        if (_builtIn.Platform is null || _builtIn.Problem is not null)
+        {
+            return BadRequest(_builtIn.Problem ?? "The built-in speech-to-text has no build for this server's system.");
+        }
+
+        if (BuiltInSource.ModelName(request.Model) is not { } model)
+        {
+            return BadRequest("Unknown built-in model; choose base or small.");
+        }
+
+        if (!_builtIn.IsInstalled(model) || _builtIn.Installing)
+        {
+            _builtIn.StartInstall(model);
+        }
+
+        return Accepted(_builtIn.Status(model));
+    }
+
+    /// <summary>
     /// Checks that a speech-to-text service answers, by sending it one second of near-silence (for a paid service this
-    /// costs a small fraction of a cent).
+    /// costs a small fraction of a cent). It uses the page's values as they are, before Save (the service, model,
+    /// address, download permission and spending limits); nothing is saved.
     /// </summary>
     /// <param name="request">The service, model and (for a local service) address to test, as on the settings page.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -449,7 +498,10 @@ public class SubtitlesController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
         var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
-        var paidAllowed = SpendingLimit.AllowsPaidUsage(SpendingLimit.Monthly(config.MonthlyBudget, config.NoSpendingLimit));
+
+        // The page's values as they are now, before Save (SUB-29), made safe as Save would; nothing is stored
+        var limits = request.Limits(config.Currency, config.MonthlyBudget, config.NoSpendingLimit, config.ExtraChargesPercent);
+        var paidAllowed = SpendingLimit.AllowsPaidUsage(limits.Overall);
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(60);
         var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, request.AllowBuiltInDownload ?? config.AllowBuiltInDownload, _keys, http, _builtIn);
@@ -458,11 +510,20 @@ public class SubtitlesController : ControllerBase
             return new TestResult(false, problem ?? "Can't be used.");
         }
 
+        // The built-in download (90–200 MB) runs in the background, never inside this request (SUB-25): Test starts it
+        // and says how far it is; the page shows progress and tests again once it's done
+        if (service.Id == SpeechToTextFactory.BuiltIn && BuiltInSource.ModelName(request.Model) is { } builtInModel
+            && (_builtIn.Installing || !_builtIn.IsInstalled(builtInModel)))
+        {
+            _builtIn.StartInstall(builtInModel);
+            return new TestResult(false, BuiltInProgress.TestMessage(_builtIn.Status(builtInModel)), Downloading: true);
+        }
+
         // A paid service's test is priced and counted like any other call (a fraction of a cent)
         if (SpeechToTextFactory.IsPaid(service.Id))
         {
             await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
-            service = SpeechSelection.Metered(service, request.Model, config, _spending, "subtitles.test");
+            service = SpeechSelection.Metered(service, request.Model, limits, _spending, "subtitles.test");
         }
 
         // One second of a very quiet tone: enough for the service to accept and answer
@@ -483,6 +544,21 @@ public class SubtitlesController : ControllerBase
             return new TestResult(false, ex.Message);
         }
     }
+}
+
+/// <summary>
+/// Body of <see cref="SubtitlesController.StartBuiltInDownload"/>.
+/// </summary>
+public sealed record BuiltInDownloadRequest
+{
+    /// <summary>Gets the model (empty for the default).</summary>
+    public string? Model { get; init; }
+
+    /// <summary>
+    /// Gets whether the download is allowed, as currently ticked on the page (not yet saved); <c>null</c> for the saved
+    /// setting.
+    /// </summary>
+    public bool? AllowBuiltInDownload { get; init; }
 }
 
 /// <summary>
@@ -526,6 +602,34 @@ public sealed record TestRequest
     /// the saved setting.
     /// </summary>
     public bool? AllowBuiltInDownload { get; init; }
+
+    /// <summary>Gets the currency as currently chosen on the page; <c>null</c> for the saved setting.</summary>
+    public string? Currency { get; init; }
+
+    /// <summary>Gets the monthly spending limit as currently entered; <c>null</c> for the saved setting.</summary>
+    public decimal? MonthlyBudget { get; init; }
+
+    /// <summary>Gets whether "no limit" is currently ticked; <c>null</c> for the saved setting.</summary>
+    public bool? NoSpendingLimit { get; init; }
+
+    /// <summary>Gets the extra-charges percentage as currently entered; <c>null</c> for the saved setting.</summary>
+    public decimal? ExtraChargesPercent { get; init; }
+
+    /// <summary>
+    /// The spending limits Test works within: the values sent, or the saved ones where none was sent, made safe by the
+    /// rules Save applies (SUB-29).
+    /// </summary>
+    /// <param name="savedCurrency">The saved currency.</param>
+    /// <param name="savedMonthly">The saved monthly limit.</param>
+    /// <param name="savedNoLimit">The saved "no limit".</param>
+    /// <param name="savedExtraPercent">The saved extra-charges percentage.</param>
+    /// <returns>The limits.</returns>
+    internal Jellyfin.Plugin.Common.Costs.SpendLimits Limits(string? savedCurrency, decimal savedMonthly, bool savedNoLimit, decimal savedExtraPercent)
+        => Pricing.Spending.LimitsOf(
+            string.IsNullOrWhiteSpace(Currency) ? savedCurrency : Currency,
+            MonthlyBudget ?? savedMonthly,
+            NoSpendingLimit ?? savedNoLimit,
+            ExtraChargesPercent ?? savedExtraPercent);
 }
 
 /// <summary>
@@ -533,7 +637,9 @@ public sealed record TestRequest
 /// </summary>
 /// <param name="Ok">Whether the service answered.</param>
 /// <param name="Message">What to show (keys removed).</param>
-public sealed record TestResult(bool Ok, string Message);
+/// <param name="Downloading">Whether the built-in speech-to-text is still downloading (in the background): the page
+/// shows the progress and tests again when it's done.</param>
+public sealed record TestResult(bool Ok, string Message, bool Downloading = false);
 
 /// <summary>
 /// Whether the built-in speech-to-text can run on this server.

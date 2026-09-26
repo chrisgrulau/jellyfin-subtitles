@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 
@@ -10,6 +12,8 @@ namespace Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 public sealed class BuiltInHost : IDisposable
 {
     private readonly string _work;
+    private readonly SingleFlight _background = new();
+    private readonly CancellationTokenSource _stopping = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BuiltInHost"/> class.
@@ -56,8 +60,83 @@ public sealed class BuiltInHost : IDisposable
     public ISpeechToText Create(string model)
         => new BuiltInSpeechToText(Installer, _work, Platform ?? throw new InvalidOperationException("No build for this server."), model);
 
+    /// <summary>Gets a value indicating whether a background download (see <see cref="StartInstall"/>) is running.</summary>
+    public bool Installing => _background.Running;
+
+    /// <summary>Gets the background download started last, if any (for tests).</summary>
+    internal Task? Background => _background.Current;
+
+    /// <summary>
+    /// Starts downloading the program and a model in the background (SUB-25), so the settings page doesn't wait on
+    /// 90–200 MB inside one request; <see cref="BuiltInInstaller.Progress"/> says how far it is. Only one runs at a time:
+    /// asking while one runs joins it. It shares the installer's lock, so a nightly run that needs the built-in
+    /// speech-to-text meanwhile waits for it and then uses what it installed. It stops when the server shuts down. The
+    /// caller checks the administrator's consent first.
+    /// </summary>
+    /// <param name="model">Model setting value (<c>base</c> or <c>small</c>).</param>
+    /// <returns><c>true</c> if a download started now, <c>false</c> if one was already running.</returns>
+    /// <exception cref="InvalidOperationException">There is no build for this server, or it can't run here.</exception>
+    public bool StartInstall(string model)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        var platform = Platform ?? throw new InvalidOperationException("No build for this server.");
+        if (Problem is not null)
+        {
+            throw new InvalidOperationException(Problem);
+        }
+
+        return _background.TryStart(
+            async token =>
+            {
+                try
+                {
+                    await Installer.EnsureAsync(platform, model, token).ConfigureAwait(false);
+                    Installer.Progress.Complete();
+                }
+#pragma warning disable CA1031 // Background work: any failure is shown on the settings page, never thrown into nothing
+                catch (Exception ex)
+#pragma warning restore CA1031
+                {
+                    // Shown on the page; the next use, Test or Download now tries again
+                    Installer.Progress.Fail(BuiltInProgress.Describe(ex));
+                }
+            },
+            _stopping.Token,
+            // Shown as downloading from the moment it's asked for, so the page never reads the previous outcome
+            () => Installer.Progress.Begin(0));
+    }
+
+    /// <summary>
+    /// Whether the program and a model are on disk (not checked; they are checked before every run).
+    /// </summary>
+    /// <param name="model">Model setting value.</param>
+    /// <returns><c>true</c> if both are there.</returns>
+    public bool IsInstalled(string model) => Platform is { } platform && Installer.IsInstalled(platform, model);
+
+    /// <summary>
+    /// Where the download stands for a model, for the settings page.
+    /// </summary>
+    /// <param name="model">Model setting value.</param>
+    /// <returns>The status.</returns>
+    public BuiltInInstallStatus Status(string model) => Installer.Progress.Report(IsInstalled(model));
+
     /// <inheritdoc />
-    public void Dispose() => Installer.Dispose();
+    public void Dispose()
+    {
+        // The server is stopping: a background download is cancelled (its partial file is removed) before the installer goes
+        _stopping.Cancel();
+        try
+        {
+            _background.Current?.Wait(TimeSpan.FromSeconds(10));
+        }
+        catch (AggregateException)
+        {
+            // Its outcome no longer matters
+        }
+
+        Installer.Dispose();
+        _stopping.Dispose();
+    }
 
     /// <summary>
     /// Moves an install from where earlier versions put it (under Jellyfin's plugins folder, where on Windows its DLLs

@@ -33,6 +33,8 @@
       #SubtitlesConfigPage .subs-key { display: flex; gap: .5em; align-items: end; flex-wrap: wrap; }
       #SubtitlesConfigPage .subs-key .inputContainer { flex: 1 1 14em; margin: 0; }
       #SubtitlesConfigPage .subs-set { color: #4caf50; }
+      #SubtitlesConfigPage .subs-download { display: flex; gap: .75em; align-items: center; flex-wrap: wrap; margin: .5em 0; }
+      #SubtitlesConfigPage .subs-download progress { flex: 0 1 16em; }
       #SubtitlesConfigPage .subs-result { flex-basis: 100%; margin: .25em 0; }
       #SubtitlesConfigPage .subs-found { list-style: none; margin: .5em 0; padding: 0; }
       #SubtitlesConfigPage .subs-found li { display: flex; gap: .75em; align-items: center; flex-wrap: wrap; padding: .3em 0; }
@@ -168,8 +170,12 @@
           <p class="subs-muted">Keys are stored on this server in a file only Jellyfin can read. They are never shown again, logged or included in exports; you can replace or clear them. <strong>Test</strong> sends one second of near-silence (for a paid service, a small fraction of a cent).</p>
           <div class="subs-service" data-service="builtin">
             <h4>Built-in</h4>
-            <div class="fieldDescription">Runs on this server's CPU. Model <strong>base</strong> (the default; about 90 MB with the program) or <strong>small</strong> (more accurate, slower; about 200 MB), set in the Model box above. Downloaded the first time it's needed, or when you press Test.</div>
+            <div class="fieldDescription">Runs on this server's CPU. Model <strong>base</strong> (the default; about 90 MB with the program) or <strong>small</strong> (more accurate, slower; about 200 MB), set in the Model box above. Downloaded in the background when you press <strong>Download now</strong> or Test, or the first time it's needed.</div>
             <div id="BuiltInProblem" class="subs-warning" role="status" hidden></div>
+            <div id="BuiltInDownload" class="subs-download" hidden>
+              <progress id="BuiltInProgress" max="100" hidden></progress>
+              <span id="BuiltInDownloadText" class="subs-muted" role="status" aria-live="polite"></span>
+            </div>
             <div class="subs-key"></div>
           </div>
           <div class="subs-service" data-service="local">
@@ -419,7 +425,8 @@
             var optional = id === 'local';
             var noTest = id === 'subdl';
             if (id === 'builtin') {
-              box.querySelector('.subs-key').innerHTML = '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button><div class="subs-result subs-muted" aria-live="polite"></div>';
+              box.querySelector('.subs-key').innerHTML = '<button is="emby-button" type="button" class="raised svc-download" hidden><span>Download now</span></button><button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button><div class="subs-result subs-muted" aria-live="polite"></div>';
+              if (builtInStatus) { showBuiltInDownload(builtInStatus); }
               return;
             }
             box.querySelector('.subs-key').innerHTML =
@@ -472,7 +479,7 @@
             Array.prototype.forEach.call(box.querySelectorAll('.local-use'), function (b) {
               b.addEventListener('click', function () {
                 page.querySelector('#LocalServiceUrl').value = found[parseInt(b.getAttribute('data-i'), 10)].Address;
-                Dashboard.alert('Address filled in. Save the settings, then press Test.');
+                Dashboard.alert('Address filled in. Press Test to check it, then Save.');
               });
             });
             box.querySelector('.local-copy').addEventListener('click', function () {
@@ -554,11 +561,73 @@
             var allow = page.querySelector('#AllowBuiltInDownload');
             allow.disabled = !b.Available;
             if (!b.Available) { allow.checked = false; }
+            builtInAvailable = !!b.Available;
+            return loadBuiltInDownload();
           }, function () {});
         }
 
+        // The built-in download runs in the background on the server (SUB-25); this shows how far it is, polling while it
+        // runs, and offers Download now once it's allowed and not there yet
+        var builtInAvailable = false, builtInStatus = null, builtInPoll = null, retestAfterDownload = false;
+
+        function showBuiltInDownload(st) {
+          builtInStatus = st;
+          var box = page.querySelector('#BuiltInDownload'), bar = page.querySelector('#BuiltInProgress'), text = page.querySelector('#BuiltInDownloadText');
+          var button = page.querySelector('.subs-service[data-service="builtin"] .svc-download');
+          var allowed = page.querySelector('#AllowBuiltInDownload').checked;
+          var busy = st.State === 'downloading' || st.State === 'verifying';
+          var mb = function (n) { return Math.round(n / 1048576); };
+          bar.hidden = !busy;
+          if (busy && st.Percent != null) { bar.value = st.Percent; } else { bar.removeAttribute('value'); }
+          text.textContent = st.State === 'downloading' ? 'Downloading' + (st.Percent != null ? ': ' + st.Percent + '% (' + mb(st.BytesDone) + ' of ' + mb(st.BytesTotal) + ' MB)' : '…')
+            : st.State === 'verifying' ? 'Checking the download…'
+            : st.State === 'installed' ? 'Downloaded and ready.'
+            : st.State === 'failed' ? 'The download failed: ' + (st.Error || 'unknown error') + (allowed ? ' Press Download now to try again.' : '')
+            : allowed ? 'Not downloaded yet.' : '';
+          box.hidden = !builtInAvailable || !text.textContent;
+          if (button) { button.hidden = !builtInAvailable || !allowed || busy || st.State === 'installed'; }
+        }
+
+        function loadBuiltInDownload() {
+          if (builtInPoll) { clearTimeout(builtInPoll); builtInPoll = null; }
+          if (!builtInAvailable) { page.querySelector('#BuiltInDownload').hidden = true; return Promise.resolve(); }
+          return ApiClient.getJSON(ApiClient.getUrl('Subtitles/BuiltIn/Download', { model: modelFor('builtin') })).then(function (st) {
+            showBuiltInDownload(st);
+            if (st.State === 'downloading' || st.State === 'verifying') {
+              builtInPoll = setTimeout(loadBuiltInDownload, 1500);
+            } else if (retestAfterDownload) {
+              // Test started the download: test now that it's done
+              retestAfterDownload = false;
+              var test = page.querySelector('.subs-service[data-service="builtin"] .svc-test');
+              if (st.State === 'installed' && test) { test.click(); }
+            }
+          }, function () {});
+        }
+
+        page.addEventListener('viewhide', function () {
+          if (builtInPoll) { clearTimeout(builtInPoll); builtInPoll = null; }
+        });
+
+        page.addEventListener('change', function (e) {
+          if (e.target.id === 'AllowBuiltInDownload' || e.target.closest('.subs-tier')) { loadBuiltInDownload(); }
+        });
+
         function loadKeys() {
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Keys')).then(renderKeys);
+        }
+
+        // What Test uses: the page's values as they are now, before Save (SUB-29); the spending values as Save sends them
+        function testValues(id) {
+          return {
+            Provider: id,
+            Model: modelFor(id),
+            LocalServiceUrl: page.querySelector('#LocalServiceUrl').value.trim(),
+            AllowBuiltInDownload: page.querySelector('#AllowBuiltInDownload').checked,
+            Currency: page.querySelector('#Currency').value,
+            MonthlyBudget: Math.max(0, parseFloat(page.querySelector('#MonthlyBudget').value) || 0),
+            NoSpendingLimit: page.querySelector('#NoSpendingLimit').checked,
+            ExtraChargesPercent: Math.min(100, Math.max(0, parseFloat(page.querySelector('#ExtraChargesPercent').value) || 0))
+          };
         }
 
         function modelFor(id) {
@@ -578,10 +647,16 @@
               .then(function () { return loadKeys().then(function () { if (id === 'deepgram') { return loadDeepgram(true); } }); }, function (err) { problemText(err).then(Dashboard.alert); });
           } else if (e.target.closest('.svc-clearkey')) {
             ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/' + id) }).then(loadKeys);
+          } else if (e.target.closest('.svc-download')) {
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/BuiltIn/Download'), data: JSON.stringify({ Model: modelFor('builtin'), AllowBuiltInDownload: page.querySelector('#AllowBuiltInDownload').checked }), contentType: 'application/json', dataType: 'json' })
+              .then(function (st) { showBuiltInDownload(st); return loadBuiltInDownload(); }, function (err) { problemText(err).then(Dashboard.alert); });
           } else if (e.target.closest('.svc-test')) {
             result.textContent = 'Testing ' + serviceNames[id] + '…';
-            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify({ Provider: id, Model: modelFor(id), LocalServiceUrl: page.querySelector('#LocalServiceUrl').value.trim(), AllowBuiltInDownload: page.querySelector('#AllowBuiltInDownload').checked }), contentType: 'application/json', dataType: 'json' })
-              .then(function (r) { result.textContent = (r.Ok ? '✓ ' : '✗ ') + r.Message; loadSpending(); }, function () { result.textContent = '✗ The test couldn\'t be run.'; });
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify(testValues(id)), contentType: 'application/json', dataType: 'json' })
+              .then(function (r) {
+                result.textContent = (r.Ok ? '✓ ' : r.Downloading ? '… ' : '✗ ') + r.Message;
+                if (r.Downloading) { retestAfterDownload = true; loadBuiltInDownload(); } else { loadSpending(); }
+              }, function () { result.textContent = '✗ The test couldn\'t be run.'; });
           }
         });
 
