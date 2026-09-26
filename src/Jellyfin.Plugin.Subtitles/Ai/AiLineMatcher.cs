@@ -16,7 +16,7 @@ namespace Jellyfin.Plugin.Subtitles.Ai;
 /// <item>Sent: the subtitle's language, a few minutes of heard phrases and the subtitle lines around them. No file
 /// names, paths or titles.</item>
 /// <item>Only pairs of offered phrases and lines are used, and they must still agree on one timing.</item>
-/// <item>At most <see cref="Limit"/> questions per run.</item>
+/// <item>At most the run's allowance of AI questions (<see cref="AiChecks"/>).</item>
 /// </list>
 /// </summary>
 public sealed class AiLineMatcher : ILineMatcher
@@ -60,38 +60,35 @@ public sealed class AiLineMatcher : ILineMatcher
         additionalProperties = false,
     };
 
+    private readonly AiChecks _checks;
     private readonly Func<string, string, string, object, object, int, string, CancellationToken, Task<AiReply>> _ask;
-    private int _asked;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AiLineMatcher"/> class.
     /// </summary>
-    /// <param name="limit">The most questions this instance asks (one run of a task).</param>
-    public AiLineMatcher(int limit)
-        : this(limit, AiBridgeClient.AskAsync)
+    /// <param name="checks">The run's allowance of AI questions.</param>
+    public AiLineMatcher(AiChecks checks)
+        : this(checks, AiBridgeClient.AskAsync)
     {
     }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AiLineMatcher"/> class.
     /// </summary>
-    /// <param name="limit">The most questions this instance asks.</param>
+    /// <param name="checks">The run's allowance of AI questions.</param>
     /// <param name="ask">Asks the AI plugin (for tests).</param>
-    internal AiLineMatcher(int limit, Func<string, string, string, object, object, int, string, CancellationToken, Task<AiReply>> ask)
+    internal AiLineMatcher(AiChecks checks, Func<string, string, string, object, object, int, string, CancellationToken, Task<AiReply>> ask)
     {
-        Limit = Math.Max(0, limit);
+        _checks = checks ?? throw new ArgumentNullException(nameof(checks));
         _ask = ask ?? throw new ArgumentNullException(nameof(ask));
     }
-
-    /// <summary>Gets the most questions this instance asks.</summary>
-    public int Limit { get; }
 
     /// <inheritdoc />
     public async Task<LineMatch> MatchAsync(IReadOnlyList<HeardPhrase> phrases, IReadOnlyList<CueLine> cues, string? language, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(phrases);
         ArgumentNullException.ThrowIfNull(cues);
-        if (Interlocked.Increment(ref _asked) > Limit)
+        if (!_checks.TryTake())
         {
             return new LineMatch(LineVerdict.Unsure, [], "The AI plugin wasn't asked: this run's limit of AI checks was reached.", null);
         }

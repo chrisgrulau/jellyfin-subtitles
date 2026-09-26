@@ -6,6 +6,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Subtitles.Audio;
+using Jellyfin.Plugin.Subtitles.Audit;
 using Jellyfin.Plugin.Subtitles.Cleaning;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Formats;
@@ -33,7 +34,8 @@ public sealed record SubtitleJob(Guid ItemId, string Name, string VideoPath, str
 /// <param name="Text">Wording changes (merged repeats, removed sound descriptions).</param>
 /// <param name="Cleanup">Clean-up settings.</param>
 /// <param name="Matcher">Pairs heard phrases with subtitle lines by meaning when exact words can't settle the timing (optional).</param>
-public sealed record Policies(ChangePolicy Timing, ChangePolicy Text, CleanupSettings Cleanup, Sync.ILineMatcher? Matcher = null);
+/// <param name="Auditor">Audits the wording of subtitles whose timing is settled (optional).</param>
+public sealed record Policies(ChangePolicy Timing, ChangePolicy Text, CleanupSettings Cleanup, Sync.ILineMatcher? Matcher = null, Audit.ITextAuditor? Auditor = null);
 
 /// <summary>
 /// Checks one subtitle and applies (or proposes) a timing correction according to the timing policy; applies or undoes
@@ -82,6 +84,9 @@ public sealed class SubtitleProcessor
 
     /// <summary>How many change examples a result keeps.</summary>
     public const int MaxExamples = 12;
+
+    /// <summary>The <see cref="SubtitleResult.Cleaned"/> key counting lines reworded from an audit.</summary>
+    public const string RewordedKind = "RewordedFromAudit";
 
     /// <summary>
     /// Whether a subtitle needs checking: it hasn't been, it changed since, the check failed, or an older pipeline version
@@ -206,7 +211,26 @@ public sealed class SubtitleProcessor
             Examples = [.. applied.Select(c => Describe(c, false)).Concat(pending.Select(c => Describe(c, true))).Take(MaxExamples)],
         };
 
-        if (status != ResultStatus.Corrected && applied.Count == 0)
+        // With the timing settled by speech-to-text (and the words matching, so not a translation), the wording can be
+        // audited: lines whose meaning differs are flagged, and suggested wording waits for review
+        var writes = status == ResultStatus.Corrected || applied.Count > 0;
+        if (policies.Auditor is not null && outcome.Transcripts.Count > 0 && status is ResultStatus.InSync or ResultStatus.Corrected or ResultStatus.Proposed
+            && outcome.Stage != SyncCheck.ByMeaningStage)
+        {
+            var file = writes ? cleaned : document;
+            Func<TimeSpan, TimeSpan> toAudio = status == ResultStatus.Proposed ? model.Map : t => t;
+            var (findings, note, by) = await WordingAudit.RunAsync(policies.Auditor, file, toAudio, outcome.Transcripts, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
+            result = result with
+            {
+                Findings = findings,
+                Examples = [.. findings.Select(WordingAudit.Describe).Concat(result.Examples).Take(MaxExamples)],
+                Explanation = result.Explanation + (findings.Count > 0
+                    ? $" Wording audited ({by}): {findings.Count} line(s) differ in meaning from what is said{(findings.Any(f => f.Suggestion is not null) ? "; Apply uses the suggested wording" : string.Empty)}."
+                    : note.Length > 0 ? " " + note : by is not null ? $" Wording audited ({by}): no differences in meaning." : string.Empty),
+            };
+        }
+
+        if (!writes)
         {
             return Save(result);
         }
@@ -233,6 +257,14 @@ public sealed class SubtitleProcessor
 
         var bytes = File.ReadAllBytes(r.SubtitlePath);
         var document = SubtitleReader.Read(bytes, r.SubtitlePath) ?? throw new InvalidOperationException("The subtitle can no longer be read.");
+
+        // Suggested wording first (the lines are found by their text and time as the file has them now), then timing
+        var reworded = 0;
+        if (r.Findings.Count > 0)
+        {
+            (document, reworded) = WordingAudit.Apply(document, r.Findings);
+        }
+
         if (r.Status == ResultStatus.Proposed)
         {
             document = document.Retime(new SyncModel(SyncStatus.Corrected, r.Scale, r.Offset, r.Confidence, [], r.Explanation).Map);
@@ -254,8 +286,9 @@ public sealed class SubtitleProcessor
                 Backup = r.Changed ? r.Backup ?? backup : backup,
                 Fingerprint = written,
                 Changed = true,
-                Cleaned = cleanedCounts,
+                Cleaned = reworded > 0 ? new Dictionary<string, int>(cleanedCounts, StringComparer.Ordinal) { [RewordedKind] = cleanedCounts.GetValueOrDefault(RewordedKind) + reworded } : cleanedCounts,
                 CleanupPending = new Dictionary<string, int>(),
+                Findings = [],
                 Time = _clock.GetUtcNow(),
             });
         }
@@ -303,6 +336,7 @@ public sealed class SubtitleProcessor
                 Cleaned = new Dictionary<string, int>(),
                 CleanupPending = new Dictionary<string, int>(),
                 Examples = [],
+                Findings = [],
                 Time = _clock.GetUtcNow(),
                 Explanation = "Undone: the original subtitle file is back.",
             });

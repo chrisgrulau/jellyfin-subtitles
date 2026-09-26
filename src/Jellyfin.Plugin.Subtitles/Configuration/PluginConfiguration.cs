@@ -167,7 +167,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool UseAi { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the most AI checks in one run of a task.
+    /// Gets or sets a value indicating whether, with <see cref="UseAi"/>, the wording of a subtitle whose timing is settled
+    /// is compared with what is said: lines whose meaning differs (names, numbers, negations, missing words) are flagged,
+    /// with suggested wording that waits for review (never applied on its own).
+    /// </summary>
+    public bool AuditWording { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the most AI checks in one run of a task (matching lines and audits together).
     /// </summary>
     public int MaxAiChecksPerRun { get; set; } = 20;
 }

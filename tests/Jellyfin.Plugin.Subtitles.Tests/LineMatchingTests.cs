@@ -192,7 +192,7 @@ public partial class LineMatchingTests
     {
         string? sent = null;
         var calls = 0;
-        var matcher = new AiLineMatcher(1, (caller, purpose, instructions, data, schema, max, effort, ct) =>
+        var matcher = new AiLineMatcher(new AiChecks(1), (caller, purpose, instructions, data, schema, max, effort, ct) =>
         {
             calls++;
             sent = JsonSerializer.Serialize(data);

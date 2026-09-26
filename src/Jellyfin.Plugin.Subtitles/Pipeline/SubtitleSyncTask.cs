@@ -106,7 +106,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         http.Timeout = TimeSpan.FromMinutes(3);
         await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
         var speech = SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.sync", out var problem);
-        var policies = PoliciesOf(config) with { Matcher = MatcherFor(config) };
+        var policies = RunPolicies(config);
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
@@ -203,14 +203,22 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     }
 
     /// <summary>
-    /// The line matcher for one run: the AI plugin (if the settings allow it), limited to that run's AI checks.
+    /// The settings for one run, with the AI plugin's help where the settings allow it: matching lines by meaning and
+    /// auditing the wording, sharing that run's allowance of AI checks.
     /// </summary>
     /// <param name="config">Plugin settings.</param>
-    /// <returns>The matcher, or <c>null</c>.</returns>
-    public static Sync.ILineMatcher? MatcherFor(PluginConfiguration config)
+    /// <returns>The policies.</returns>
+    public static Policies RunPolicies(PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return config.UseAi && config.MaxAiChecksPerRun > 0 ? new Ai.AiLineMatcher(config.MaxAiChecksPerRun) : null;
+        var policies = PoliciesOf(config);
+        if (!config.UseAi || config.MaxAiChecksPerRun <= 0)
+        {
+            return policies;
+        }
+
+        var checks = new Ai.AiChecks(config.MaxAiChecksPerRun);
+        return policies with { Matcher = new Ai.AiLineMatcher(checks), Auditor = config.AuditWording ? new Ai.AiTextAuditor(checks) : null };
     }
 
     /// <summary>

@@ -46,6 +46,16 @@ public enum ResultStatus
 }
 
 /// <summary>
+/// A line whose meaning differs from what is said, found by an audit.
+/// </summary>
+/// <param name="Time">When the line starts, in the file's time (to find it again).</param>
+/// <param name="Current">The line's text as it was in the file (to find it again).</param>
+/// <param name="Suggestion">The line as it should read, or <c>null</c> when it is only flagged.</param>
+/// <param name="Kind">What differs: name, number, negation, missing, wrong or extra.</param>
+/// <param name="Reason">Why, in one sentence.</param>
+public sealed record LineFinding(double Time, string Current, string? Suggestion, string Kind, string Reason);
+
+/// <summary>
 /// The latest result for one subtitle file.
 /// </summary>
 public sealed record SubtitleResult
@@ -107,8 +117,11 @@ public sealed record SubtitleResult
     /// <summary>Gets where an added subtitle came from (source, release name, score), for provenance.</summary>
     public string? Origin { get; init; }
 
-    /// <summary>Gets a value indicating whether anything waits for review (a timing correction or clean-up).</summary>
-    public bool PendingReview => Status == ResultStatus.Proposed || CleanupPending.Count > 0;
+    /// <summary>Gets lines whose meaning differs from what is said (from an audit), with suggested wording where given.</summary>
+    public IReadOnlyList<LineFinding> Findings { get; init; } = [];
+
+    /// <summary>Gets a value indicating whether anything waits for review (a timing correction, clean-up or suggested wording).</summary>
+    public bool PendingReview => Status == ResultStatus.Proposed || CleanupPending.Count > 0 || Findings.Any(f => f.Suggestion is not null);
 }
 
 /// <summary>
