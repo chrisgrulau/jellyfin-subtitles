@@ -280,6 +280,11 @@ public sealed partial class SubDlSource : ICandidateSource
             // Answered, but larger than any subtitle download should be
             return null;
         }
+        catch (ProviderException ex) when (ex.StatusCode is not null)
+        {
+            // SubDL's own words, keeping the class, the wait and the status (a 429 stops SubDL for the run)
+            throw new ProviderException(ProviderWording.Said("SubDL", ex), ex) { Failure = ex.Failure, RetryAfter = ex.RetryAfter, StatusCode = ex.StatusCode, Detail = ex.Detail };
+        }
     }
 
     [GeneratedRegex(@"^([0-9]{1,3})[ ._-]+[^0-9]")]
