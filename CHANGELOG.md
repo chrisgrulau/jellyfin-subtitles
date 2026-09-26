@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **SubDL as an extra subtitle source** (the successor to Subscene), searched after Jellyfin's own providers when a free
+  SubDL API key is set on the settings page.
+  - It searches by the film's or show's IMDb or TMDb id, with season and episode for TV.
+  - From a whole-season zip, only the one file for the wanted episode is taken (`S01E02`, `1x02`, or a numbered file
+    when the pack uses nothing else), and nothing if that isn't clear.
+  - Downloads are capped.
+  - SubDL puts the key in its download links, so the links are never logged, shown or stored.
+  - A provider that is down is skipped. One whose daily allowance is used up is left out for the rest of the run
+    instead of stopping it.
+
 ## [0.3.0-alpha] - 2026-09-26
 
 ### Added

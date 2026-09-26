@@ -114,7 +114,13 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             LogNoSpeech(_logger, problem);
         }
 
-        var source = new JellyfinSubtitleSource(_library, _subtitles);
+        // Jellyfin's own subtitle providers first (such as the OpenSubtitles plugin), then SubDL when a key is set
+        var jellyfin = new JellyfinSubtitleSource(_library, _subtitles);
+        using var subdlHttp = _http.CreateClient();
+        subdlHttp.Timeout = TimeSpan.FromSeconds(60);
+        var subdlKey = _keys.Get(SubDlKey);
+        var combined = subdlKey is null ? null : new CombinedSource([jellyfin, new SubDlSource(subdlHttp, subdlKey, IdsOf)]);
+        ICandidateSource source = combined ?? (ICandidateSource)jellyfin;
         // Specials (season 0) last: subtitle sites rarely have them, and they'd use up the run
         var jobs = Missing(SpendingLimit.EffectiveLanguages(config.Languages), config.CountImageSubtitles)
             .Where(_finder.NeedsSearch)
@@ -130,6 +136,10 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             {
                 var result = await _finder.FindAsync(job, source, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, SubtitleSyncTask.PoliciesOf(config), config.MaxDownloadsPerDay, cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
+                foreach (var p in combined?.Problems ?? [])
+                {
+                    LogSourceProblem(_logger, p);
+                }
                 if (result.Status == ResultStatus.Added)
                 {
                     // Jellyfin picks the new file up as it would from real-time monitoring
@@ -154,6 +164,23 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             }
 
             progress.Report(100.0 * (i + 1) / jobs.Count);
+        }
+    }
+
+    /// <summary>The key-store id of the SubDL key.</summary>
+    public const string SubDlKey = "subdl";
+
+    // The ids SubDL searches by: the film's, or for an episode the show's, with season and episode numbers
+    private VideoIds? IdsOf(Guid itemId)
+    {
+        switch (_library.GetItemById(itemId))
+        {
+            case MediaBrowser.Controller.Entities.TV.Episode ep when ep.Series is { } series && ep.ParentIndexNumber is { } season && ep.IndexNumber is { } number:
+                return new VideoIds(series.GetProviderId(MetadataProvider.Imdb), series.GetProviderId(MetadataProvider.Tmdb), season, number);
+            case MediaBrowser.Controller.Entities.Movies.Movie movie:
+                return new VideoIds(movie.GetProviderId(MetadataProvider.Imdb), movie.GetProviderId(MetadataProvider.Tmdb), null, null);
+            default:
+                return null;
         }
     }
 
@@ -208,6 +235,9 @@ public sealed partial class SubtitleFindTask : IScheduledTask
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: the subtitle provider stopped the search for today: {Message}")]
     private static partial void LogProviderStopped(ILogger logger, string message);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: a subtitle provider couldn't be searched: {Problem}")]
+    private static partial void LogSourceProblem(ILogger logger, string problem);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: {Name}: the search failed: {Error}")]
     private static partial void LogFailed(ILogger logger, string name, string error);
