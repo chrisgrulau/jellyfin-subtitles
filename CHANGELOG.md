@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0-alpha] - 2026-09-26
+
 ### Changed
 
 - Uses common's follow-ups: a 429 counts as a limit through the shared `RateLimited` flag (still stopping that provider

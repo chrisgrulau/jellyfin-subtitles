@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.11.0.0"
+version: "0.12.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,6 +14,6 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.11.0-alpha: SubDL, Deepgram and speech-to-text calls go through the shared provider HTTP (capped, keys redacted,
-  Retry-After kept); the find run stops on a provider limit or sign-in failure; one library walk and one run start;
-  embedded tracks are checked when the only file beside the video is forced or picture-based.
+  0.12.0-alpha: the built-in speech-to-text downloads in the background with progress, and Test no longer waits for
+  it; Test uses the page's unsaved spending limits; rewritten subtitles keep their group on Linux; provider errors
+  quote the provider's own reply.
