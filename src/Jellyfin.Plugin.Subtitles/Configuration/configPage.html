@@ -209,6 +209,18 @@
               <div class="fieldDescription">Default 50. The rest are checked on following runs. Each takes a few seconds, longer when speech-to-text is used.</div>
             </div>
 
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="CheckEmbeddedSubtitles" type="checkbox" is="emby-checkbox" />
+                <span>Also check subtitles inside video files</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">Checks text subtitle tracks inside videos, for languages with no subtitle file beside the video. Copying a track out reads the whole video, so this is off by default and only a few are checked per run. The video is never changed: a track that's out of time gets a corrected copy added beside the video (Undo removes it).</div>
+            </div>
+            <div class="inputContainer">
+              <label class="inputLabel inputLabelUnfocused" for="MaxEmbeddedPerRun">Tracks inside videos checked per run</label>
+              <input id="MaxEmbeddedPerRun" type="number" min="1" max="200" step="1" is="emby-input" />
+              <div class="fieldDescription">Default 10.</div>
+            </div>
             <div class="inputContainer">
               <label class="inputLabel inputLabelUnfocused" for="MaxFindsPerRun">Videos searched per run</label>
               <input id="MaxFindsPerRun" type="number" min="1" max="1000" step="1" is="emby-input" />
@@ -583,6 +595,8 @@
             page.querySelector('#MaxFindsPerRun').value = config.MaxFindsPerRun || 20;
             page.querySelector('#MaxDownloadsPerDay').value = config.MaxDownloadsPerDay == null ? 10 : config.MaxDownloadsPerDay;
             page.querySelector('#CountImageSubtitles').checked = config.CountImageSubtitles !== false;
+            page.querySelector('#CheckEmbeddedSubtitles').checked = !!config.CheckEmbeddedSubtitles;
+            page.querySelector('#MaxEmbeddedPerRun').value = config.MaxEmbeddedPerRun || 10;
             loadResults();
             renderTiers(config);
             refreshWarnings();
@@ -606,6 +620,8 @@
             var downloads = parseInt(page.querySelector('#MaxDownloadsPerDay').value, 10);
             config.MaxDownloadsPerDay = Math.min(10000, Math.max(0, isNaN(downloads) ? 10 : downloads));
             config.CountImageSubtitles = page.querySelector('#CountImageSubtitles').checked;
+            config.CheckEmbeddedSubtitles = page.querySelector('#CheckEmbeddedSubtitles').checked;
+            config.MaxEmbeddedPerRun = Math.min(200, Math.max(1, parseInt(page.querySelector('#MaxEmbeddedPerRun').value, 10) || 10));
             config.TextChanges = page.querySelector('#TextChanges').value;
             config.Currency = page.querySelector('#Currency').value;
             config.MonthlyBudget = Math.max(0, parseFloat(page.querySelector('#MonthlyBudget').value) || 0);

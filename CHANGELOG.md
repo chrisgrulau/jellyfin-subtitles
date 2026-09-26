@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Subtitles inside video files** (opt-in: **Also check subtitles inside video files**, off by default).
+  - What's checked: text subtitle tracks inside videos (SRT, ASS, WebVTT, MP4 text), in the chosen languages, for
+    videos with no subtitle file of that language beside them. Forced-only tracks are skipped.
+  - How they're checked: each track is copied out with Jellyfin's ffmpeg, and checked against the audio like any
+    other subtitle. Copying reads the video file (all of it for most MKVs), so only a few tracks are checked per run
+    (10 by default).
+  - What happens after: the video is never changed. A track that's out of time gets a corrected copy added beside the
+    video, which Undo removes. A track that's in time is recorded and not read again until the video changes, and a
+    failure is tried again after 30 days.
+
+### Added
+
 - **SubDL as an extra subtitle source** (the successor to Subscene), searched after Jellyfin's own providers when a free
   SubDL API key is set on the settings page.
   - It searches by the film's or show's IMDb or TMDb id, with season and episode for TV.
