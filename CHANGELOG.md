@@ -14,6 +14,18 @@ All notable changes to this project are documented here. The format follows
   HTTPS. Runs use below-normal priority, at most 8 threads and a time limit. The settings page has a **Built-in** box
   with **Test** (DOC-02).
 
+### Fixed
+
+- **SUB-09:** a subtitle replaced from outside (by another tool or a person) after this plugin changed it is treated as
+  a new original. If it is in sync it offers no Undo, and if it is corrected, Undo brings back that replacement, never
+  the older file. Each original now gets its own backup.
+- **SUB-10:** results are no longer evicted after 2,000. They are the record of what was checked, changed and can be
+  undone, so one is kept per subtitle file. Results for deleted files are dropped at the start of each run (unless the
+  folder itself is missing, as with an offline share). Past a ceiling of 200,000, only results nothing depends on are
+  dropped. Large libraries are now checked once each instead of the first 2,000 files being re-checked every night.
+  Undo buttons, added subtitles and the 30-day search wait are never lost, and everything waiting for review is always
+  listed.
+
 ## [0.1.0-alpha] - 2026-09-25
 
 ### Security

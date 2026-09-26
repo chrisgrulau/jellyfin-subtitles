@@ -42,12 +42,27 @@ public sealed class SubtitleFiles
     }
 
     /// <summary>
+    /// The backup file name for one original of a subtitle: the path and the content it replaces, so a file replaced from
+    /// outside after this plugin changed it gets its own backup and undo never brings back an older original.
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle's path.</param>
+    /// <param name="originalFingerprint">The fingerprint of the content being replaced.</param>
+    /// <returns>A stable file name.</returns>
+    public static string BackupName(string subtitlePath, string originalFingerprint)
+    {
+        ArgumentNullException.ThrowIfNull(subtitlePath);
+        ArgumentNullException.ThrowIfNull(originalFingerprint);
+        return Fingerprint(System.Text.Encoding.UTF8.GetBytes(subtitlePath))[..24] + "-" + originalFingerprint[..Math.Min(16, originalFingerprint.Length)] + Path.GetExtension(subtitlePath);
+    }
+
+    /// <summary>
     /// Replaces a subtitle file's content, keeping the original.
     /// </summary>
     /// <param name="subtitlePath">The subtitle file.</param>
     /// <param name="expected">The fingerprint the file must still have (it was checked with this content).</param>
     /// <param name="content">The new content.</param>
-    /// <returns>The backup file name and the new content's fingerprint.</returns>
+    /// <returns>The backup of the content that was replaced, and the new content's fingerprint. Callers that already hold an
+    /// earlier original for this file (their own change is still in place) keep that one for undo.</returns>
     /// <exception cref="IOException">The file changed since it was checked, or can't be written.</exception>
     public (string Backup, string Fingerprint) Replace(string subtitlePath, string expected, byte[] content)
     {
@@ -61,11 +76,10 @@ public sealed class SubtitleFiles
         }
 
         Directory.CreateDirectory(_backups);
-        var backup = BackupName(subtitlePath);
+        var backup = BackupName(subtitlePath, expected);
         var backupPath = Path.Combine(_backups, backup);
         if (!File.Exists(backupPath))
         {
-            // The first original is the one kept: undo always goes back to what was there before this plugin touched it
             File.WriteAllBytes(backupPath + ".tmp", current);
             File.Move(backupPath + ".tmp", backupPath, overwrite: true);
         }

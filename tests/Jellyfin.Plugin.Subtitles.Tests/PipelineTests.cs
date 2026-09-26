@@ -364,4 +364,153 @@ public sealed class PipelineTests : IDisposable
         Assert.False(processor.NeedsCheck("/x/c.srt", "h"));
         Assert.True(processor.NeedsCheck("/x/c.srt", "changed"));
     }
+
+    // SUB-09: a file replaced from outside after this plugin changed it is a new original
+
+    private static SubtitleDocument OtherRelease()
+        => new() { Format = SubtitleFormat.Srt, Cues = [.. Enumerable.Range(0, 300).Select(i => new SubtitleCue { Start = TimeSpan.FromSeconds(10 + (i * 5)), End = TimeSpan.FromSeconds(12 + (i * 5)), Text = $"Scene {i} has term{i}p then term{i}q" })] };
+
+    [Fact]
+    public async Task A_replacement_in_sync_after_a_change_offers_no_undo()
+    {
+        var (processor, job, path) = Setup();
+        var fake = new Shifted(Story(), 2.5);
+        await processor.ProcessAsync(job, fake, fake, Auto, CancellationToken.None);
+
+        var replacement = SubtitleWriter.ToBytes(OtherRelease());
+        File.WriteAllBytes(path, replacement);
+        Assert.True(processor.NeedsCheck(path, SubtitleFiles.Fingerprint(replacement)));
+        var other = new Shifted(OtherRelease(), 0);
+        var result = await processor.ProcessAsync(job, other, other, Auto, CancellationToken.None);
+
+        Assert.Equal(ResultStatus.InSync, result.Status);
+        Assert.False(result.Changed);
+        Assert.Null(result.Backup);
+        Assert.Throws<InvalidOperationException>(() => processor.Undo(result.Id));
+        Assert.Equal(replacement, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public async Task Undo_after_correcting_a_replacement_restores_the_replacement_not_the_older_file()
+    {
+        var (processor, job, path) = Setup();
+        var fake = new Shifted(Story(), 2.5);
+        await processor.ProcessAsync(job, fake, fake, Auto, CancellationToken.None);
+
+        var replacement = SubtitleWriter.ToBytes(OtherRelease());
+        File.WriteAllBytes(path, replacement);
+        var other = new Shifted(OtherRelease(), 1.5);
+        var result = await processor.ProcessAsync(job, other, other, Auto, CancellationToken.None);
+        Assert.Equal(ResultStatus.Corrected, result.Status);
+
+        processor.Undo(result.Id);
+
+        Assert.Equal(replacement, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void Each_original_gets_its_own_backup()
+    {
+        var path = Path.Combine(_dir, "Film.en.srt");
+        File.WriteAllText(path, Srt);
+        var files = new SubtitleFiles(Path.Combine(_dir, "backups"));
+        var (first, written) = files.Replace(path, SubtitleFiles.Fingerprint(File.ReadAllBytes(path)), Encoding.UTF8.GetBytes("one"));
+        File.WriteAllText(path, "outside");
+        var (second, _) = files.Replace(path, SubtitleFiles.Fingerprint(File.ReadAllBytes(path)), Encoding.UTF8.GetBytes("two"));
+
+        Assert.NotEqual(first, second);
+        Assert.Equal(Srt, File.ReadAllText(Path.Combine(_dir, "backups", first)));
+        Assert.Equal("outside", File.ReadAllText(Path.Combine(_dir, "backups", second)));
+        Assert.NotEqual(written, SubtitleFiles.Fingerprint(Encoding.UTF8.GetBytes("two")));
+    }
+
+    // SUB-10: results are the record of what was checked, so none are evicted
+
+    [Fact]
+    public void A_large_library_is_checked_once_each_across_runs()
+    {
+        var store = new ResultStore(Path.Combine(_dir, "results.json"));
+        var processor = new SubtitleProcessor(store, new SubtitleFiles(Path.Combine(_dir, "originals")));
+        var paths = Enumerable.Range(0, 2500).Select(i => Path.Combine(_dir, $"Show S01E{i:0000}.en.srt")).ToList();
+        var checks = new int[paths.Count];
+        for (var run = 0; run < 60; run++)
+        {
+            var todo = paths.Select((p, i) => (p, i)).Where(x => processor.NeedsCheck(x.p, "f" + x.i)).Take(50).ToList();
+            foreach (var (p, i) in todo)
+            {
+                checks[i]++;
+                store.Put(new SubtitleResult
+                {
+                    Id = ResultStore.IdFor(p),
+                    SubtitlePath = p,
+                    Status = i % 100 == 0 ? ResultStatus.Corrected : ResultStatus.InSync,
+                    Changed = i % 100 == 0,
+                    Backup = i % 100 == 0 ? "b" + i : null,
+                    Fingerprint = "f" + i,
+                    Version = SubtitleProcessor.CurrentVersion,
+                    Time = DateTimeOffset.UnixEpoch.AddMinutes((run * 100) + i),
+                });
+            }
+        }
+
+        Assert.All(checks, c => Assert.Equal(1, c));
+        Assert.Equal(2500, store.All().Count);
+        Assert.Equal(25, store.All().Count(r => r.Changed && r.Backup is not null));
+    }
+
+    [Fact]
+    public void Past_the_ceiling_only_results_nothing_depends_on_are_dropped()
+    {
+        var store = new ResultStore(Path.Combine(_dir, "results.json"), maxResults: 10);
+        var t = DateTimeOffset.UnixEpoch;
+        for (var i = 0; i < 5; i++)
+        {
+            store.Put(new SubtitleResult { Id = "c" + i, SubtitlePath = "/x/c" + i, Status = ResultStatus.Corrected, Changed = true, Backup = "b", Time = t.AddMinutes(i) });
+        }
+
+        store.Put(new SubtitleResult { Id = "find-n", SubtitlePath = "/x/n", Status = ResultStatus.NotFound, Time = t.AddMinutes(6) });
+        for (var i = 0; i < 20; i++)
+        {
+            store.Put(new SubtitleResult { Id = "s" + i, SubtitlePath = "/x/s" + i, Status = ResultStatus.InSync, Time = t.AddMinutes(10 + i) });
+        }
+
+        var kept = store.All();
+        Assert.Equal(10, kept.Count);
+        Assert.All(Enumerable.Range(0, 5), i => Assert.Contains(kept, r => r.Id == "c" + i));
+        Assert.Contains(kept, r => r.Id == "find-n");
+        Assert.Contains(kept, r => r.Id == "s19");
+    }
+
+    [Fact]
+    public void Results_for_deleted_files_are_pruned_but_not_when_the_folder_is_offline()
+    {
+        var store = new ResultStore(Path.Combine(_dir, "results.json"));
+        var here = Path.Combine(_dir, "here.en.srt");
+        File.WriteAllText(here, Srt);
+        store.Put(new SubtitleResult { Id = "here", SubtitlePath = here, Status = ResultStatus.InSync });
+        store.Put(new SubtitleResult { Id = "gone", SubtitlePath = Path.Combine(_dir, "gone.en.srt"), Status = ResultStatus.Corrected, Changed = true });
+        store.Put(new SubtitleResult { Id = "offline", SubtitlePath = Path.Combine(_dir, "unmounted", "a.en.srt"), Status = ResultStatus.Corrected, Changed = true });
+        store.Put(new SubtitleResult { Id = "find-x", SubtitlePath = Path.Combine(_dir, "missing.en.srt"), Status = ResultStatus.NotFound });
+
+        Assert.Equal(1, store.Prune(File.Exists, Directory.Exists));
+
+        Assert.Equal(["find-x", "here", "offline"], store.All().Select(r => r.Id).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Everything_waiting_for_review_is_listed_however_old()
+    {
+        var store = new ResultStore(Path.Combine(_dir, "results.json"));
+        var processor = new SubtitleProcessor(store, new SubtitleFiles(Path.Combine(_dir, "originals")));
+        store.Put(new SubtitleResult { Id = "old", SubtitlePath = "/x/old", Status = ResultStatus.Proposed, Time = DateTimeOffset.UnixEpoch });
+        for (var i = 0; i < 20; i++)
+        {
+            store.Put(new SubtitleResult { Id = "n" + i, SubtitlePath = "/x/n" + i, Status = ResultStatus.InSync, Time = DateTimeOffset.UnixEpoch.AddDays(1 + i) });
+        }
+
+        var recent = processor.Recent(5);
+
+        Assert.Equal(6, recent.Count);
+        Assert.Contains(recent, r => r.Id == "old");
+    }
 }
