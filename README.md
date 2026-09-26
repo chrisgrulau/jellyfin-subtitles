@@ -118,7 +118,7 @@ make results worse.
    speech-to-text), subtitle clean-up, reversible changes, review screen, budgets.
 2. With the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) installed: lines matched by meaning when the
    wording differs from what is said (done); wording audit of checked subtitles and, a few per night, the existing library (done);
-   subtitle editor.
+   subtitle editor with audio playback (done).
 3. Full transcription: last-resort subtitles, discrepancy finder, automatic confidence calibration.
 4. More languages; later, subtitles in a different language from the audio.
 

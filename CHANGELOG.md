@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Subtitle editor.** **Edit** on a result opens that subtitle's lines on the plugin page.
+  - **Editing:** change a line's text, start or end time; delete a line or add one; shift every line at once; find
+    lines by text.
+  - **Listening:** ▶ plays that line's audio (from a moment before to a moment after), using the audio track that
+    suits the subtitle's language.
+  - **Saving:** Save writes the file only if it hasn't changed since it was opened. The first original is kept, so
+    **Undo** brings it back. It is written in the file's own encoding.
+  - **Formats:** styles and identifiers are kept for lines that were already there. Added ASS lines take the first
+    line's style.
+
 ## [0.6.1-alpha] - 2026-09-26
 
 ### Fixed
@@ -15,8 +27,6 @@ All notable changes to this project are documented here. The format follows
 - **FAM-03:** an "off" answer from the AI plugin (switched off, or Subtitles not allowed) is quiet, like a missing
   plugin. Other failures are shown in the result.
 - The shared source is updated.
-
-### Fixed
 
 - **SUB-14:** subtitles in legacy encodings are no longer rewritten as garbled text. Before, anything that wasn't
   UTF-8 or UTF-16 was read as Windows-1252 and written back as UTF-8. That garbled Cyrillic, Central European, Greek,
