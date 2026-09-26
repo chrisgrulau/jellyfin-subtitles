@@ -388,7 +388,7 @@ public static partial class SubtitleReader
 
     // Only spaces and tabs around the parts (never \s, which also matches newlines and let a multiline match wander over
     // runs of blank lines); a time limit on every pattern that sees whole files
-    [GeneratedRegex(@"^[ \t]*(?<a>[\d:.,]+)[ \t]*-->[ \t]*(?<b>[\d:.,]+)(?<rest>.*)$", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"^[ \t]*(?<a>[0-9:.,]+)[ \t]*-->[ \t]*(?<b>[0-9:.,]+)(?<rest>.*)$", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
     private static partial Regex TimingLine();
 
     [GeneratedRegex(@"\n[ \t]*\n", RegexOptions.None, matchTimeoutMilliseconds: 1000)]

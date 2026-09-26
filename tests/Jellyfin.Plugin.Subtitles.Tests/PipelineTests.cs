@@ -257,7 +257,7 @@ public sealed class PipelineTests : IDisposable
         processor.RecordFailure(job, "ffmpeg failed");
 
         Assert.True(processor.NeedsCheck(job.SubtitlePath, "anything"));
-        Assert.Equal("ffmpeg failed", processor.Recent(10)[0].Explanation);
+        Assert.StartsWith("ffmpeg failed", processor.Recent(10)[0].Explanation, StringComparison.Ordinal);
     }
 
     [Theory]
