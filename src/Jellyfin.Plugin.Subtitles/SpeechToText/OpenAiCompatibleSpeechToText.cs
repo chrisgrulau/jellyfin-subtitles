@@ -62,39 +62,12 @@ public sealed class OpenAiCompatibleSpeechToText : HttpSpeechToText
             throw new SpeechToTextException("The service address must be an http:// or https:// address.") { Failure = FailureClass.BadRequest };
         }
 
-        if (!string.IsNullOrEmpty(key) && address.Scheme == Uri.UriSchemeHttp && !IsLocal(address))
+        if (!string.IsNullOrEmpty(key) && address.Scheme == Uri.UriSchemeHttp && !Common.NetworkAddress.IsLocal(address))
         {
             throw new SpeechToTextException("An API key is only sent over https, or to this machine or the local network.") { Failure = FailureClass.BadRequest };
         }
 
         return address.AbsoluteUri.EndsWith('/') ? address : new Uri(address.AbsoluteUri + "/");
-    }
-
-    /// <summary>
-    /// Whether an address is this machine or the local network.
-    /// </summary>
-    /// <param name="address">The address.</param>
-    /// <returns><c>true</c> for loopback, private and link-local addresses and <c>.local</c> names.</returns>
-    public static bool IsLocal(Uri address)
-    {
-        ArgumentNullException.ThrowIfNull(address);
-        if (address.IsLoopback || address.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (!IPAddress.TryParse(address.Host.Trim('[', ']'), out var ip))
-        {
-            return false;
-        }
-
-        if (ip.IsIPv6LinkLocal || ip.IsIPv6UniqueLocal)
-        {
-            return true;
-        }
-
-        var b = ip.GetAddressBytes();
-        return b.Length == 4 && (b[0] == 10 || (b[0] == 172 && b[1] is >= 16 and <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254));
     }
 
     /// <inheritdoc />

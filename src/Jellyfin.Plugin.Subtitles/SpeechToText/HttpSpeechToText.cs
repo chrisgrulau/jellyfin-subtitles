@@ -66,7 +66,7 @@ public abstract class HttpSpeechToText : ISpeechToText
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            throw new SpeechToTextException(Id + ": " + Redaction.Redact(ex.Message, [_key]), ex) { Failure = HttpFailure.Classify(ex) };
+            throw new SpeechToTextException(Id + ": " + Redaction.Redact(ex.Message, [_key]), ex) { Failure = HttpFailure.Classify(ex, cancellationToken) };
         }
 
         using (response)

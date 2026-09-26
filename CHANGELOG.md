@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Shared code updated (COM-03, COM-04, COM-05):
+  - provider waits are bounded;
+  - quota errors are recognised by the providers' own wording;
+  - secrets are redacted before error text is shortened;
+  - the key file is owner-only on Windows too;
+  - "is this a local address" (where a key may go over plain HTTP) is the one shared definition.
+
 ### Added
 
 - **Built-in speech-to-text.** Once an administrator allows it, the plugin downloads whisper.cpp (built and published
