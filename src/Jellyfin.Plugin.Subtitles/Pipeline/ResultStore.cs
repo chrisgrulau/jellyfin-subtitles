@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using Jellyfin.Plugin.Common.Storage;
 
 namespace Jellyfin.Plugin.Subtitles.Pipeline;
 
@@ -266,11 +267,17 @@ public sealed class ResultStore : IDisposable
     }
 
     /// <summary>
-    /// The stable id for a subtitle path.
+    /// The stable id for a subtitle path: the first 16 hex digits (lower case) of the SHA-256 of its UTF-8 bytes. Hashed
+    /// here rather than borrowed from backup naming, so a change there can't orphan every stored result; it must keep
+    /// producing the ids already stored.
     /// </summary>
     /// <param name="subtitlePath">The path.</param>
     /// <returns>A short hex id.</returns>
-    public static string IdFor(string subtitlePath) => SubtitleFiles.BackupName(subtitlePath)[..16];
+    public static string IdFor(string subtitlePath)
+    {
+        ArgumentNullException.ThrowIfNull(subtitlePath);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(subtitlePath)))[..16];
+    }
 
     /// <summary>
     /// All results, newest first.
@@ -444,34 +451,30 @@ public sealed class ResultStore : IDisposable
             return _byId;
         }
 
+        // The policy for each state of the file (FAM-06's JsonFile tells them apart)
+        var read = JsonFile.Read<List<SubtitleResult>>(_path, JsonOptions);
         List<SubtitleResult>? loaded;
-        try
+        switch (read.State)
         {
-            loaded = File.Exists(_path) ? JsonSerializer.Deserialize<List<SubtitleResult>>(File.ReadAllText(_path), JsonOptions) : null;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Unreadable for now (locked, permissions, a share hiccup): this file holds the undo records, so it is never
-            // replaced. Nothing is cached, so nothing can be saved over it, and the next access reads it again.
-            Problem = "The results file can't be read right now (" + ex.GetType().Name + "); nothing is checked or recorded until it can be.";
-            return null;
-        }
-        catch (JsonException)
-        {
-            // Damaged: set it aside (with the undo records it held, for recovery by hand) and start afresh
-            var aside = _path + ".damaged-" + DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
-            try
-            {
-                File.Move(_path, aside, overwrite: true);
-                Problem = "The results file was damaged and was set aside as " + Path.GetFileName(aside) + "; results start afresh (the originals of changed files are still in the originals folder).";
-            }
-            catch (Exception moveEx) when (moveEx is IOException or UnauthorizedAccessException)
-            {
-                Problem = "The results file is damaged and couldn't be set aside; nothing is recorded until it is moved or deleted.";
+            case JsonFileState.Unreadable:
+                // Unreadable for now (locked, permissions, a share hiccup): this file holds the undo records, so it is never
+                // replaced. Nothing is cached, so nothing can be saved over it, and the next access reads it again.
+                Problem = "The results file can't be read right now (" + read.Error!.GetType().Name + "); nothing is checked or recorded until it can be.";
                 return null;
-            }
+            case JsonFileState.Damaged:
+                // Damaged: set it aside (with the undo records it held, for recovery by hand) and start afresh
+                if (JsonFile.SetAside(_path) is not { } aside)
+                {
+                    Problem = "The results file is damaged and couldn't be set aside; nothing is recorded until it is moved or deleted.";
+                    return null;
+                }
 
-            loaded = null;
+                Problem = "The results file was damaged and was set aside as " + Path.GetFileName(aside) + "; results start afresh (the originals of changed files are still in the originals folder).";
+                loaded = null;
+                break;
+            default:
+                loaded = read.Value;
+                break;
         }
 
         _byId = new Dictionary<string, SubtitleResult>(StringComparer.Ordinal);
@@ -498,9 +501,7 @@ public sealed class ResultStore : IDisposable
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path + ".tmp", JsonSerializer.Serialize(_byId!.Values, JsonOptions));
-            File.Move(_path + ".tmp", _path, overwrite: true);
+            JsonFile.WriteAtomic(_path, _byId!.Values, JsonOptions);
             _unsaved = 0;
             _lastSave = Environment.TickCount64;
         }

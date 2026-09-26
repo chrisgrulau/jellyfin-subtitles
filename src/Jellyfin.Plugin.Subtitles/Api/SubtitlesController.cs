@@ -140,7 +140,7 @@ public class SubtitlesController : ControllerBase
     {
         try
         {
-            return _processor.Apply(id, SubtitleSyncTask.PoliciesOf(SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()));
+            return _processor.Apply(id, (SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()).Policies());
         }
         catch (InvalidOperationException ex)
         {
@@ -352,7 +352,7 @@ public class SubtitlesController : ControllerBase
     public async Task<ActionResult<LimitKeyResult>> LimitDeepgramKey([FromBody, Required] LimitKeyRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_keys.Get(SpeechToTextFactory.Deepgram) is not { } admin)
+        if (_keys.Get(SpeechToTextFactory.Deepgram) is null)
         {
             return BadRequest("Add the Deepgram key first.");
         }
@@ -363,34 +363,16 @@ public class SubtitlesController : ControllerBase
         http.Timeout = TimeSpan.FromSeconds(30);
         try
         {
-            if (!await DeepgramAccount.CanReadBillingAsync(http, admin, cancellationToken).ConfigureAwait(false))
-            {
-                return new LimitKeyResult(false, "The Deepgram key is already a limited key; nothing to change.", before);
-            }
-
-            var limited = await DeepgramAccount.CreateTranscriptionKeyAsync(http, admin, "Shoal Subtitles (transcription only, created by the plugin)", cancellationToken).ConfigureAwait(false);
-            _keys.Set(SpeechToTextFactory.Deepgram, limited);
-            if (request.KeepForBalance)
-            {
-                _keys.Set(DeepgramAccount.BillingKey, admin);
-            }
+            var (swapped, message, after) = await DeepgramAccount.LimitTranscriptionKeyAsync(http, _keys, request.KeepForBalance, before, cancellationToken).ConfigureAwait(false);
 
             // The page applies the resulting setting too, so its next Save doesn't write the old one back
-            var after = DeepgramAccount.BalanceAfterLimiting(before, request.KeepForBalance);
-            if (config is not null && after != before)
+            if (swapped && config is not null && after != before)
             {
                 config.DeepgramBalance = after;
                 SubtitlesPlugin.Instance!.SaveConfiguration();
             }
 
-            DeepgramAccount.ClearCache();
-            const string Stays = " The new key is in your Deepgram project and stays there if this plugin is removed; delete it in Deepgram's console when no longer needed.";
-            return new LimitKeyResult(
-                true,
-                (request.KeepForBalance
-                    ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
-                    : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.") + Stays,
-                after);
+            return new LimitKeyResult(swapped, message, after);
         }
         catch (SpeechToTextException ex)
         {
@@ -428,7 +410,7 @@ public class SubtitlesController : ControllerBase
         var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
         var limits = Pricing.Spending.LimitsOf(config);
         var rates = _spending.Rates.Current;
-        var month = _spending.Ledger.ThisMonth(limits, rates);
+        var month = _spending.ThisMonth(limits);
         return new SpendingSummary(
             limits.Currency,
             limits.Overall,
@@ -436,7 +418,8 @@ public class SubtitlesController : ControllerBase
             month.PerProvider.ToDictionary(p => p.Key, p => decimal.Round(p.Value, 4), StringComparer.OrdinalIgnoreCase),
             rates?.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             rates is not null && rates.IsFresh(DateOnly.FromDateTime(DateTime.Now)),
-            _spending.Prices?.Version);
+            _spending.Prices?.Version,
+            Pricing.Spending.Currencies);
     }
 
     /// <summary>
@@ -478,8 +461,8 @@ public class SubtitlesController : ControllerBase
         // A paid service's test is priced and counted like any other call (a fraction of a cent)
         if (SpeechToTextFactory.IsPaid(service.Id))
         {
-            await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
-            service = new MeteredSpeechToText(service, Pipeline.SubtitleSyncTask.ModelOf(service.Id, request.Model), _spending, Pricing.Spending.LimitsOf(config), "subtitles.test");
+            await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
+            service = SpeechSelection.Metered(service, request.Model, config, _spending, "subtitles.test");
         }
 
         // One second of a very quiet tone: enough for the service to accept and answer
@@ -569,7 +552,8 @@ public sealed record BuiltInStatus(bool Available, string? Problem);
 /// <param name="RatesDate">The date of the exchange rates in use, if any.</param>
 /// <param name="RatesFresh">Whether those rates are recent enough to use.</param>
 /// <param name="PricesVersion">The version of the published prices shipped with the plugin.</param>
-public sealed record SpendingSummary(string Currency, decimal? Limit, decimal? Spent, IReadOnlyDictionary<string, decimal> PerProvider, string? RatesDate, bool RatesFresh, string? PricesVersion);
+/// <param name="Currencies">The currencies that can be chosen (the settings page offers these, rather than its own copy).</param>
+public sealed record SpendingSummary(string Currency, decimal? Limit, decimal? Spent, IReadOnlyDictionary<string, decimal> PerProvider, string? RatesDate, bool RatesFresh, string? PricesVersion, IReadOnlyList<string> Currencies);
 
 /// <summary>
 /// What the local-service helper found.

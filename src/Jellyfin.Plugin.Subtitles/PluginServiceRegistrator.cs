@@ -54,7 +54,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         });
         serviceCollection.AddSingleton(sp => new SubtitleProcessor(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"))));
         serviceCollection.AddSingleton(sp => new EmbeddedChecker(sp.GetRequiredService<ResultStore>()));
-        // The in-process entry point other plugins of the family use for short transcripts (no HTTP endpoint)
+        // The in-process entry point other plugins of the family use for short transcripts (no HTTP endpoint): its work is
+        // a registered service; the static method they find by reflection forwards to it
+        serviceCollection.AddSingleton<Bridge.SpeechBridgeService>();
         serviceCollection.AddHostedService<Bridge.SpeechBridgeHost>();
 
         serviceCollection.AddSingleton(sp => new SubtitleFinder(sp.GetRequiredService<ResultStore>(), new DownloadLedger(Path.Combine(DataFolder(sp), "downloads.json"))));

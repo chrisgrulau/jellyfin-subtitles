@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.Common.Secrets;
+using Jellyfin.Plugin.Common.Resilience;
 
 namespace Jellyfin.Plugin.Subtitles.SpeechToText;
 
@@ -153,6 +153,49 @@ public static partial class DeepgramAccount
             : current;
 
     /// <summary>
+    /// Swaps an Admin transcription key for a new key that can only transcribe, created with the Admin key: the new key
+    /// becomes the transcription key, and the Admin key is either kept only for reading the balance or forgotten. Says
+    /// which key reads the balance afterwards (the caller saves that setting, and the page applies it).
+    /// </summary>
+    /// <param name="http">HTTP client.</param>
+    /// <param name="keys">The key store.</param>
+    /// <param name="keepForBalance">Whether to keep the Admin key, only for reading the balance.</param>
+    /// <param name="balanceBefore">Which key read the balance before.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Whether the key was swapped, what to show, and which key reads the balance now.</returns>
+    /// <exception cref="SpeechToTextException">Deepgram couldn't be asked, or the key couldn't be created.</exception>
+    internal static async Task<(bool Swapped, string Message, Configuration.BalanceSource BalanceSource)> LimitTranscriptionKeyAsync(HttpClient http, SpeechToTextKeys keys, bool keepForBalance, Configuration.BalanceSource balanceBefore, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(keys);
+        if (keys.Get(SpeechToTextFactory.Deepgram) is not { } admin)
+        {
+            return (false, "Add the Deepgram key first.", balanceBefore);
+        }
+
+        if (!await CanReadBillingAsync(http, admin, cancellationToken).ConfigureAwait(false))
+        {
+            return (false, "The Deepgram key is already a limited key; nothing to change.", balanceBefore);
+        }
+
+        var limited = await CreateTranscriptionKeyAsync(http, admin, "Shoal Subtitles (transcription only, created by the plugin)", cancellationToken).ConfigureAwait(false);
+        keys.Set(SpeechToTextFactory.Deepgram, limited);
+        if (keepForBalance)
+        {
+            keys.Set(BillingKey, admin);
+        }
+
+        ClearCache();
+        const string Stays = " The new key is in your Deepgram project and stays there if this plugin is removed; delete it in Deepgram's console when no longer needed.";
+        return (
+            true,
+            (keepForBalance
+                ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
+                : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.") + Stays,
+            BalanceAfterLimiting(balanceBefore, keepForBalance));
+    }
+
+    /// <summary>
     /// Forgets the cached balance (after a key changes).
     /// </summary>
     public static void ClearCache()
@@ -172,53 +215,53 @@ public static partial class DeepgramAccount
         return id is not null && ProjectId().IsMatch(id) ? id : throw new SpeechToTextException("Deepgram didn't return a project for this key.");
     }
 
+    // Through the shared provider HTTP helper: failures are classified (a rejected key is an authentication failure, not a
+    // transient one), the body is capped before it is read, and the key is removed from every message
     private static async Task<JsonDocument> SendAsync(HttpClient http, string key, HttpMethod method, Uri address, HttpContent? body, CancellationToken cancellationToken)
     {
         if (address.Host != Api.Host || address.Scheme != Uri.UriSchemeHttps)
         {
-            throw new SpeechToTextException("Refused: Deepgram keys are only sent to Deepgram.");
+            throw new SpeechToTextException("Refused: Deepgram keys are only sent to Deepgram.") { Failure = FailureClass.BadRequest };
         }
 
         using var request = new HttpRequestMessage(method, address) { Content = body };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Token", key);
-        HttpResponseMessage response;
+        string text;
         try
         {
-            response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            text = await ProviderHttp.SendAsync(http, request, HttpSpeechToText.MaxReplyBytes, [key], cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        catch (ProviderException ex)
         {
-            throw new SpeechToTextException("Deepgram couldn't be reached: " + Redaction.Redact(ex.Message, [key]), ex);
+            throw ToSpeechToText(ex);
         }
 
-        using (response)
+        try
         {
-            var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (text.Length > HttpSpeechToText.MaxReplyBytes)
-            {
-                throw new SpeechToTextException("Deepgram's reply was too large.");
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var why = response.StatusCode switch
-                {
-                    HttpStatusCode.Unauthorized => "Deepgram didn't accept this key.",
-                    HttpStatusCode.Forbidden => "This key isn't allowed to do that (it needs an Admin or Owner key).",
-                    _ => "Deepgram answered " + (int)response.StatusCode + ": " + Redaction.Redact(text, [key]),
-                };
-                throw new SpeechToTextException(why) { StatusCode = response.StatusCode };
-            }
-
-            try
-            {
-                return JsonDocument.Parse(text);
-            }
-            catch (JsonException ex)
-            {
-                throw new SpeechToTextException("Deepgram's reply wasn't valid JSON.", ex);
-            }
+            return JsonDocument.Parse(text);
         }
+        catch (JsonException ex)
+        {
+            throw new SpeechToTextException("Deepgram's reply wasn't valid JSON.", ex) { Failure = FailureClass.Transient };
+        }
+    }
+
+    /// <summary>
+    /// A failed account call as this plugin's speech-to-text failure, keeping its class and status, with plain words for a
+    /// rejected key or a key without the needed permission.
+    /// </summary>
+    /// <param name="ex">The classified failure.</param>
+    /// <returns>The failure to throw.</returns>
+    internal static SpeechToTextException ToSpeechToText(ProviderException ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+        var why = ex.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized => "Deepgram didn't accept this key.",
+            HttpStatusCode.Forbidden when ex.Failure == FailureClass.Authentication => "This key isn't allowed to do that (it needs an Admin or Owner key).",
+            _ => ex.Message,
+        };
+        return new SpeechToTextException(why, ex) { Failure = ex.Failure, StatusCode = ex.StatusCode };
     }
 
     [GeneratedRegex("^[0-9a-fA-F-]{8,64}$")]

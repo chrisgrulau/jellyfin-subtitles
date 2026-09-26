@@ -381,9 +381,16 @@
           ['AiContext', 'Context for AI decisions', 'A slightly longer excerpt (a couple of minutes), used only when the AI plugin is installed, for example to tell which episode a new video is.'],
           ['FullTranscript', 'Full transcript (coming later)', 'Not available yet: nothing uses it in this version. It will transcribe the whole video for last-resort subtitles and detailed checks.', true]
         ];
-        // The euro plus every currency in the European Central Bank's daily rates (as CurrencyCode.Supported)
-        var currencies = ['AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'HUF', 'IDR', 'ILS', 'INR', 'ISK',
-          'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'RON', 'SEK', 'SGD', 'THB', 'TRY', 'USD', 'ZAR'];
+        // The currencies that can be chosen come from the server with the spending (Currencies), so the page never copies
+        // the list; until they arrive, only the saved currency is offered (a Save meanwhile keeps it)
+        var currencies = [];
+
+        function fillCurrencies(wanted) {
+          var list = currencies.length ? currencies : [wanted || 'USD'];
+          var select = page.querySelector('#Currency');
+          select.innerHTML = list.map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + '</option>'; }).join('');
+          select.value = list.indexOf(wanted) >= 0 ? wanted : 'USD';
+        }
         var providers = [['builtin', 'Built-in (no setup)'], ['local', 'Local service'], ['deepgram', 'Deepgram'], ['openai', 'OpenAI']];
 
         function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -429,6 +436,10 @@
         function loadSpending() {
           var box = page.querySelector('#SpendingNow');
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Spending')).then(function (s) {
+            if (s.Currencies && s.Currencies.length) {
+              currencies = s.Currencies;
+              fillCurrencies(page.querySelector('#Currency').value);
+            }
             var fmt = function (n) { return s.Currency + ' ' + Number(n).toFixed(n > 0 && n < 0.01 ? 4 : 2); };
             var spent = s.Spent == null ? 'unknown (no current exchange rates)' : fmt(s.Spent);
             var parts = ['This month: ' + spent + (s.Limit == null ? ' (no limit)' : ' of ' + fmt(s.Limit))];
@@ -823,8 +834,7 @@
             page.querySelector('#Languages').value = (config.Languages || []).filter(function (l, i, a) { return a.indexOf(l) === i; }).join(', ') || 'eng';
             page.querySelector('#TimingFixes').value = config.TimingFixes;
             page.querySelector('#TextChanges').value = config.TextChanges;
-            page.querySelector('#Currency').innerHTML = currencies.map(function (c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
-            page.querySelector('#Currency').value = currencies.indexOf(config.Currency) >= 0 ? config.Currency : 'USD';
+            fillCurrencies(config.Currency || 'USD');
             page.querySelector('#MonthlyBudget').value = config.MonthlyBudget;
             page.querySelector('#ExtraChargesPercent').value = config.ExtraChargesPercent || 0;
             page.querySelector('#NoSpendingLimit').checked = !!config.NoSpendingLimit;

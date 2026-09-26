@@ -5,6 +5,46 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **FAM-06:** uses the shared building blocks from the common library (updated to its FAM-06 release).
+  - Paid speech-to-text calls are metered by the shared metered call: reserved first, settled at the actual cost, released
+    when the provider failed or the call was cancelled. A call that fails in an unexpected way is now recorded at its
+    estimate (before, its reservation stayed open, which counted the same).
+  - `results.json` and the download count are read and written through the shared JSON file helper, each keeping its
+    policy: a damaged results file is set aside and results start afresh, one that can't be read is never overwritten
+    (SUB-18); a damaged or unreadable download count starts from zero. Writes are now flushed to disk before the rename.
+  - Spending uses the shared spending store. Exchange rates refresh themselves when due: while they are missing or stale,
+    the European Central Bank is asked at most every 30 minutes, not at the start of every run and test. The currency
+    setting is read with the shared "setting, or USD" rule.
+  - The settings page offers the currencies the server sends with the spending summary (`Currencies`), instead of its
+    own copy of the list.
+  - ffmpeg (reading audio, copying subtitle tracks out of videos) and the built-in speech-to-text run through one shared
+    runner, which handles standard error the same way for all three: only its end is kept in memory while the program
+    runs, and a failure reports its last 300 characters (before, ffmpeg's messages were read whole and cut to their first
+    300 or 4,000 characters).
+- **SUB-31:** the code is reorganised without changing what it does, except as noted:
+  - Choosing the speech-to-text service moved out of the sync task into its own class; the change policies are read
+    from the settings; one helper starts every run (ffmpeg, HTTP client, exchange rates, speech-to-text service).
+  - The library is walked by one class for the sync, embedded and find tasks, with one rule for "already has a subtitle
+    in this language". An embedded track is now checked when the only subtitle file beside the video in its language is
+    forced-only, or picture-based while **Count picture-based subtitles** is off; before, any subtitle file there skipped
+    it.
+  - Swapping the Deepgram key for a limited one lives with the other Deepgram account calls.
+  - Result ids are worked out by the results store itself (the same ids as before, so stored results and their undo
+    records carry over).
+  - The entry point other plugins call for transcripts forwards to a registered service.
+
+### Fixed
+
+- **SUB-26:** SubDL searches and downloads, Deepgram account calls (balance, key check, creating a limited key) and the
+  cloud speech-to-text calls go through the shared provider HTTP helper: every failure is classified, the provider's
+  requested wait is read, keys are removed from messages, and no reply or error body is read beyond its size limit
+  (before, a large Deepgram error was read whole). A SubDL "too many requests" or used-up allowance now leaves SubDL out
+  for the rest of the run instead of asking it again for every remaining video; a rejected Deepgram key is reported as
+  an authentication failure rather than a passing one. The missing-subtitle search stops on a classified provider limit
+  or sign-in failure; the OpenSubtitles plugin's own limit is recognised where Jellyfin's providers are called.
+
 ## [0.10.0-alpha] - 2026-09-26
 
 ### Changed

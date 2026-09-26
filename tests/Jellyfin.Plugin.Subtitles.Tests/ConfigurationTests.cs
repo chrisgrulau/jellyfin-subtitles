@@ -53,16 +53,14 @@ public class ConfigurationTests
     public void Extra_charges_stay_between_0_and_100_percent(int input, int expected)
         => Assert.Equal(expected, SpendingLimit.NormaliseExtraPercent(input));
 
+    // FAM-06: the page offers the currencies the server sends with the spending, not a copy of its own
     [Fact]
-    public void The_settings_page_offers_exactly_the_supported_currencies()
+    public void The_settings_page_offers_the_servers_currencies()
     {
-        using var stream = typeof(SpendingLimit).Assembly.GetManifestResourceStream("Jellyfin.Plugin.Subtitles.Configuration.configPage.html")!;
-        using var reader = new System.IO.StreamReader(stream);
-        var page = reader.ReadToEnd();
-        var list = System.Text.RegularExpressions.Regex.Match(page, @"var currencies = \[(?<list>[^\]]*)\]").Groups["list"].Value;
-        var offered = System.Text.RegularExpressions.Regex.Matches(list, "'([A-Z]{3})'").Select(m => m.Groups[1].Value);
+        var page = Page();
 
-        Assert.Equal(Common.Costs.CurrencyCode.Supported, offered);
+        Assert.Contains("s.Currencies", page, StringComparison.Ordinal);
+        Assert.DoesNotMatch("'AUD'|'EUR'|'JPY'", page);
     }
 
     private static string Page()
@@ -101,17 +99,17 @@ public class ConfigurationTests
     [Fact]
     public void Languages_are_deduplicated_and_default_to_english()
     {
-        Assert.Equal(["eng"], SpendingLimit.EffectiveLanguages(null));
-        Assert.Equal(["eng"], SpendingLimit.EffectiveLanguages(["eng", "ENG", " eng "]));
-        Assert.Equal(["fre", "eng"], SpendingLimit.EffectiveLanguages(["fre", "eng", "bogus", "fre"]));
+        Assert.Equal(["eng"], LanguageSettings.EffectiveLanguages(null));
+        Assert.Equal(["eng"], LanguageSettings.EffectiveLanguages(["eng", "ENG", " eng "]));
+        Assert.Equal(["fre", "eng"], LanguageSettings.EffectiveLanguages(["fre", "eng", "bogus", "fre"]));
     }
 
     // FAM-01: codes in any form and names are accepted without the server's culture data; unknown entries are reported
     [Fact]
     public void Languages_may_be_written_as_codes_or_names()
     {
-        Assert.Equal(["fre", "deu", "swe"], SpendingLimit.EffectiveLanguages(["fre", "German", "sv", "fre"]));
-        Assert.Equal(["eng"], SpendingLimit.EffectiveLanguages(["Elvish"]));
-        Assert.Equal(["Elvish"], SpendingLimit.UnknownLanguages(["eng", "Elvish", " "]));
+        Assert.Equal(["fre", "deu", "swe"], LanguageSettings.EffectiveLanguages(["fre", "German", "sv", "fre"]));
+        Assert.Equal(["eng"], LanguageSettings.EffectiveLanguages(["Elvish"]));
+        Assert.Equal(["Elvish"], LanguageSettings.UnknownLanguages(["eng", "Elvish", " "]));
     }
 }

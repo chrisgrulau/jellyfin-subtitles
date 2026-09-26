@@ -44,6 +44,14 @@ public sealed class SpendingTests : IDisposable
         Assert.Equal(Money.Of(0.006m, "USD"), spending.Prices.PriceOf("openai", "whisper-1", PriceTable.AudioMinute));
     }
 
+    // FAM-06: the page offers the server's currency list, not a copy
+    [Fact]
+    public void The_currencies_offered_are_the_supported_ones()
+    {
+        Assert.Equal(CurrencyCode.Supported, Spending.Currencies);
+        Assert.Contains("AUD", Spending.Currencies);
+    }
+
     [Fact]
     public async Task Paid_calls_are_priced_recorded_and_stopped_at_the_limit()
     {
@@ -76,6 +84,20 @@ public sealed class SpendingTests : IDisposable
         Assert.Equal(0m, spending.Ledger.ThisMonth(Aud(5m), spending.Rates.Current).Total);
     }
 
+    // FAM-06: metering goes through the shared MeteredCall; an unexpected failure may have been billed, so it counts
+    [Fact]
+    public async Task An_unexpected_failure_is_recorded_at_the_estimate_and_a_cancellation_is_not()
+    {
+        using var spending = new Spending(_dir);
+        var metered = new MeteredSpeechToText(new Fake("deepgram") { Throw = new InvalidOperationException("odd") }, "nova-3", spending, Aud(5m), "subtitles.sync");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => metered.TranscribeAsync(Minute(), "en", TestContext.Current.CancellationToken));
+        Assert.Equal(0.00645m, spending.Ledger.ThisMonth(Aud(5m), spending.Rates.Current).Total);
+
+        var cancelled = new MeteredSpeechToText(new Fake("deepgram") { Throw = new OperationCanceledException() }, "nova-3", spending, Aud(5m), "subtitles.sync");
+        await Assert.ThrowsAsync<OperationCanceledException>(() => cancelled.TranscribeAsync(Minute(), "en", TestContext.Current.CancellationToken));
+        Assert.Equal(0.00645m, spending.Ledger.ThisMonth(Aud(5m), spending.Rates.Current).Total);
+    }
+
     [Fact]
     public async Task Unknown_prices_zero_limits_and_missing_rates_mean_no_call()
     {
@@ -99,11 +121,18 @@ public sealed class SpendingTests : IDisposable
 
         public bool Fail { get; init; }
 
+        public Exception? Throw { get; init; }
+
         public int Calls { get; private set; }
 
         public Task<Transcript> TranscribeAsync(float[] samples, string? language, CancellationToken cancellationToken)
         {
             Calls++;
+            if (Throw is not null)
+            {
+                return Task.FromException<Transcript>(Throw);
+            }
+
             return Fail
                 ? throw new SpeechToTextException("service down")
                 : Task.FromResult(new Transcript([], "en", id, "m", samples.Length / (double)AudioFormat.SampleRate));

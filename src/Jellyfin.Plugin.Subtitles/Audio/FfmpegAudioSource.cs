@@ -1,6 +1,5 @@
 using System;
 using System.Buffers.Binary;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -9,17 +8,15 @@ using System.Threading.Tasks;
 namespace Jellyfin.Plugin.Subtitles.Audio;
 
 /// <summary>
-/// Reads audio with ffmpeg (Jellyfin's own build, found through the server's encoder setting). The process is started
-/// without a shell, with its arguments as a list; the video is passed as an absolute <c>file:</c> path, so no file name
-/// can be read as an option or a protocol. It runs single-threaded at low priority with a time limit, and the whole
-/// process tree is killed on cancellation or timeout.
+/// Reads audio with ffmpeg (Jellyfin's own build, found through the server's encoder setting), run by
+/// <see cref="ExternalProcess"/>: without a shell, with its arguments as a list, at low priority with a time limit, and
+/// the whole process tree killed on cancellation or timeout. The video is passed as an absolute <c>file:</c> path, so no
+/// file name can be read as an option or a protocol, and ffmpeg runs single-threaded.
 /// </summary>
 public sealed class FfmpegAudioSource : IAudioSource
 {
     /// <summary>The longest a single read may take.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
-
-    private const int MaxErrorChars = 4000;
 
     private readonly string _ffmpeg;
     private readonly string _video;
@@ -74,56 +71,23 @@ public sealed class FfmpegAudioSource : IAudioSource
         ArgumentOutOfRangeException.ThrowIfNegative(start.Ticks);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length.Ticks);
 
-        var info = new ProcessStartInfo(_ffmpeg)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = false,
-            CreateNoWindow = true,
-        };
-        foreach (var a in Arguments(_video, _audioStream, start, length))
-        {
-            info.ArgumentList.Add(a);
-        }
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(Timeout);
-        using var process = Process.Start(info) ?? throw new IOException("ffmpeg could not be started.");
+        var maxBytes = (long)(length.TotalSeconds * AudioFormat.SampleRate * 2) + 65536;
+        ExternalProcessResult<byte[]>? run;
         try
         {
-            try
-            {
-                process.PriorityClass = ProcessPriorityClass.BelowNormal;
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
-            {
-                // Lowering priority is a courtesy; carry on without it
-            }
-
-            // Both pipes are drained at once so neither can fill up and stall the process
-            var maxBytes = (long)(length.TotalSeconds * AudioFormat.SampleRate * 2) + 65536;
-            var errors = ReadLimitedAsync(process.StandardError, timeout.Token);
-            var bytes = await ReadAllAsync(process.StandardOutput.BaseStream, maxBytes, timeout.Token).ConfigureAwait(false);
-            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-            if (process.ExitCode != 0)
-            {
-                throw new IOException("ffmpeg failed: " + (await errors.ConfigureAwait(false)).Trim());
-            }
-
-            return ToSamples(bytes);
+            run = await ExternalProcess.RunAsync(_ffmpeg, Arguments(_video, _audioStream, start, length), Timeout, (stream, ct) => ReadAllAsync(stream, maxBytes, ct), null, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TimeoutException)
         {
             throw new TimeoutException("Reading audio took longer than " + Timeout.TotalMinutes.ToString(CultureInfo.InvariantCulture) + " minutes.");
         }
-        finally
+
+        if (run!.ExitCode != 0)
         {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
+            throw new IOException("ffmpeg failed: " + run.Errors);
         }
+
+        return ToSamples(run.Output);
     }
 
     /// <summary>
@@ -144,7 +108,7 @@ public sealed class FfmpegAudioSource : IAudioSource
 
     private static string Seconds(TimeSpan t) => t.TotalSeconds.ToString("0.000", CultureInfo.InvariantCulture);
 
-    private static async Task<byte[]> ReadAllAsync(Stream stream, long maxBytes, CancellationToken ct)
+    private static async Task<byte[]?> ReadAllAsync(Stream stream, long maxBytes, CancellationToken ct)
     {
         using var buffer = new MemoryStream();
         var chunk = new byte[81920];
@@ -160,11 +124,5 @@ public sealed class FfmpegAudioSource : IAudioSource
         }
 
         return buffer.ToArray();
-    }
-
-    private static async Task<string> ReadLimitedAsync(StreamReader reader, CancellationToken ct)
-    {
-        var text = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
-        return text.Length > MaxErrorChars ? text[..MaxErrorChars] : text;
     }
 }

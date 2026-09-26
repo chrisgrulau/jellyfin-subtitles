@@ -49,8 +49,15 @@ public sealed class JellyfinSubtitleSource : ICandidateSource
         }
 
         // Not perfect-match only: fingerprint matches are scored highly, but other good releases are worth checking too
-        var results = await _subtitles.SearchSubtitles(video, language, null, true, cancellationToken).ConfigureAwait(false);
-        return [.. results.Select(ToCandidate)];
+        try
+        {
+            var results = await _subtitles.SearchSubtitles(video, language, null, true, cancellationToken).ConfigureAwait(false);
+            return [.. results.Select(ToCandidate)];
+        }
+        catch (Exception ex) when (ProviderFailures.Classify(ex) is { } failure)
+        {
+            throw failure;
+        }
     }
 
     /// <inheritdoc />
@@ -58,7 +65,17 @@ public sealed class JellyfinSubtitleSource : ICandidateSource
     {
         ArgumentNullException.ThrowIfNull(candidate);
 
-        var response = await _subtitles.GetRemoteSubtitles(candidate.Id, cancellationToken).ConfigureAwait(false);
+        SubtitleResponse response;
+        try
+        {
+            response = await _subtitles.GetRemoteSubtitles(candidate.Id, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ProviderFailures.Classify(ex) is { } failure)
+        {
+            // A provider's own limit or sign-in failure is classified here, where its foreign exception enters the plugin
+            throw failure;
+        }
+
         if (response?.Stream is null)
         {
             return null;

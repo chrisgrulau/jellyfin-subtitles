@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -11,9 +10,9 @@ namespace Jellyfin.Plugin.Subtitles.Audio;
 
 /// <summary>
 /// Copies a text subtitle track out of a video with Jellyfin's ffmpeg, without changing the video. ffmpeg has to read
-/// the whole file to do it, so this is only used when the administrator opts in, a few videos per run. Same rules as
-/// the audio reader: an argument list (no shell), a <c>file:</c> prefix, low priority, a time limit, capped output, and
-/// the process tree killed on cancel.
+/// the whole file to do it, so this is only used when the administrator opts in, a few videos per run. Run like the
+/// audio reader by <see cref="ExternalProcess"/>: an argument list (no shell), a <c>file:</c> prefix, low priority, a
+/// time limit, capped output, and the process tree killed on cancel.
 /// </summary>
 public static class FfmpegSubtitleExtractor
 {
@@ -65,58 +64,22 @@ public static class FfmpegSubtitleExtractor
         ArgumentException.ThrowIfNullOrWhiteSpace(ffmpegPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(videoPath);
         ArgumentOutOfRangeException.ThrowIfNegative(streamIndex);
-        var info = new ProcessStartInfo(ffmpegPath)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (var a in Arguments(Path.GetFullPath(videoPath), streamIndex, codec))
-        {
-            info.ArgumentList.Add(a);
-        }
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(Timeout);
-        using var process = Process.Start(info) ?? throw new IOException("ffmpeg could not be started.");
+        ExternalProcessResult<byte[]>? run;
         try
         {
-            try
-            {
-                process.PriorityClass = ProcessPriorityClass.BelowNormal;
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
-            {
-                // Lowering priority is a courtesy
-            }
-
-            var errors = process.StandardError.ReadToEndAsync(timeout.Token);
-            var bytes = await SubtitleReader.ReadLimitedAsync(process.StandardOutput.BaseStream, timeout.Token).ConfigureAwait(false);
-            if (bytes is null)
-            {
-                return null;
-            }
-
-            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-            if (process.ExitCode != 0)
-            {
-                var text = (await errors.ConfigureAwait(false)).Trim();
-                throw new IOException("ffmpeg failed: " + (text.Length > 300 ? text[..300] : text));
-            }
-
-            return bytes;
+            // Stops as soon as the output is too big to be a subtitle (ffmpeg is then killed)
+            run = await ExternalProcess.RunAsync(ffmpegPath, Arguments(Path.GetFullPath(videoPath), streamIndex, codec), Timeout, SubtitleReader.ReadLimitedAsync, null, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TimeoutException)
         {
             throw new TimeoutException("Copying the subtitle track took longer than " + Timeout.TotalMinutes.ToString(CultureInfo.InvariantCulture) + " minutes.");
         }
-        finally
+
+        if (run is null)
         {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
+            return null;
         }
+
+        return run.ExitCode == 0 ? run.Output : throw new IOException("ffmpeg failed: " + run.Errors);
     }
 }
