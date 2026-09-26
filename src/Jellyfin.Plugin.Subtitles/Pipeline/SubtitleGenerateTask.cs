@@ -62,6 +62,9 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>The HTTP timeout for one chunk (ten minutes of audio) sent to a speech-to-text service.</summary>
+    public static readonly TimeSpan ChunkTimeout = TimeSpan.FromMinutes(20);
+
     /// <inheritdoc />
     public string Name => "Generate missing subtitles";
 
@@ -120,7 +123,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
             return;
         }
 
-        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken).ConfigureAwait(false);
+        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken, ChunkTimeout).ConfigureAwait(false);
         if (run is null)
         {
             LogSkipped(_logger, "Jellyfin's ffmpeg wasn't found");

@@ -140,7 +140,8 @@ Stage 4, part 1: the last resort when no subtitle can be found.
   Chunk times are moved to the video's clock; a word is kept from the chunk on whose side of the middle of the overlap
   its midpoint falls, and the same word heard by both chunks at the seam (starting within a second) is kept once.
 - **Time limit:** 10 minutes plus 5× the video's length per video, at most a day (each built-in run also has its own
-  limit); a video that runs over is recorded as failed.
+  limit, and each HTTP call 20 minutes rather than the usual 3, for a local service on a CPU); a video that runs over is
+  recorded as failed.
 - **Cues** (`TranscriptCues`, a pure function): word timings (every provider gives them; segments only fill in as above).
   Sound descriptions (`[Music]`, `(laughs)`, bracketed runs), music notes and words without letters or digits are
   dropped. Words are grouped greedily: a new cue at a pause over 0.6 s, after a sentence end once the cue has 12

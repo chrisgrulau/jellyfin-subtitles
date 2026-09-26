@@ -48,8 +48,10 @@ internal sealed class RunStart : IDisposable
     /// <param name="builtIn">The built-in speech-to-text.</param>
     /// <param name="spending">Prices, ledger and exchange rates.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="httpTimeout">The HTTP timeout, or <c>null</c> for <see cref="HttpTimeout"/> (full transcripts send ten
+    /// minutes of audio per call, which a local service on a CPU can take longer than that to transcribe).</param>
     /// <returns>The run's start, or <c>null</c> when Jellyfin's ffmpeg wasn't found (nothing can be checked).</returns>
-    public static async Task<RunStart?> BeginAsync(IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost? builtIn, Spending spending, CancellationToken cancellationToken)
+    public static async Task<RunStart?> BeginAsync(IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost? builtIn, Spending spending, CancellationToken cancellationToken, TimeSpan? httpTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(encoder);
         ArgumentNullException.ThrowIfNull(http);
@@ -63,7 +65,7 @@ internal sealed class RunStart : IDisposable
         var client = http.CreateClient();
         try
         {
-            client.Timeout = HttpTimeout;
+            client.Timeout = httpTimeout ?? HttpTimeout;
             await spending.CurrentRatesAsync(client, cancellationToken).ConfigureAwait(false);
             return new RunStart(ffmpeg, client, keys, builtIn, spending);
         }
