@@ -24,6 +24,10 @@
       #SubtitlesConfigPage .subs-key .inputContainer { flex: 1 1 14em; margin: 0; }
       #SubtitlesConfigPage .subs-set { color: #4caf50; }
       #SubtitlesConfigPage .subs-result { flex-basis: 100%; margin: .25em 0; }
+      #SubtitlesConfigPage .subs-found { list-style: none; margin: .5em 0; padding: 0; }
+      #SubtitlesConfigPage .subs-found li { display: flex; gap: .75em; align-items: center; flex-wrap: wrap; padding: .3em 0; }
+      #SubtitlesConfigPage .subs-found code, #SubtitlesConfigPage .subs-setup code { word-break: break-all; }
+      #SubtitlesConfigPage .subs-setup pre { white-space: pre-wrap; word-break: break-all; background: rgba(128,128,128,.12); padding: .6em .8em; border-radius: 4px; margin: .4em 0; }
       @media (max-width: 720px) { #SubtitlesConfigPage .subs-tier { grid-template-columns: 1fr; } }
     </style>
     <div data-role="content">
@@ -122,6 +126,8 @@
               <input id="LocalServiceUrl" type="url" is="emby-input" placeholder="http://localhost:8000/v1" />
               <div class="fieldDescription">A speech-to-text service with an OpenAI-compatible API on this server or your network (for example a faster-whisper server, speaches, or the whisper.cpp server). Free, and fast with a GPU.</div>
             </div>
+            <button is="emby-button" type="button" class="raised button-alt" id="FindLocal"><span>Find a local service</span></button>
+            <div id="LocalFound" class="subs-muted"></div>
             <div class="subs-key"></div>
           </div>
           <div class="subs-service" data-service="deepgram"><h4>Deepgram</h4><div class="subs-key"></div></div>
@@ -319,6 +325,38 @@
             box.textContent = parts.join(' · ');
           }, function () { box.textContent = ''; });
         }
+
+        // Local services: what answers on this machine's usual ports, and how to run one
+        page.querySelector('#FindLocal').addEventListener('click', function () {
+          var box = page.querySelector('#LocalFound');
+          box.textContent = 'Looking on this server…';
+          ApiClient.getJSON(ApiClient.getUrl('Subtitles/LocalServices')).then(function (r) {
+            var found = r.Found || [];
+            var html = found.length
+              ? '<ul class="subs-found">' + found.map(function (f, i) {
+                  return '<li><code>' + esc(f.Address) + '</code><span>' + (f.Models.length ? esc(f.Models.slice(0, 4).join(', ')) + (f.Models.length > 4 ? ' …' : '') : 'no models listed') + '</span>' +
+                    '<button is="emby-button" type="button" class="raised local-use" data-i="' + i + '"><span>Use this</span></button></li>';
+                }).join('') + '</ul>'
+              : '<p>No speech-to-text service answered on this server\'s usual ports.</p>';
+            var sg = r.Suggestion;
+            html += '<details class="subs-setup"' + (found.length ? '' : ' open') + '><summary>How to run one on this server</summary><p>' + esc(sg.Why) + '</p>' +
+              sg.Commands.map(function (c) { return '<pre>' + esc(c) + '</pre>'; }).join('') +
+              '<button is="emby-button" type="button" class="raised local-copy"><span>Copy commands</span></button>' +
+              '<p>Then press <strong>Find a local service</strong> again, or enter <code>' + esc(sg.Address) + '</code>, save, and press <strong>Test</strong>. The first transcription downloads the model, so it can take a minute.</p></details>';
+            box.innerHTML = html;
+            Array.prototype.forEach.call(box.querySelectorAll('.local-use'), function (b) {
+              b.addEventListener('click', function () {
+                page.querySelector('#LocalServiceUrl').value = found[parseInt(b.getAttribute('data-i'), 10)].Address;
+                Dashboard.alert('Address filled in. Save the settings, then press Test.');
+              });
+            });
+            box.querySelector('.local-copy').addEventListener('click', function () {
+              var text = sg.Commands.join('\n');
+              var done = function () { Dashboard.alert('Commands copied.'); };
+              if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, function () {}); }
+            });
+          }, function () { box.textContent = 'The search couldn\'t be run.'; });
+        });
 
         function loadKeys() {
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Keys')).then(renderKeys);

@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Local service helper.** On the settings page, **Find a local service** looks for OpenAI-compatible speech-to-text
+  services on this server's usual ports (only this server, never the network). Each one found has a **Use this**
+  button. The page also suggests how to run one (speaches in Docker), matched to Jellyfin's hardware acceleration
+  setting: the GPU image for NVIDIA, the CPU image otherwise. It shows the commands with a copy button. Nothing is
+  installed or started by the plugin.
+
+### Added
+
 - **Paid speech-to-text within your monthly limit.** Deepgram or OpenAI can now be used by the nightly runs.
   - Every call is priced from the providers' published prices (shipped with the plugin, dated 2026-09-26), reserved
     against the month's limit in your currency before it is made, and recorded afterwards.

@@ -12,6 +12,8 @@ using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Pipeline;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -30,6 +32,7 @@ public class SubtitlesController : ControllerBase
 {
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
+    private readonly IServerConfigurationManager _serverConfig;
     private readonly Pricing.Spending _spending;
     private readonly IHttpClientFactory _http;
     private readonly SubtitleProcessor _processor;
@@ -42,8 +45,10 @@ public class SubtitlesController : ControllerBase
     /// <param name="processor">Subtitle checks, results, apply and undo.</param>
     /// <param name="builtIn">The built-in speech-to-text.</param>
     /// <param name="spending">Prices, spend ledger and exchange rates.</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending)
+    /// <param name="serverConfig">Jellyfin's configuration (for its hardware acceleration setting).</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig)
     {
+        _serverConfig = serverConfig ?? throw new ArgumentNullException(nameof(serverConfig));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
@@ -146,6 +151,24 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Helps set up a local speech-to-text service: the services answering on this machine's usual ports, and a suggested
+    /// way to run one that suits Jellyfin's hardware acceleration setting. Nothing is installed or started.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What was found and the suggestion.</returns>
+    [HttpGet("LocalServices")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<LocalServicesResult>> LocalServicesFound(CancellationToken cancellationToken)
+    {
+        var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
+        using var http = _http.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(10);
+        var found = await LocalServices.FindAsync(http, config.LocalServiceUrl, cancellationToken).ConfigureAwait(false);
+        var accel = _serverConfig.GetEncodingOptions().HardwareAccelerationType.ToString();
+        return new LocalServicesResult(found, accel, LocalServices.Suggest(accel));
     }
 
     /// <summary>
@@ -263,3 +286,11 @@ public sealed record TestResult(bool Ok, string Message);
 /// <param name="RatesFresh">Whether those rates are recent enough to use.</param>
 /// <param name="PricesVersion">The version of the published prices shipped with the plugin.</param>
 public sealed record SpendingSummary(string Currency, decimal? Limit, decimal? Spent, IReadOnlyDictionary<string, decimal> PerProvider, string? RatesDate, bool RatesFresh, string? PricesVersion);
+
+/// <summary>
+/// What the local-service helper found.
+/// </summary>
+/// <param name="Found">Services answering on this machine.</param>
+/// <param name="HardwareAcceleration">Jellyfin's hardware acceleration setting.</param>
+/// <param name="Suggestion">A suggested way to run one.</param>
+public sealed record LocalServicesResult(IReadOnlyList<FoundService> Found, string HardwareAcceleration, SetupSuggestion Suggestion);
