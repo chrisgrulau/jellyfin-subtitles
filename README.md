@@ -17,10 +17,17 @@ against what is actually said in the audio, and fixes the timing, so the subtitl
 
 ## Installing
 
-Download `jellyfin-plugin-subtitles.zip` from the [releases](https://github.com/chrisgrulau/jellyfin-subtitles/releases),
+**From the Shoal plugin repository (recommended):** in **Dashboard → Plugins → Repositories**, add
+`https://raw.githubusercontent.com/chrisgrulau/jellyfin-shoal/main/manifest.json`, install **Shoal Subtitles** from
+the catalogue and restart Jellyfin. Jellyfin installs updates from a repository automatically (daily, and at start-up)
+unless you switch that off for the plugin under **My Plugins**.
+
+**By hand:** download `jellyfin-plugin-subtitles.zip` from the [releases](https://github.com/chrisgrulau/jellyfin-subtitles/releases),
 check it against `SHA256SUMS` (and, if you like, its build provenance with
 `gh attestation verify jellyfin-plugin-subtitles.zip --repo chrisgrulau/jellyfin-subtitles`), and put
-`Jellyfin.Plugin.Subtitles.dll` in `<jellyfin data>/plugins/Subtitles_<version>/`, then restart Jellyfin. For speech-to-text,
+`Jellyfin.Plugin.Subtitles.dll` in `<jellyfin data>/plugins/Subtitles_<version>/`, then restart Jellyfin.
+
+Nothing is checked, changed or downloaded until you have saved the settings page once. For speech-to-text,
 either allow the **built-in** one on the plugin page (it downloads about 90 MB the first time), or point **Local service
 address** at an OpenAI-compatible service (for example a faster-whisper server); then press **Test**.
 
@@ -33,15 +40,15 @@ find candidates → score them → check the best against the audio → synchron
 ```
 
 1. **Find candidates**: first through Jellyfin's own subtitle providers (for example the OpenSubtitles plugin, using your
-   account), then SubDL (with a free API key), then subtitles already embedded in the file (text tracks, and image
-   tracks read with OCR). As a last resort, and only if you allow it, subtitles can be generated from a transcript (clearly
-   labelled as such).
+   account), then SubDL (with a free API key). Text subtitles already inside the video can be checked too (optional).
+   Planned, not yet built: image tracks read with OCR, and subtitles generated from a full transcript as a last resort.
 2. **Score them** without spending anything: release name, source and edition, frame rate, running time, uploader
    signals, machine-translation flags, language check.
 3. **Check against the audio**: short, dialogue-heavy snippets are transcribed and matched against the subtitle text.
-4. **Synchronise**: fixes a constant offset, gradual drift, or separate sections (for example around cuts), using the
-   video's own speech/silence pattern first (free) and speech-to-text when needed.
-5. **File it**, keeping the original download beside the result, or hold it for your review.
+4. **Synchronise**: fixes a constant offset or a gradual drift (a frame-rate difference), using the video's own
+   speech/silence pattern first (free) and speech-to-text when needed. Separate offsets around cuts are planned.
+5. **File it**, or hold it for your review. When an existing file is changed, its original is kept in the plugin's data
+   folder, so **Undo** brings it back.
 
 ## Speech-to-text
 
@@ -122,6 +129,30 @@ make results worse.
 3. Full transcription: last-resort subtitles, discrepancy finder, automatic confidence calibration.
 4. More languages; later, subtitles in a different language from the audio.
 
+## What it stores and sends
+
+**Stored** in the plugin's data folder (`<jellyfin data>/plugins/Jellyfin.Plugin.Subtitles/`): `keys.json` (owner-only),
+`results.json` (a result per subtitle: paths, video names, what was changed; kept while the file exists),
+`originals/` (the original of every file it changed, for Undo), `spend.json` and `rates.json` (spending), and
+`downloads.json` (the day's download count). The built-in speech-to-text lives in `<jellyfin data>/shoal-subtitles/`.
+
+**Sent:**
+
+| To | When | What |
+|---|---|---|
+| Your subtitle providers (through Jellyfin), SubDL | Finding missing subtitles | The video's title, year, season and episode, as Jellyfin's own search does |
+| A cloud speech-to-text service | Only if you chose one | A few one-minute audio snippets per checked file (the built-in and local services keep audio on the server) |
+| Shoal AI → your AI provider | Only if installed and allowing Subtitles | The subtitle language, a few minutes of heard phrases and the subtitle lines around them |
+
+**Needs write access** to your media folders: corrections are written beside the video.
+
+## Upgrading and uninstalling
+
+Upgrades keep settings, results and originals. Before uninstalling, use **Undo** on any change you want reversed: once
+the plugin is gone, its originals are no longer linked to their files. Left behind: the plugin's data folder (keys,
+results, originals) and `<jellyfin data>/shoal-subtitles/` (the built-in speech-to-text). Jellyfin's own "Download
+missing subtitles" task uses the same OpenSubtitles allowance, so you may want only one of them searching.
+
 ## Building
 
 The shared source ([jellyfin-plugin-common](https://github.com/chrisgrulau/jellyfin-plugin-common)) is a git
@@ -140,8 +171,9 @@ The output `Jellyfin.Plugin.Subtitles.dll` goes in `<jellyfin data>/plugins/Subt
 
 ## Security
 
-This repository is public. **No secrets are committed.** API keys you enter are stored in Jellyfin's plugin
-configuration on your server. See [SECURITY.md](SECURITY.md).
+This repository is public. **No secrets are committed.** API keys you enter are stored in their own file,
+`keys.json` in the plugin's data folder, readable only by Jellyfin's account (never in the plugin configuration, and
+never shown again or logged). See [SECURITY.md](SECURITY.md).
 
 ## Licence
 
