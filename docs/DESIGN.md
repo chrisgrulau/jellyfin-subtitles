@@ -116,6 +116,19 @@ lines them up with the local-service word times the synchroniser was calibrated 
     start against phrase start), and the usual solver needs at least 6 of them agreeing within 0.5 s on one shift and
     frame-rate ratio. Pairs that don't agree change nothing.
   - **"Different":** confirms "another language / something else".
+- Wording audit:
+  - **When:** the timing is settled (in sync, corrected or proposed) and speech-to-text ran. It is skipped for
+    subtitles matched by meaning, which are translations.
+  - **What the auditor gets:** the heard phrases, and the lines shown during the same stretches mapped to the audio's
+    clock. The AI plugin is the auditor, with purpose `subtitles.audit`.
+  - **What it answers:** lines of kind `name`, `number`, `negation`, `missing`, `wrong` or `extra`, each with a
+    suggestion and a reason.
+  - **Which findings are kept:** only for offered lines, of a known kind, one per line, at most 10. An empty or
+    unchanged suggestion only flags the line.
+  - **How a finding is stored:** as `LineFinding` (the line's time and text as in the file) on the result, which
+    makes it wait for review.
+  - **Apply:** changes only lines whose text is unchanged and whose time is within 1.5 s. It then retimes a proposed
+    correction and applies held-back clean-up, and Undo restores the original.
 - Agreement between independent sources outweighs a single model's confidence (default; can be switched to review).
 - Confidence is not comparable across models, so thresholds are per model (starting points: Deepgram word confidence
   ≥ 0.90 over a line; Whisper average log-probability ≥ −0.3 with compression-ratio and no-speech guards) and

@@ -18,7 +18,11 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="WrongLanguageSuspected">Speech was heard but almost none of it matches the subtitle text: the subtitle may
 /// be in another language, or for another version.</param>
 /// <param name="Note">Anything worth saying beyond the model's own explanation (e.g. why speech-to-text wasn't used).</param>
-public sealed record SyncOutcome(SyncModel Model, string Stage, bool WrongLanguageSuspected, string? Note);
+public sealed record SyncOutcome(SyncModel Model, string Stage, bool WrongLanguageSuspected, string? Note)
+{
+    /// <summary>Gets the stretches speech-to-text transcribed (empty when it didn't run), for an audit of the wording.</summary>
+    public IReadOnlyList<(double Start, Transcript Transcript)> Transcripts { get; init; } = [];
+}
 
 /// <summary>
 /// Checks one subtitle's timing: the free line-start stage first, then speech-to-text when that stage can't decide, or
@@ -28,6 +32,9 @@ public sealed class SyncCheck
 {
     /// <summary>Speech must contain at least this many words before a lack of matches means anything.</summary>
     public const int WordsHeardForLanguageCheck = 40;
+
+    /// <summary>The stage name when lines were matched by meaning (the wording differs, so it isn't audited).</summary>
+    public const string ByMeaningStage = "lines by meaning";
 
     private readonly IAudioSource _audio;
     private readonly ISpeechToText? _speech;
@@ -80,7 +87,7 @@ public sealed class SyncCheck
             var second = TranscriptAligner.Solve(anchors, _wordLag);
             if (second.Status != SyncStatus.Unreliable)
             {
-                return new SyncOutcome(second, "speech-to-text", false, null);
+                return new SyncOutcome(second, "speech-to-text", false, null) { Transcripts = transcripts };
             }
 
             var heard = transcripts.Sum(t => t.Transcript.Words.Count);
@@ -90,7 +97,7 @@ public sealed class SyncCheck
                 var (outcome, note) = await ByMeaningAsync(subtitles, transcripts, first, language, cancellationToken).ConfigureAwait(false);
                 if (outcome is not null)
                 {
-                    return outcome;
+                    return outcome with { Transcripts = transcripts };
                 }
 
                 byMeaning = note;
@@ -99,7 +106,7 @@ public sealed class SyncCheck
             var wrongLanguage = heard >= WordsHeardForLanguageCheck && anchors.Count < TranscriptAligner.MinimumAnchors;
             return new SyncOutcome(first, "line starts", wrongLanguage, (wrongLanguage
                 ? "Speech was heard but almost none of it matches this subtitle's text: it may be in another language, for another version, or not dialogue at all (commentary, storyboard or trivia notes). Left unchanged."
-                : "Speech-to-text couldn't settle it either: " + second.Explanation) + byMeaning);
+                : "Speech-to-text couldn't settle it either: " + second.Explanation) + byMeaning) { Transcripts = transcripts };
         }
         catch (SpeechToTextException ex)
         {
@@ -123,12 +130,12 @@ public sealed class SyncCheck
         switch (match.Verdict)
         {
             case LineVerdict.Different:
-                return (new SyncOutcome(first, "lines by meaning", true, $"Compared by meaning ({by}): these subtitles don't say what is said. {match.Note} Left unchanged."), string.Empty);
+                return (new SyncOutcome(first, ByMeaningStage, true, $"Compared by meaning ({by}): these subtitles don't say what is said. {match.Note} Left unchanged."), string.Empty);
             case LineVerdict.SameContent:
                 var model = MeaningAligner.Solve(MeaningAligner.Anchors(phrases, cues, match.Pairs), _wordLag);
                 if (model.Status != SyncStatus.Unreliable)
                 {
-                    return (new SyncOutcome(model, "lines by meaning", false, $"Lines matched by meaning ({by}), as the wording differs from what is said. {match.Note}".TrimEnd()), string.Empty);
+                    return (new SyncOutcome(model, ByMeaningStage, false, $"Lines matched by meaning ({by}), as the wording differs from what is said. {match.Note}".TrimEnd()), string.Empty);
                 }
 
                 return (null, $" Compared by meaning ({by}): the same content, but the matched lines don't agree on one timing.");
