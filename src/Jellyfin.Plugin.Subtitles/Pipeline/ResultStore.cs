@@ -69,7 +69,38 @@ public enum ResultStatus
 /// <param name="Suggestion">The line as it should read, or <c>null</c> when it is only flagged.</param>
 /// <param name="Kind">What differs: name, number, negation, missing, wrong or extra.</param>
 /// <param name="Reason">Why, in one sentence.</param>
-public sealed record LineFinding(double Time, string Current, string? Suggestion, string Kind, string Reason);
+public sealed record LineFinding(double Time, string Current, string? Suggestion, string Kind, string Reason)
+{
+    /// <summary>Gets which check found it: <c>null</c> for the wording audit, <see cref="Discrepancy.DiscrepancyReview.WholeFile"/> for the whole-file check.</summary>
+    public string? From { get; init; }
+
+    /// <summary>Gets what was heard there (whole-file check), if anything.</summary>
+    public string? Heard { get; init; }
+
+    /// <summary>Gets when a line heard but missing from the subtitle ends, in the file's time (it is added from <see cref="Time"/> to here).</summary>
+    public double? End { get; init; }
+}
+
+/// <summary>
+/// A whole subtitle file compared with a full transcript of its video.
+/// </summary>
+public sealed record WholeFileCheck
+{
+    /// <summary>Gets when.</summary>
+    public DateTimeOffset Time { get; init; }
+
+    /// <summary>Gets the speech-to-text service and model (for example <c>builtin/base</c>).</summary>
+    public string Setup { get; init; } = string.Empty;
+
+    /// <summary>Gets the lines found to differ, by kind (before any were applied or declined).</summary>
+    public IReadOnlyDictionary<string, int> Counts { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>Gets what the check found, in one or two sentences.</summary>
+    public string Summary { get; init; } = string.Empty;
+
+    /// <summary>Gets a value indicating whether it couldn't be done (the transcript failed); tried again after a while.</summary>
+    public bool Failed { get; init; }
+}
 
 /// <summary>
 /// The latest result for one subtitle file.
@@ -145,8 +176,14 @@ public sealed record SubtitleResult
     /// <summary>Gets lines whose meaning differs from what is said (from an audit), with suggested wording where given.</summary>
     public IReadOnlyList<LineFinding> Findings { get; init; } = [];
 
-    /// <summary>Gets a value indicating whether anything waits for review (a timing correction, clean-up or suggested wording).</summary>
-    public bool PendingReview => Status == ResultStatus.Proposed || CleanupPending.Count > 0 || Findings.Any(f => f.Suggestion is not null);
+    /// <summary>Gets the latest comparison of the whole file with a full transcript, if one was made.</summary>
+    public WholeFileCheck? WholeFile { get; init; }
+
+    /// <summary>Gets a value indicating whether the whole file is to be compared with a full transcript on the next run (asked for from the results).</summary>
+    public bool WholeFileRequested { get; init; }
+
+    /// <summary>Gets a value indicating whether anything waits for review (a timing correction, clean-up, suggested wording or a line the whole-file check flagged).</summary>
+    public bool PendingReview => Status == ResultStatus.Proposed || CleanupPending.Count > 0 || Findings.Any(f => f.Suggestion is not null || f.From is not null);
 }
 
 /// <summary>
@@ -225,7 +262,7 @@ public sealed class ResultStore : IDisposable
     public static bool MustKeep(SubtitleResult r, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(r);
-        return r.Changed || r.PendingReview || r.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Generated or ResultStatus.NoSpeech
+        return r.Changed || r.PendingReview || r.WholeFileRequested || r.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Generated or ResultStatus.NoSpeech
             || (r.Status is ResultStatus.NotFound or ResultStatus.Failed && r.Id.StartsWith("find-", StringComparison.Ordinal) && now - r.Time < SubtitleFinder.SearchAgainAfter);
     }
 
@@ -239,7 +276,7 @@ public sealed class ResultStore : IDisposable
     public static bool SaveAtOnce(SubtitleResult result, SubtitleResult? previous)
     {
         ArgumentNullException.ThrowIfNull(result);
-        return result.Changed || previous?.Changed == true || result.PendingReview || previous?.PendingReview == true
+        return result.Changed || previous?.Changed == true || result.PendingReview || previous?.PendingReview == true || result.WholeFileRequested != (previous?.WholeFileRequested ?? false)
             || result.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Declined or ResultStatus.Generated or ResultStatus.Replaced;
     }
 

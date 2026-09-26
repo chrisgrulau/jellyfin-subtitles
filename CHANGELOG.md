@@ -5,6 +5,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Stage 4: whole-file check.** A doubtful subtitle is compared line by line with a full transcript of its video, and
+  the lines that differ wait for your review: **Check whole file for doubtful subtitles** (off by default), and **Check
+  whole file** on any subtitle in the results (checked on the next run, even with the switch off; a subtitle that
+  can't be checked, such as one whose language isn't the audio's, is refused with the reason).
+  - Doubtful means: the timing check was unclear or settled by few matching words, or the AI wording audit flagged
+    lines. Generated subtitles, translations and subtitles in another language than the audio's are never checked.
+  - Finds lines heard but missing, lines with nothing heard (not sound descriptions, music or short interjections), and
+    lines whose names, numbers or negations differ from what is said or that leave out most of it. Case, punctuation,
+    contractions and numbers in digits or words don't count; timing may be off by up to 3 seconds. Deterministic; with
+    the AI plugin, lines flagged for their wording can be confirmed within the run's AI checks.
+  - Words heard with low confidence flag nothing (Deepgram under 0.90, Whisper-based services under 0.74).
+  - Each line is listed with its time, what was heard and a suggested fix, with its own **Apply** (**Add line**,
+    **Remove line**), **Decline** and **Edit** (the editor opens at the line with the fix filled in). **Apply** on the
+    result takes every suggested fix; lines with nothing heard are removed only one by one. Undo restores the original.
+    New filter **Differs from what is said (whole file)**; Activity log entries.
+  - At most **Subtitle files checked whole per night** (5 by default, 0 to 200), picked ones first, within the same
+    time budget as generating (now shared by both), in the same nightly task.
+  - Full transcripts are kept (compressed, in the data folder, at most 200 MB), so checking again or generating from
+    the same video costs nothing more.
+- **Tune confidence thresholds automatically** now works (off by default): each speech-to-text service and model learns
+  a stricter threshold from subtitles already found in sync, so that at most 2 % of their words would be flagged; it
+  never goes below the starting points.
+
+### Changed
+
+- The nightly task **Generate missing subtitles** is now **Generate missing subtitles and check whole files**, and
+  **Generate now** is **Run full transcripts now**. **Stop starting new videos after** is shared by generating and
+  checking whole files. Generated subtitles reuse a transcript already made for the same video.
+- The unused **Tune confidence thresholds automatically** setting is stored under a new name, so it starts off on
+  every install.
+
 ## [0.13.0-alpha] - 2026-09-27
 
 ### Added

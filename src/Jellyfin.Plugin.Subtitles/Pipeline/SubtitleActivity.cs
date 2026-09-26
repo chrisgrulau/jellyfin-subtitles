@@ -55,7 +55,8 @@ public sealed class SubtitleActivity
     public static ActivityNote? NoteFor(SubtitleResult r)
     {
         ArgumentNullException.ThrowIfNull(r);
-        var (headline, severity) = r.PendingReview ? ("A subtitle is waiting for review: ", LogLevel.Warning)
+        var (headline, severity) = r.PendingReview && r.Findings.Any(Discrepancy.DiscrepancyReview.IsWholeFile) ? ("Lines of a subtitle differ from what is said (whole file): ", LogLevel.Warning)
+            : r.PendingReview ? ("A subtitle is waiting for review: ", LogLevel.Warning)
             : r.Status switch
             {
                 ResultStatus.Added => ("Shoal Subtitles added a subtitle: ", LogLevel.Information),
@@ -73,7 +74,7 @@ public sealed class SubtitleActivity
     /// <param name="r">The result.</param>
     /// <returns>Whether it was written.</returns>
     public Task<bool> NotifyAsync(SubtitleResult r)
-        => NoteFor(r) is { } note ? WriteOnceAsync(r.Id + "|" + r.Status + "|" + r.PendingReview, note) : Task.FromResult(false);
+        => NoteFor(r) is { } note ? WriteOnceAsync(r.Id + "|" + r.Status + "|" + r.PendingReview + "|" + r.WholeFile?.Time.ToUnixTimeSeconds(), note) : Task.FromResult(false);
 
     /// <summary>
     /// Writes that a subtitle provider stopped a search run (not signed in, daily allowance used up).

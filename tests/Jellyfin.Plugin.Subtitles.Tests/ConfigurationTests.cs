@@ -89,10 +89,9 @@ public class ConfigurationTests
     public void Settings_that_do_nothing_yet_are_disabled_and_not_saved()
     {
         var page = Page();
-        Assert.Contains("id=\"SelfCalibration\" type=\"checkbox\" is=\"emby-checkbox\" disabled", page, StringComparison.Ordinal);
         Assert.Contains("id=\"AgreementDecides\" type=\"checkbox\" is=\"emby-checkbox\" disabled", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("config.SelfCalibration =", page, StringComparison.Ordinal);
         Assert.DoesNotContain("config.AgreementDecides =", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelfCalibration", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Full transcript (coming later)", page, StringComparison.Ordinal);
     }
 
@@ -109,6 +108,25 @@ public class ConfigurationTests
         Assert.Contains("runTask('ShoalSubtitlesGenerate'", page, StringComparison.Ordinal);
         Assert.Contains("config.MaxGenerateHours = isNaN(hours) ? 4 : Math.max(0, Math.min(24, hours));", page, StringComparison.Ordinal);
         Assert.Contains("Stop starting new videos after", page, StringComparison.Ordinal);
+    }
+
+    // Stage 4: the whole-file check's switch, nightly number and confidence tuning are saved; its findings are reviewed
+    // one by one, filtered, and asked for from the results
+    [Fact]
+    public void The_page_saves_whole_file_settings_and_reviews_findings()
+    {
+        var page = Page();
+        Assert.Contains("Check whole file for doubtful subtitles", page, StringComparison.Ordinal);
+        Assert.Contains("config.CheckWholeFile = page.querySelector('#CheckWholeFile').checked;", page, StringComparison.Ordinal);
+        Assert.Contains("config.MaxWholeFileChecksPerNight = isNaN(wholePerNight) ? 5 : Math.max(0, Math.min(200, wholePerNight));", page, StringComparison.Ordinal);
+        Assert.Contains("id=\"TuneConfidence\" type=\"checkbox\" is=\"emby-checkbox\" />", page, StringComparison.Ordinal);
+        Assert.Contains("config.TuneConfidence = page.querySelector('#TuneConfidence').checked;", page, StringComparison.Ordinal);
+        Assert.Contains("page.querySelector('#CheckWholeFile').checked = config.CheckWholeFile === true;", page, StringComparison.Ordinal);
+        Assert.Contains("page.querySelector('#TuneConfidence').checked = config.TuneConfidence === true;", page, StringComparison.Ordinal);
+        Assert.Contains("<option value=\"wholefile\">Differs from what is said (whole file)</option>", page, StringComparison.Ordinal);
+        Assert.Contains("'/CheckWholeFile'", page, StringComparison.Ordinal);
+        Assert.Contains("'/Findings/' + index + '/'", page, StringComparison.Ordinal);
+        Assert.Contains("openEditor(rid, owner && owner.Findings[index]);", page, StringComparison.Ordinal);
     }
 
     [Fact]

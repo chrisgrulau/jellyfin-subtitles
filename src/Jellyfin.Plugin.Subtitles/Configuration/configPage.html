@@ -27,6 +27,9 @@
       #SubtitlesConfigPage .subs-lines textarea { width: 100%; min-width: 16em; box-sizing: border-box; font: inherit; resize: vertical; }
       #SubtitlesConfigPage .subs-lines input, #SubtitlesConfigPage .subs-lines textarea { background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 3px; padding: .25em .35em; }
       #SubtitlesConfigPage .subs-lines .ed-bad { border-color: #ff7043; }
+      #SubtitlesConfigPage .subs-lines tr.ed-focus td { background: rgba(255,179,0,.15); }
+      #SubtitlesConfigPage .subs-findings { padding-left: 1.2em; }
+      #SubtitlesConfigPage .subs-findings li { margin: .4em 0; }
       #SubtitlesConfigPage .subs-filter { padding: .3em .45em; background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 3px; font: inherit; }
       #SubtitlesConfigPage .subs-service { padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
       #SubtitlesConfigPage .subs-service h4 { margin: .5em 0; }
@@ -56,11 +59,11 @@
             <h3 class="sectionTitle" style="margin:0">Results</h3>
             <button is="emby-button" type="button" id="RunNow" class="raised"><span>Check now</span></button>
             <button is="emby-button" type="button" id="FindNow" class="raised"><span>Find missing now</span></button>
-            <button is="emby-button" type="button" id="GenerateNow" class="raised" hidden><span>Generate now</span></button>
+            <button is="emby-button" type="button" id="GenerateNow" class="raised" hidden><span>Run full transcripts now</span></button>
             <span id="ResultsSummary" class="subs-muted"></span>
           </div>
           <div style="display:flex;gap:.75em;align-items:center;flex-wrap:wrap;margin-top:.5em">
-            <label class="subs-muted">Show <select id="ResFilter" class="subs-filter"><option value="">Everything</option><option value="waiting">Waiting for review</option></select></label>
+            <label class="subs-muted">Show <select id="ResFilter" class="subs-filter"><option value="">Everything</option><option value="waiting">Waiting for review</option><option value="wholefile">Differs from what is said (whole file)</option><option value="queued">Whole-file check queued</option></select></label>
             <input id="ResSearch" type="search" class="subs-filter" placeholder="Find a video" aria-label="Find a video" />
           </div>
           <p class="subs-muted">Subtitle files beside your films and episodes are checked daily, and subtitles are found for videos that have none in your languages (Scheduled Tasks → Shoal); if switched on, subtitles are generated for videos nothing could be found for. Corrections follow the timing setting below; every change keeps the original, and every added or generated subtitle can be removed with Undo.</p>
@@ -113,9 +116,23 @@
             <label class="inputLabel inputLabelUnfocused" for="MaxGeneratedPerNight">Videos transcribed per night</label>
             <input id="MaxGeneratedPerNight" type="number" min="0" max="200" step="1" is="emby-input" />
             <div class="fieldDescription">Default 20 (0 to 200). A video with no speech to speak of (music, silence) gets no subtitle and isn't transcribed again unless the Full transcript service or model changes.</div>
+          </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="CheckWholeFile" type="checkbox" is="emby-checkbox" />
+              <span>Check whole file for doubtful subtitles</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">A subtitle whose timing check was unclear or settled by few matching words, or whose wording the AI audit flagged, is compared line by line with a <strong>Full transcript</strong> of its video. Lines that are heard but missing, lines with nothing heard, and lines whose names, numbers, negations or words differ from what is said are listed with what was heard and a suggested fix, for you to apply or decline one by one (or open in the editor); nothing is changed on its own. Words heard with low confidence aren't used. Only subtitles in the audio's language; generated subtitles are never checked. <strong>Check whole file</strong> in the results asks for any subtitle to be checked, even with this off. Transcripts are kept, so checking again, or generating from the same video, costs nothing more. Runs nightly with the generated subtitles (Scheduled Tasks → Shoal → Generate missing subtitles and check whole files).</div>
+          </div>
+          <div class="inputContainer" id="WholeFileOptions">
+            <label class="inputLabel inputLabelUnfocused" for="MaxWholeFileChecksPerNight">Subtitle files checked whole per night</label>
+            <input id="MaxWholeFileChecksPerNight" type="number" min="0" max="200" step="1" is="emby-input" />
+            <div class="fieldDescription">Default 5 (0 to 200). Files you picked with <strong>Check whole file</strong> go first and count too.</div>
+          </div>
+          <div class="inputContainer" id="TranscriptHoursBox">
             <label class="inputLabel inputLabelUnfocused" for="MaxGenerateHours">Stop starting new videos after (hours)</label>
             <input id="MaxGenerateHours" type="number" min="0" max="24" step="1" is="emby-input" />
-            <div class="fieldDescription">Default 4 (0 to 24; 0 means no limit). Once this long has passed since the night's run began, no new video is started; one being transcribed finishes. The rest wait for the next night.</div>
+            <div class="fieldDescription">Default 4 (0 to 24; 0 means no limit), shared by generating subtitles and checking whole files. Once this long has passed since the night's run began, no new video is started; one being transcribed finishes. The rest wait for the next night.</div>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
@@ -350,10 +367,10 @@
             <h3 class="sectionTitle">Judging results</h3>
             <div class="checkboxContainer checkboxContainer-withDescription">
               <label class="emby-checkbox-label">
-                <input id="SelfCalibration" type="checkbox" is="emby-checkbox" disabled />
-                <span>Tune confidence thresholds automatically (coming later)</span>
+                <input id="TuneConfidence" type="checkbox" is="emby-checkbox" />
+                <span>Tune confidence thresholds automatically</span>
               </label>
-              <div class="fieldDescription checkboxFieldDescription">Not available yet: this setting has no effect in this version. It will use subtitles already known to be good in your library to calibrate each speech-to-text model.</div>
+              <div class="fieldDescription checkboxFieldDescription">Off by default. The whole-file check ignores words heard with less confidence than a starting point per service (Deepgram 0.90; the built-in, local and OpenAI Whisper services 0.74, Whisper's usual −0.3 average log-probability). With this on, each service and model learns a stricter threshold from subtitles already known to be good (found in sync by speech-to-text, nothing flagged): the lowest at which at most 2 % of their matched words would have been flagged, once 1,000 words have been seen. It only ever raises the threshold, so fewer, surer lines are flagged; it never goes below the starting point.</div>
             </div>
             <div class="checkboxContainer checkboxContainer-withDescription">
               <label class="emby-checkbox-label">
@@ -678,7 +695,37 @@
 
         var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large', CantWrite: "Can't write here", Declined: 'Declined', Generated: 'Generated', NoSpeech: 'No speech to transcribe', Replaced: 'Replaced by a found subtitle' };
 
-        var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened', RewordedFromAudit: 'line reworded', EditedByHand: 'line edited' };
+        var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened', RewordedFromAudit: 'line reworded', EditedByHand: 'line edited', FixedFromWholeFile: 'line fixed from the whole-file check' };
+
+        // What the whole-file check found, by kind
+        var findingNames = { 'missing-line': ['missing line', 'missing lines'], extra: ['line with nothing heard', 'lines with nothing heard'], name: ['name', 'names'], number: ['number', 'numbers'], negation: ['negation', 'negations'], words: ['line with words missing', 'lines with words missing'] };
+
+        function isWhole(f) { return f.From === 'whole file'; }
+
+        function fmtShort(s) {
+          var t = Math.max(0, Math.floor(s)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, sec = t % 60;
+          return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+        }
+
+        // Each finding with what was heard, the suggested fix and its own Apply / Decline / Edit
+        function findingList(r) {
+          var findings = r.Findings || [];
+          if (!findings.length) { return ''; }
+          return '<details open><summary>Lines to review (' + findings.length + ')</summary><ul class="subs-findings">' + findings.map(function (f, i) {
+            var names = findingNames[f.Kind];
+            var what = isWhole(f) ? (names ? names[0] : f.Kind) : f.Kind + ' (wording audit)';
+            var line = f.Kind === 'missing-line' ? '' : ' \u201c' + esc(f.Current.replace(/<[^>]*>/g, '').replace(/\n/g, ' ')) + '\u201d';
+            var heard = f.Heard ? '<br>Heard: \u201c' + esc(f.Heard.replace(/\n/g, ' ')) + '\u201d' : '';
+            var fix = f.Kind === 'extra' && isWhole(f) ? '<br>Fix: remove the line' : f.Suggestion ? '<br>' + (f.Kind === 'missing-line' ? 'Add' : 'Fix') + ': \u201c' + esc(f.Suggestion.replace(/\n/g, ' / ')) + '\u201d' : '';
+            var applyLabel = f.Kind === 'missing-line' ? 'Add line' : f.Kind === 'extra' && isWhole(f) ? 'Remove line' : 'Apply';
+            var canApply = f.Suggestion || (f.Kind === 'extra' && isWhole(f));
+            var attrs = ' data-id="' + esc(r.Id) + '" data-index="' + i + '" data-time="' + f.Time + '"';
+            return '<li><strong>' + esc(fmtShort(f.Time)) + '</strong> ' + esc(what) + ':' + line + heard + fix + '<br><span class="subs-muted">' + esc(f.Reason) + '</span><br>' +
+              (canApply ? '<button is="emby-button" type="button" class="raised fd-apply"' + attrs + '><span>' + applyLabel + '</span></button>' : '') +
+              '<button is="emby-button" type="button" class="raised button-alt fd-decline"' + attrs + '><span>Decline</span></button>' +
+              (r.Id.indexOf('gen-') !== 0 ? '<button is="emby-button" type="button" class="raised button-alt fd-edit"' + attrs + '><span>Edit</span></button>' : '') + '</li>';
+          }).join('') + '</ul></details>';
+        }
 
         function counts(map) {
           return Object.keys(map || {}).map(function (k) { var n = map[k]; return n + ' ' + (kindNames[k] || k) + (n === 1 || /d$/.test(kindNames[k] || '') ? '' : 's'); }).join(', ');
@@ -694,11 +741,16 @@
           var done = counts(r.Cleaned), waiting = counts(r.CleanupPending);
           if (done) { parts.push('Cleaned: ' + done); }
           if (waiting) { parts.push('Waiting: ' + waiting); }
-          var findings = r.Findings || [];
+          var findings = (r.Findings || []).filter(function (f) { return !isWhole(f); });
           if (findings.length) {
             var suggested = findings.filter(function (f) { return f.Suggestion; }).length;
             parts.push('Wording: ' + findings.length + ' line' + (findings.length === 1 ? '' : 's') + ' differ' + (findings.length === 1 ? 's' : '') + (suggested ? ' (' + suggested + ' with suggested wording)' : ''));
           }
+          var whole = {};
+          (r.Findings || []).filter(isWhole).forEach(function (f) { whole[f.Kind] = (whole[f.Kind] || 0) + 1; });
+          var wholeText = Object.keys(findingNames).filter(function (k) { return whole[k]; }).map(function (k) { return whole[k] + ' ' + findingNames[k][whole[k] === 1 ? 0 : 1]; }).join(', ');
+          if (wholeText) { parts.push('Whole file: ' + wholeText); }
+          if (r.WholeFileRequested) { parts.push('Whole-file check queued'); }
           return parts.join('<br>');
         }
 
@@ -710,34 +762,47 @@
           var chosen = filter.value;
           var present = {};
           all.forEach(function (r) { present[r.Status] = true; });
-          filter.innerHTML = '<option value="">Everything</option><option value="waiting">Waiting for review</option>' +
+          filter.innerHTML = '<option value="">Everything</option><option value="waiting">Waiting for review</option><option value="wholefile">Differs from what is said (whole file)</option><option value="queued">Whole-file check queued</option>' +
             Object.keys(present).map(function (k) { return '<option value="' + esc(k) + '">' + esc(statusNames[k] || k) + '</option>'; }).join('');
-          filter.value = chosen && (chosen === 'waiting' || present[chosen]) ? chosen : '';
+          filter.value = chosen && (chosen === 'waiting' || chosen === 'wholefile' || chosen === 'queued' || present[chosen]) ? chosen : '';
           var text = page.querySelector('#ResSearch').value.trim().toLowerCase();
           var results = all.filter(function (r) {
-            return (!filter.value || (filter.value === 'waiting' ? r.PendingReview : r.Status === filter.value)) &&
+            var shown = !filter.value || (filter.value === 'waiting' ? r.PendingReview
+              : filter.value === 'wholefile' ? (r.Findings || []).some(isWhole)
+              : filter.value === 'queued' ? r.WholeFileRequested : r.Status === filter.value);
+            return shown &&
               (!text || (r.Name || '').toLowerCase().indexOf(text) >= 0 || (r.SubtitlePath || '').toLowerCase().indexOf(text) >= 0);
           });
           var tally = {};
           results.forEach(function (r) { tally[r.Status] = (tally[r.Status] || 0) + 1; });
           var pending = results.filter(function (r) { return r.PendingReview; }).length;
+          var differs = results.filter(function (r) { return (r.Findings || []).some(isWhole); }).length;
           page.querySelector('#ResultsSummary').textContent = all.length
-            ? Object.keys(tally).map(function (k) { return (statusNames[k] || k) + ': ' + tally[k]; }).join(' · ') + (pending ? ' · waiting for review: ' + pending : '') +
+            ? Object.keys(tally).map(function (k) { return (statusNames[k] || k) + ': ' + tally[k]; }).join(' · ') + (pending ? ' · waiting for review: ' + pending : '') + (differs ? ' · differ from what is said (whole file): ' + differs : '') +
               (results.length > 100 ? ' · showing the first 100 of ' + results.length : '')
             : 'Nothing checked yet.';
           page.querySelector('#Results').innerHTML = results.length ? '<tr><th>When</th><th>Video</th><th>Timing</th><th>Changes</th><th>Details</th><th></th></tr>' + results.slice(0, 100).map(function (r) {
             var editable = ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'Added'].indexOf(r.Status) >= 0;
             var actions = (editable ? '<button is="emby-button" type="button" class="raised button-alt res-edit" data-id="' + esc(r.Id) + '"><span>Edit</span></button>' : '') +
-              (r.PendingReview ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '"><span>Apply</span></button>' +
-                '<button is="emby-button" type="button" class="raised button-alt res-decline" data-id="' + esc(r.Id) + '"><span>Decline</span></button>' : '') +
+              (r.PendingReview && (r.Status === 'Proposed' || Object.keys(r.CleanupPending || {}).length || (r.Findings || []).some(function (f) { return f.Suggestion; })) ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '" title="Apply everything waiting (lines with nothing heard are removed only one by one)"><span>Apply</span></button>' : '') +
+              (r.PendingReview ? '<button is="emby-button" type="button" class="raised button-alt res-decline" data-id="' + esc(r.Id) + '"><span>Decline</span></button>' : '') +
               (r.Changed ? '<button is="emby-button" type="button" class="raised button-alt res-undo" data-id="' + esc(r.Id) + '"><span>Undo</span></button>' : '') +
-              (!r.Changed && !r.PendingReview ? '<button is="emby-button" type="button" class="raised button-alt res-check" data-id="' + esc(r.Id) + '" title="Check this subtitle again on the next run (or search again for this video, or generate its subtitle again)"><span>' + (r.Id.indexOf('gen-') === 0 ? 'Generate again' : r.Status === 'Undone' || r.Status === 'NotFound' ? 'Search again' : 'Check again') + '</span></button>' : '');
+              (!r.Changed && !r.PendingReview ? '<button is="emby-button" type="button" class="raised button-alt res-check" data-id="' + esc(r.Id) + '" title="Check this subtitle again on the next run (or search again for this video, or generate its subtitle again)"><span>' + (r.Id.indexOf('gen-') === 0 ? 'Generate again' : r.Status === 'Undone' || r.Status === 'NotFound' ? 'Search again' : 'Check again') + '</span></button>' : '') +
+              (wholeCheckable(r) ? '<button is="emby-button" type="button" class="raised button-alt res-whole" data-id="' + esc(r.Id) + '" title="Compare every line with a full transcript of the video on the next run of the full transcripts task"><span>Check whole file</span></button>' : '');
             var origin = r.Origin ? '<div>From ' + esc(r.Origin) + '</div>' : '';
             var examples = (r.Examples || []).length ? '<details><summary>What changed</summary><ul>' + r.Examples.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>' : '';
+            examples += findingList(r);
             return '<tr><td style="white-space:nowrap">' + esc(new Date(r.Time).toLocaleString()) + '</td><td>' + esc(r.Name) + '<div class="subs-muted">' + esc((r.SubtitlePath || '').split(/[\\/]/).pop()) + '</div></td>' +
               '<td class="subs-status st-' + esc(r.Status) + '">' + esc(statusNames[r.Status] || r.Status) + '</td><td>' + change(r) + '</td>' +
               '<td class="subs-muted">' + origin + esc(r.Explanation) + examples + '</td><td style="white-space:nowrap">' + actions + '</td></tr>';
           }).join('') : '';
+          refreshWarnings();
+        }
+
+        // Subtitle files beside videos that aren't generated can be compared whole with a full transcript
+        function wholeCheckable(r) {
+          return !r.WholeFileRequested && r.Id.indexOf('gen-') !== 0 && r.Id.indexOf('emb-') !== 0 && !/\.generated\.[^.\\/]+$/i.test(r.SubtitlePath || '') &&
+            ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'Added', 'Declined', 'Undone'].indexOf(r.Status) >= 0 && !(r.Status === 'Undone' && r.Id.indexOf('find-') === 0);
         }
 
         page.querySelector('#ResFilter').addEventListener('change', function () { renderResults(lastResults); });
@@ -786,7 +851,7 @@
         function renderEditor() {
           var rows = visibleCues();
           page.querySelector('#EdLines').innerHTML = rows.slice(0, editor.shown).map(function (x) {
-            return '<tr data-i="' + x.i + '"><td><button is="emby-button" type="button" class="raised button-alt ed-play" title="Play this line"><span>▶</span></button></td>' +
+            return '<tr data-i="' + x.i + '"' + (x.i === editor.focus ? ' class="ed-focus"' : '') + '><td><button is="emby-button" type="button" class="raised button-alt ed-play" title="Play this line"><span>▶</span></button></td>' +
               '<td><input class="ed-time ed-start" value="' + esc(fmtTime(x.c.Start)) + '" aria-label="Start" /><br><input class="ed-time ed-end" value="' + esc(fmtTime(x.c.End)) + '" aria-label="End" /></td>' +
               '<td style="width:100%"><textarea class="ed-text" rows="2" aria-label="Text">' + esc(x.c.Text) + '</textarea></td>' +
               '<td><button is="emby-button" type="button" class="raised button-alt ed-delete" title="Delete this line"><span>✕</span></button></td></tr>';
@@ -794,16 +859,31 @@
           page.querySelector('#EdMore').hidden = rows.length <= editor.shown;
         }
 
-        function openEditor(id) {
+        // Opens the editor; with a finding, at its line, the suggested fix filled in (nothing is saved until Save)
+        function openEditor(id, focus) {
           ApiClient.getJSON(ApiClient.getUrl('Subtitles/Editor/' + id)).then(function (v) {
-            editor = { id: v.Id, fingerprint: v.Fingerprint, cues: v.Cues, shown: 150 };
+            editor = { id: v.Id, fingerprint: v.Fingerprint, cues: v.Cues, shown: 150, focus: -1 };
             page.querySelector('#EdTitle').textContent = v.Name;
             page.querySelector('#EdFile').textContent = v.File + ' · ' + v.Cues.length + ' lines';
             page.querySelector('#EdFilter').value = '';
             page.querySelector('#EdShift').value = '';
             page.querySelector('#Editor').hidden = false;
+            if (focus) {
+              var at = -1;
+              if (focus.Kind === 'missing-line') {
+                editor.cues.push({ Source: -1, Start: focus.Time, End: focus.End || focus.Time + 2, Text: focus.Suggestion || '' });
+                editor.cues.sort(function (a, b) { return a.Start - b.Start; });
+                at = editor.cues.findIndex(function (c) { return c.Source === -1 && Math.abs(c.Start - focus.Time) < 0.01; });
+              } else {
+                at = editor.cues.findIndex(function (c) { return c.Text === focus.Current && Math.abs(c.Start - focus.Time) <= 1.5; });
+                if (at >= 0 && focus.Suggestion) { editor.cues[at].Text = focus.Suggestion; }
+              }
+              editor.focus = at;
+              editor.shown = Math.max(150, at + 20);
+            }
             renderEditor();
-            page.querySelector('#Editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            var row = editor.focus >= 0 ? page.querySelector('#EdLines tr[data-i="' + editor.focus + '"]') : null;
+            (row || page.querySelector('#Editor')).scrollIntoView({ behavior: 'smooth', block: row ? 'center' : 'start' });
           }, function (err) { problemText(err).then(Dashboard.alert); });
         }
 
@@ -857,6 +937,28 @@
         page.querySelector('#Results').addEventListener('click', function (e) {
           var edit = e.target.closest('.res-edit');
           if (edit) { openEditor(edit.getAttribute('data-id')); return; }
+          var fd = e.target.closest('.fd-apply, .fd-decline, .fd-edit');
+          if (fd) {
+            var rid = fd.getAttribute('data-id'), index = parseInt(fd.getAttribute('data-index'), 10), time = fd.getAttribute('data-time');
+            if (fd.classList.contains('fd-edit')) {
+              var owner = lastResults.filter(function (x) { return x.Id === rid; })[0];
+              openEditor(rid, owner && owner.Findings[index]);
+              return;
+            }
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + rid + '/Findings/' + index + '/' + (fd.classList.contains('fd-apply') ? 'Apply' : 'Decline'), { time: time }) })
+              .then(loadResults, function (err) { return problemText(err).then(function (msg) { Dashboard.alert(msg); return loadResults(); }); });
+            return;
+          }
+          var whole = e.target.closest('.res-whole');
+          if (whole) {
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + whole.getAttribute('data-id') + '/CheckWholeFile') })
+              .then(function () {
+                Dashboard.alert('Queued: it is compared with a full transcript on the next run of Scheduled Tasks → Shoal → Generate missing subtitles and check whole files (daily at 05:00), or now with Run full transcripts now. That can take a while on the built-in speech-to-text.');
+                page.querySelector('#GenerateNow').hidden = false;
+                return loadResults();
+              }, function (err) { return problemText(err).then(function (msg) { Dashboard.alert(msg); return loadResults(); }); });
+            return;
+          }
           var b = e.target.closest('.res-apply, .res-undo, .res-decline, .res-check');
           if (!b) { return; }
           var verb = b.classList.contains('res-apply') ? 'Apply' : b.classList.contains('res-decline') ? 'Decline' : b.classList.contains('res-check') ? 'CheckAgain' : 'Undo';
@@ -900,13 +1002,15 @@
 
         page.querySelector('#RunNow').addEventListener('click', function () { runTask('ShoalSubtitlesSync', 'Checking subtitles'); });
         page.querySelector('#FindNow').addEventListener('click', function () { runTask('ShoalSubtitlesFind', 'Finding missing subtitles'); });
-        page.querySelector('#GenerateNow').addEventListener('click', function () { runTask('ShoalSubtitlesGenerate', 'Generating missing subtitles'); });
+        page.querySelector('#GenerateNow').addEventListener('click', function () { runTask('ShoalSubtitlesGenerate', 'Running full transcripts'); });
 
         // Generating needs the Full transcript speech-to-text: switching generation on switches it on too
-        page.querySelector('#GenerateMissing').addEventListener('change', function () {
-          var full = page.querySelector('.subs-tier[data-tier="FullTranscript"] .tier-on');
-          if (this.checked && full) { full.checked = true; }
-          refreshWarnings();
+        ['#GenerateMissing', '#CheckWholeFile'].forEach(function (sel) {
+          page.querySelector(sel).addEventListener('change', function () {
+            var full = page.querySelector('.subs-tier[data-tier="FullTranscript"] .tier-on');
+            if (this.checked && full) { full.checked = true; }
+            refreshWarnings();
+          });
         });
 
         function tiersFromPage() {
@@ -921,8 +1025,12 @@
           page.querySelector('#MonthlyBudget').disabled = noLimit;
           Array.prototype.forEach.call(page.querySelectorAll('.subs-currency'), function (e) { e.textContent = page.querySelector('#Currency').value; });
           var generating = page.querySelector('#GenerateMissing').checked;
+          var checkingWhole = page.querySelector('#CheckWholeFile').checked;
+          var queued = lastResults.some(function (r) { return r.WholeFileRequested; });
           page.querySelector('#GenerateOptions').hidden = !generating;
-          page.querySelector('#GenerateNow').hidden = !generating;
+          page.querySelector('#WholeFileOptions').hidden = !checkingWhole;
+          page.querySelector('#TranscriptHoursBox').hidden = !generating && !checkingWhole;
+          page.querySelector('#GenerateNow').hidden = !generating && !checkingWhole && !queued;
           var needsBuiltIn = tiersFromPage().some(function (t) { return t.Enabled && t.Provider === 'builtin'; });
           page.querySelector('#BuiltInConsent').hidden = !needsBuiltIn && !page.querySelector('#AllowBuiltInDownload').checked;
         }
@@ -964,6 +1072,9 @@
             page.querySelector('#GenerateMissing').checked = config.GenerateMissing === true;
             page.querySelector('#MaxGeneratedPerNight').value = config.MaxGeneratedPerNight == null ? 20 : config.MaxGeneratedPerNight;
             page.querySelector('#MaxGenerateHours').value = config.MaxGenerateHours == null ? 4 : config.MaxGenerateHours;
+            page.querySelector('#CheckWholeFile').checked = config.CheckWholeFile === true;
+            page.querySelector('#MaxWholeFileChecksPerNight').value = config.MaxWholeFileChecksPerNight == null ? 5 : config.MaxWholeFileChecksPerNight;
+            page.querySelector('#TuneConfidence').checked = config.TuneConfidence === true;
             page.querySelector('#WriteToActivityLog').checked = config.WriteToActivityLog !== false;
             page.querySelector('#AllowIngest').checked = config.AllowIngest === true;
             page.querySelector('#MaxFindsPerRun').value = config.MaxFindsPerRun || 20;
@@ -996,6 +1107,10 @@
             config.MaxGeneratedPerNight = isNaN(perNight) ? 20 : Math.max(0, Math.min(200, perNight));
             var hours = parseInt(page.querySelector('#MaxGenerateHours').value, 10);
             config.MaxGenerateHours = isNaN(hours) ? 4 : Math.max(0, Math.min(24, hours));
+            config.CheckWholeFile = page.querySelector('#CheckWholeFile').checked;
+            var wholePerNight = parseInt(page.querySelector('#MaxWholeFileChecksPerNight').value, 10);
+            config.MaxWholeFileChecksPerNight = isNaN(wholePerNight) ? 5 : Math.max(0, Math.min(200, wholePerNight));
+            config.TuneConfidence = page.querySelector('#TuneConfidence').checked;
             config.WriteToActivityLog = page.querySelector('#WriteToActivityLog').checked;
             config.SetupSaved = true;
             config.AllowIngest = page.querySelector('#AllowIngest').checked;

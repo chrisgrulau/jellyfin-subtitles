@@ -190,6 +190,95 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
+    /// Asks for a subtitle file to be compared whole with a full transcript of its video on the next run of the full
+    /// transcripts task (answers at once; the check itself can take a while).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/CheckWholeFile")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<SubtitleResult> CheckWholeFile([FromRoute] string id)
+    {
+        try
+        {
+            var wanted = LanguageSettings.EffectiveLanguages((SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()).Languages);
+            var (result, refused) = _processor.RequestWholeFileCheck(id, JobFor, wanted);
+            return result is not null ? result : BadRequest(refused);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(ex.Message);
+        }
+    }
+
+    // The subtitle as the nightly run would see it: its video in the library, its language and the audio track chosen for it
+    private SubtitleJob? JobFor(SubtitleResult r)
+    {
+        if (_library.GetItemById(r.ItemId) is not MediaBrowser.Controller.Entities.Video video || string.IsNullOrEmpty(video.Path))
+        {
+            return null;
+        }
+
+        var streams = _media.GetMediaStreams(video.Id);
+        var subtitle = streams.FirstOrDefault(s => s.Type == MediaBrowser.Model.Entities.MediaStreamType.Subtitle && s.IsExternal && string.Equals(s.Path, r.SubtitlePath, StringComparison.Ordinal));
+        var audio = streams.Where(s => s.Type == MediaBrowser.Model.Entities.MediaStreamType.Audio).OrderBy(s => s.Index).Select(s => (Language: (string?)s.Language, s.IsDefault)).ToList();
+        if (subtitle is null || audio.Count == 0)
+        {
+            return null;
+        }
+
+        var track = AudioChoice.For(audio, subtitle.Language);
+        return new SubtitleJob(video.Id, r.Name, video.Path, r.SubtitlePath, subtitle.Language, TimeSpan.FromTicks(video.RunTimeTicks ?? 0), track, audio[track].Language);
+    }
+
+    /// <summary>
+    /// Applies one finding waiting for review (a line's suggested wording, a missing line added, or a line with nothing
+    /// heard removed).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="index">The finding's position in the result.</param>
+    /// <param name="time">The finding's time, as listed (so a stale page can't apply another finding).</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Findings/{index}/Apply")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> ApplyFinding([FromRoute] string id, [FromRoute] int index, [FromQuery] double time)
+    {
+        try
+        {
+            return _processor.ApplyFinding(id, index, time);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Declines one finding waiting for review: nothing is changed.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="index">The finding's position in the result.</param>
+    /// <param name="time">The finding's time, as listed.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Findings/{index}/Decline")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> DeclineFinding([FromRoute] string id, [FromRoute] int index, [FromQuery] double time)
+    {
+        try
+        {
+            return _processor.DeclineFinding(id, index, time);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Undoes this plugin's changes to a file.
     /// </summary>
     /// <param name="id">Result id.</param>

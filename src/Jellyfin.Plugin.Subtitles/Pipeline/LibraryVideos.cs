@@ -56,7 +56,8 @@ internal sealed class LibraryVideos
                     continue;
                 }
 
-                yield return new SubtitleJob(v.Item.Id, v.Item.Name, v.Video.Path, sub.Path, sub.Language, v.Duration, AudioChoice.For(v.Audio, sub.Language));
+                var audio = AudioChoice.For(v.Audio, sub.Language);
+                yield return new SubtitleJob(v.Item.Id, v.Item.Name, v.Video.Path, sub.Path, sub.Language, v.Duration, audio, v.Audio[audio].Language);
             }
         }
     }
