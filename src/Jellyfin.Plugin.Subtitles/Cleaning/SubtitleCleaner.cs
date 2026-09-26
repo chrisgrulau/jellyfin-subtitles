@@ -358,7 +358,7 @@ public static partial class SubtitleCleaner
 
     // Override tags that make an ASS event a sign or karaoke: position, movement, origin, karaoke, transform, fade, clip,
     // drawing mode
-    [GeneratedRegex(@"\{[^}]*\\(?:pos|move|org|k[fo]?\d|K\d|t\(|fade?\(|i?clip|p[1-9])", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"\{[^}]*\\(?:pos|move|org|k[fo]?[0-9]|K[0-9]|t\(|fade?\(|i?clip|p[1-9])", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex TypesetTag();
 
     [GeneratedRegex(@"[ \t]{2,}")]

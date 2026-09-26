@@ -160,6 +160,16 @@ The editor opens a subtitle through its result id, so only files this plugin alr
 - **Saving:** the file is written through `SubtitleFiles.Replace`, so the first original is kept for Undo. The number
   of lines changed is added to `Cleaned` as `EditedByHand`.
 
+## Encodings
+
+- **Reading:** a file that isn't UTF-8 or UTF-16 (by byte-order mark or strict UTF-8 validation) is decoded with the
+  code page for the language tag in its name (`SubtitleEncoding.CodePageFor`), or Windows-1252 when there is none.
+- **Writing:** the encoding read is kept on the document (`SourceEncoding`). `SubtitleWriter.ToBytes` writes a legacy
+  file back in the same code page, refusing characters it can't hold, so unchanged lines round-trip byte for byte even
+  when the guess was wrong. UTF-8 and UTF-16 input is written as UTF-8.
+- **Suspect text:** replacement or C1 control characters mark the text as suspect (`TextSuspect`). Then timing and
+  text changes wait for review, only empty lines are removed automatically, and the wording isn't audited.
+
 ## Reversibility and provenance
 
 The original subtitle is always kept. A small JSON record next to each result stores source, scores, sync model and

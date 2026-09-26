@@ -17,7 +17,7 @@
       #SubtitlesConfigPage .subs-results td, #SubtitlesConfigPage .subs-results th { text-align: left; padding: .35em .5em; border-bottom: 1px solid rgba(128,128,128,.2); vertical-align: top; }
       #SubtitlesConfigPage .subs-status { white-space: nowrap; font-weight: 600; }
       #SubtitlesConfigPage .st-Corrected, #SubtitlesConfigPage .st-Added { color: #4caf50; } #SubtitlesConfigPage .st-Proposed { color: #03a9f4; }
-      #SubtitlesConfigPage .st-WrongLanguage, #SubtitlesConfigPage .st-Failed { color: #ff7043; } #SubtitlesConfigPage .st-Unreliable { color: #ffb300; }
+      #SubtitlesConfigPage .st-WrongLanguage, #SubtitlesConfigPage .st-Failed, #SubtitlesConfigPage .st-CantWrite { color: #ff7043; } #SubtitlesConfigPage .st-Unreliable { color: #ffb300; }
       #SubtitlesConfigPage .subs-editor { margin: 1em 0; padding: 1em; border: 1px solid rgba(128,128,128,.35); border-radius: 4px; }
       #SubtitlesConfigPage .subs-editor-bar { display: flex; flex-wrap: wrap; gap: .5em 1em; align-items: end; margin-bottom: .75em; }
       #SubtitlesConfigPage .subs-editor-bar .inputContainer { margin: 0; flex: 0 1 12em; }
@@ -525,7 +525,7 @@
           }
         });
 
-        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large' };
+        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large', CantWrite: "Can't write here" };
 
         var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened', RewordedFromAudit: 'line reworded', EditedByHand: 'line edited' };
 

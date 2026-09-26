@@ -32,6 +32,19 @@ public sealed record SubtitleDocument
     public string AssTrailer { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets the encoding the file was read in (a web name such as <c>utf-8</c> or <c>windows-1251</c>), or <c>null</c>
+    /// for a document that didn't come from a file. A document read in a legacy code page is written back in it, so
+    /// lines this plugin doesn't change keep their exact bytes even if the code page was guessed wrong.
+    /// </summary>
+    public string? SourceEncoding { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the decoded text looks wrong (replacement or C1 control characters): the code
+    /// page was probably guessed wrong, so changes wait for review rather than being made on their own.
+    /// </summary>
+    public bool TextSuspect { get; init; }
+
+    /// <summary>
     /// Returns a copy with every cue's start and end mapped through <paramref name="map"/> (used by synchronisation).
     /// Times are clamped at zero, and a cue never ends before it starts.
     /// </summary>

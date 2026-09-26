@@ -20,6 +20,9 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Note">Anything worth saying beyond the model's own explanation (e.g. why speech-to-text wasn't used).</param>
 public sealed record SyncOutcome(SyncModel Model, string Stage, bool WrongLanguageSuspected, string? Note)
 {
+    /// <summary>Gets examples of the lines that decided a timing matched by meaning (heard phrase and subtitle line).</summary>
+    public IReadOnlyList<string> Pairs { get; init; } = [];
+
     /// <summary>Gets the stretches speech-to-text transcribed (empty when it didn't run), for an audit of the wording.</summary>
     public IReadOnlyList<(double Start, Transcript Transcript)> Transcripts { get; init; } = [];
 }
@@ -135,7 +138,12 @@ public sealed class SyncCheck
                 var model = MeaningAligner.Solve(MeaningAligner.Anchors(phrases, cues, match.Pairs), _wordLag);
                 if (model.Status != SyncStatus.Unreliable)
                 {
-                    return (new SyncOutcome(model, ByMeaningStage, false, $"Lines matched by meaning ({by}), as the wording differs from what is said. {match.Note}".TrimEnd()), string.Empty);
+                    var shown = match.Pairs
+                        .Where(p => p.Phrase >= 0 && p.Phrase < phrases.Count && p.Cue >= 0 && p.Cue < cues.Count)
+                        .Take(5)
+                        .Select(p => $"Matched by meaning: heard \u201c{phrases[p.Phrase].Text}\u201d = line at {TimeSpan.FromSeconds(cues[p.Cue].Start):h\\:mm\\:ss} \u201c{cues[p.Cue].Text}\u201d")
+                        .ToList();
+                    return (new SyncOutcome(model, ByMeaningStage, false, $"Lines matched by meaning ({by}), as the wording differs from what is said. {match.Note}".TrimEnd()) { Pairs = shown }, string.Empty);
                 }
 
                 return (null, $" Compared by meaning ({by}): the same content, but the matched lines don't agree on one timing.");

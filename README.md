@@ -107,6 +107,10 @@ make results worse.
 - Jellyfin **12.1** or newer (the plugin targets .NET 10).
 - For OpenSubtitles results: Jellyfin's OpenSubtitles plugin, signed in to your account.
 - For SubDL results: a free API key from subdl.com, entered on the plugin page.
+- **Write access to your media folders** for Jellyfin's account: corrections are written beside the video, and found
+  subtitles are added there. Folders it can't write (a read-only mount, NAS permissions) are shown as "Can't write here"
+  and tried again after 30 days, without downloading or checking anything.
+- Jellyfin's ffmpeg (it comes with the official packages and images; a system ffmpeg found on the PATH works too).
 
 ## Roadmap
 

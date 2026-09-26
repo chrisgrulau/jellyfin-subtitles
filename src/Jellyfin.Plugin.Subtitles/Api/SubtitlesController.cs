@@ -228,8 +228,8 @@ public class SubtitlesController : ControllerBase
             return NotFound("The video for this subtitle wasn't found.");
         }
 
-        var ffmpeg = _encoder.EncoderPath;
-        if (string.IsNullOrEmpty(ffmpeg) || !System.IO.File.Exists(ffmpeg))
+        var ffmpeg = Audio.FfmpegLocator.Resolve(_encoder.EncoderPath);
+        if (ffmpeg is null)
         {
             return NotFound("Jellyfin's ffmpeg wasn't found.");
         }

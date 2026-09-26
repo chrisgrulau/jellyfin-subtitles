@@ -98,8 +98,8 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             return;
         }
 
-        var ffmpeg = _encoder.EncoderPath;
-        if (string.IsNullOrEmpty(ffmpeg) || !File.Exists(ffmpeg))
+        var ffmpeg = Audio.FfmpegLocator.Resolve(_encoder.EncoderPath);
+        if (ffmpeg is null)
         {
             LogNoFfmpeg(_logger);
             return;
@@ -108,6 +108,12 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromMinutes(3);
         await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
+        if (!_finder.ResultsReadable)
+        {
+            LogNoResults(_logger, _finder.ResultsProblem ?? "unknown");
+            return;
+        }
+
         var speech = SubtitleSyncTask.SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.find", out var problem);
         var policies = SubtitleSyncTask.RunPolicies(config) with { Auditor = null };
         if (speech is null && problem is not null)
@@ -218,6 +224,9 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             }
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: search skipped: {Problem}")]
+    private static partial void LogNoResults(ILogger logger, string problem);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: Jellyfin's ffmpeg wasn't found; missing subtitles can't be checked")]
     private static partial void LogNoFfmpeg(ILogger logger);

@@ -306,15 +306,15 @@ public sealed partial class SubDlSource : ICandidateSource
         }
     }
 
-    [GeneratedRegex(@"^(\d{1,3})[ ._-]+\D")]
+    [GeneratedRegex(@"^([0-9]{1,3})[ ._-]+[^0-9]")]
     private static partial Regex LeadingNumber();
 
-    [GeneratedRegex(@"^tt\d{5,10}$")]
+    [GeneratedRegex(@"^tt[0-9]{5,10}$")]
     private static partial Regex ImdbPattern();
 
     [GeneratedRegex(@"^/subtitle/[0-9A-Za-z_-]{1,80}\.zip$")]
     private static partial Regex DownloadPath();
 
-    [GeneratedRegex(@"(?:S(?<s>\d{1,2})[ ._-]?E(?<e>\d{1,3})|(?<s>\d{1,2})X(?<e>\d{2,3})|(?:^|[ ._-])E(?:P)?(?<e>\d{2,3}))(?!\d)")]
+    [GeneratedRegex(@"(?:S(?<s>[0-9]{1,2})[ ._-]?E(?<e>[0-9]{1,3})|(?<s>[0-9]{1,2})X(?<e>[0-9]{2,3})|(?:^|[ ._-])E(?:P)?(?<e>[0-9]{2,3}))(?![0-9])")]
     private static partial Regex EpisodeCode();
 }

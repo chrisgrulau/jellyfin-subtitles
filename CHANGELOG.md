@@ -13,38 +13,48 @@ All notable changes to this project are documented here. The format follows
   - **Listening:** ▶ plays that line's audio (from a moment before to a moment after), using the audio track that
     suits the subtitle's language.
   - **Saving:** Save writes the file only if it hasn't changed since it was opened. The first original is kept, so
-    **Undo** brings it back.
+    **Undo** brings it back. It is written in the file's own encoding.
   - **Formats:** styles and identifiers are kept for lines that were already there. Added ASS lines take the first
     line's style.
 
-### Added
+## [0.6.1-alpha] - 2026-09-26
 
-- **Wording audit of earlier subtitles.** After each run's checks, a few subtitles checked before the audit existed
-  are audited, oldest first: **Earlier subtitles audited per run**, 5 by default, 0 turns it off.
-  - Only subtitles that are in sync or were corrected are audited, and only if the file is unchanged since, nothing
-    is waiting for review, and it isn't a translation.
-  - A few stretches are transcribed again. If the fresh transcript no longer finds the subtitle in sync, it isn't
-    audited, and it isn't tried again until the file changes.
-  - Each subtitle is audited once. Each attempt counts towards the per-run number, and audits use what is left of
-    the run's AI checks.
+### Fixed
 
-### Added
+- **FAM-02:** questions to the AI plugin (lines matched by meaning, the wording audit) carry text in every script as
+  it is, not escaped. They are fitted to its limit: shorter texts first, then fewer lines. Before, Cyrillic, Greek,
+  Hebrew or Arabic subtitles were six times their size, often refused, and the feature quietly did nothing.
+- **FAM-03:** an "off" answer from the AI plugin (switched off, or Subtitles not allowed) is quiet, like a missing
+  plugin. Other failures are shown in the result.
+- The shared source is updated.
 
-- **Wording audit** (optional, with the Shoal AI plugin: **Audit the wording with the AI plugin**, on by default).
-  - **When:** after a subtitle's timing is settled by speech-to-text.
-  - **What it checks:** the AI compares its lines with what is said during those few minutes. It flags lines whose
-    meaning differs, such as a wrong name or number, a missing "not", or missing or extra words. Ordinary subtitle
-    shortening isn't flagged.
-  - **In the results:** the flagged lines appear under *What changed*, and the *Changes* column shows how many lines
-    differ.
-  - **Suggested wording:** it waits for review and is never applied on its own. **Apply** uses it (only on lines
-    still as they were found), and **Undo** brings the original back.
-  - **What is skipped:** subtitles matched by meaning (translations) aren't audited.
-  - **Limit:** it shares the run's allowance of AI checks with line matching.
+- **SUB-14:** subtitles in legacy encodings are no longer rewritten as garbled text. Before, anything that wasn't
+  UTF-8 or UTF-16 was read as Windows-1252 and written back as UTF-8. That garbled Cyrillic, Central European, Greek,
+  Turkish, Hebrew, Arabic, Chinese, Japanese and Korean subtitles whenever the timing was corrected.
+  - **Writing:** a file is written back in the encoding it was read in, so every line the plugin doesn't change keeps
+    its exact bytes, even if the encoding was guessed wrong. UTF-8 and UTF-16 files are written as UTF-8, as before.
+  - **Reading:** the encoding is guessed from the language in the file name, for example `Film.ru.srt` as
+    Windows-1251, `Film.ja.srt` as Shift-JIS and `Film.zh.srt` as GB18030.
+  - **When the text still looks wrong:** if it contains replacement or control characters, nothing is changed on its
+    own. Timing and clean-up wait for review, and the result says why.
+  - **Unrepresentable edits:** a changed line the file's encoding can't hold is refused, never replaced with "?".
+- **SUB-18:** a `results.json` that can't be read, whether locked or its permissions changed, is never overwritten.
+  Checks and searches wait until it can be read, because it holds the undo records. A damaged one is set aside as
+  `results.json.damaged-…` and results start afresh.
+- **SUB-16:** a folder Jellyfin's account can't write is detected before any download or audio work, using a hidden
+  test file.
+  - Such files are shown as **Can't write here** and tried again after 30 days or when they change. Before, the same
+    files were redone every night, using download quota and audio work each time.
+  - Failed checks now wait 3 days before being tried again, unless the file changes.
+- **SUB-17:** one unexpected error in a file no longer stops the nightly run. It is recorded as a failure with its type,
+  and the run carries on. Timecodes and release names only accept ASCII digits, so full-width or Arabic-Indic digits
+  are simply not a timecode, instead of throwing.
+- **SUB-21:** when Jellyfin finds ffmpeg through the system PATH (portable installs, source builds), Subtitles finds it
+  too. Before, both tasks and Ingest's transcript requests stopped with "ffmpeg wasn't found".
+- **SUB-28:** a timing decided from lines the AI matched by meaning always waits for review, even with automatic timing
+  fixes. The matched lines are shown in the result.
 
-### Changed
-
-- **AI checks per run** now counts line matching and wording audits together.
+## [0.6.0-alpha] - 2026-09-26
 
 ### Added
 
@@ -61,6 +71,29 @@ All notable changes to this project are documented here. The format follows
   - **What is sent:** only the subtitle language, a few minutes of heard phrases and the nearby subtitle lines. The
     AI plugin must allow Subtitles, and its spending limits apply.
 - The shared source is updated to include the AI plugin's client (`AiBridgeClient`).
+- **Wording audit** (optional, with the Shoal AI plugin: **Audit the wording with the AI plugin**, on by default).
+  - **When:** after a subtitle's timing is settled by speech-to-text.
+  - **What it checks:** the AI compares its lines with what is said during those few minutes. It flags lines whose
+    meaning differs, such as a wrong name or number, a missing "not", or missing or extra words. Ordinary subtitle
+    shortening isn't flagged.
+  - **In the results:** the flagged lines appear under *What changed*, and the *Changes* column shows how many lines
+    differ.
+  - **Suggested wording:** it waits for review and is never applied on its own. **Apply** uses it (only on lines
+    still as they were found), and **Undo** brings the original back.
+  - **What is skipped:** subtitles matched by meaning (translations) aren't audited.
+  - **Limit:** it shares the run's allowance of AI checks with line matching.
+- **Wording audit of earlier subtitles.** After each run's checks, a few subtitles checked before the audit existed
+  are audited, oldest first: **Earlier subtitles audited per run**, 5 by default, 0 turns it off.
+  - Only subtitles that are in sync or were corrected are audited, and only if the file is unchanged since, nothing
+    is waiting for review, and it isn't a translation.
+  - A few stretches are transcribed again. If the fresh transcript no longer finds the subtitle in sync, it isn't
+    audited, and it isn't tried again until the file changes.
+  - Each subtitle is audited once. Each attempt counts towards the per-run number, and audits use what is left of
+    the run's AI checks.
+
+### Changed
+
+- **AI checks per run** now counts line matching and wording audits together.
 
 ## [0.5.0-alpha] - 2026-09-26
 

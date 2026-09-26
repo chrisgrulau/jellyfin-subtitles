@@ -13,6 +13,8 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// </summary>
 public sealed class SubtitleFiles
 {
+    private static readonly System.Collections.Generic.Dictionary<string, (bool Ok, DateTimeOffset At)> Writable = new(StringComparer.Ordinal);
+
     private readonly string _backups;
 
     /// <summary>
@@ -143,6 +145,51 @@ public sealed class SubtitleFiles
         var original = File.ReadAllBytes(backupPath);
         WriteAtomically(subtitlePath, original);
         return Fingerprint(original);
+    }
+
+    /// <summary>
+    /// Whether Jellyfin's account can write a file in a folder (and, if given, replace that file): a hidden test file is
+    /// created and removed. Answers are remembered for an hour per folder.
+    /// </summary>
+    /// <param name="folder">The folder.</param>
+    /// <param name="file">A file in it that would be replaced, if any.</param>
+    /// <returns>Whether writing looks possible.</returns>
+    public static bool CanWrite(string folder, string? file = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        if (file is not null && File.Exists(file) && new FileInfo(file).IsReadOnly)
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        lock (Writable)
+        {
+            if (Writable.TryGetValue(folder, out var known) && now - known.At < TimeSpan.FromHours(1))
+            {
+                return known.Ok;
+            }
+        }
+
+        bool ok;
+        var probe = Path.Combine(folder, ".shoal-write-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            File.WriteAllBytes(probe, []);
+            File.Delete(probe);
+            ok = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ok = false;
+        }
+
+        lock (Writable)
+        {
+            Writable[folder] = (ok, now);
+        }
+
+        return ok;
     }
 
     /// <summary>

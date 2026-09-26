@@ -94,12 +94,17 @@ public sealed class AiTextAuditor : ITextAuditor
             return new AuditAnswer([], "The wording wasn't audited: this run's limit of AI checks was reached.", null);
         }
 
-        var data = new
+        // Fitted to the AI plugin's limit (FAM-02); line positions offered stay a prefix, so findings still name them
+        var (data, _, _) = AiLineMatcher.Fit((text, share) =>
         {
-            subtitleLanguage = language,
-            heard = heard.Select(p => new { at = Math.Round(p.Start, 1), text = p.Text }),
-            lines = lines.Select(l => new { index = l.Index, at = l.At, text = l.Text }),
-        };
+            var l = lines.Take(Math.Max(1, lines.Count * share / 100)).ToList();
+            return (new
+            {
+                subtitleLanguage = language,
+                heard = heard.Select(p => new { at = Math.Round(p.Start, 1), text = AiLineMatcher.Cut(p.Text, text) }),
+                lines = l.Select(x => new { index = x.Index, at = x.At, text = AiLineMatcher.Cut(x.Text, Math.Max(text, 120)) }),
+            }, heard.Count, l.Count);
+        });
         var reply = await _ask("subtitles", Purpose, Instructions, data, Schema, 4096, "medium", cancellationToken).ConfigureAwait(false);
         return Read(reply);
     }
@@ -114,7 +119,7 @@ public sealed class AiTextAuditor : ITextAuditor
         ArgumentNullException.ThrowIfNull(reply);
         if (!reply.Ok || reply.Answer is not { ValueKind: JsonValueKind.Object } answer)
         {
-            return new AuditAnswer([], reply.Failure is "not-installed" or "not-allowed" ? string.Empty : "The wording couldn't be audited: " + reply.Error, null);
+            return new AuditAnswer([], reply.Failure is "not-installed" or "not-allowed" or "off" ? string.Empty : "The wording couldn't be audited: " + reply.Error, null);
         }
 
         var findings = new List<AuditFinding>();

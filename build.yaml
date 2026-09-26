@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.5.0.0"
+version: "0.6.1.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,6 +14,8 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.5.0-alpha: short transcripts for Ingest (opt-in, "Let Ingest ask for short transcripts"). Ingest can ask for two
-  minutes of a new video to tell which episode it is; uses the "Context for AI decisions" speech-to-text service
-  (built-in by default, free and on this server), within the spending limits.
+  0.6.1-alpha: fixes. Subtitles in legacy encodings (Cyrillic, Central European, Greek, Turkish, Hebrew, Arabic,
+  CJK) are written back in their own encoding instead of being garbled. An unreadable results file is never
+  overwritten; folders that can't be written are detected before any download or check and not redone every night;
+  one odd file can't stop the nightly run; ffmpeg found through PATH works; timings matched by meaning wait for
+  review.

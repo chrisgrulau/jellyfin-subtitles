@@ -77,6 +77,6 @@ public static partial class Timecode
         return string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}.{t.Milliseconds / 10:00}");
     }
 
-    [GeneratedRegex(@"^(?:(?<h>\d{1,3})[:.])?(?<m>\d{1,2})[:.](?<s>\d{1,2})(?:[,.:](?<f>\d{1,4}))?$")]
+    [GeneratedRegex(@"^(?:(?<h>[0-9]{1,3})[:.])?(?<m>[0-9]{1,2})[:.](?<s>[0-9]{1,2})(?:[,.:](?<f>[0-9]{1,4}))?$")]
     private static partial Regex Pattern();
 }
