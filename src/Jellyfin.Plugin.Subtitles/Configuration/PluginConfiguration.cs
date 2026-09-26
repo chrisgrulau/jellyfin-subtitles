@@ -65,10 +65,24 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AllowIngest { get; set; }
 
     /// <summary>
-    /// Gets or sets speech-to-text of the whole video (last-resort subtitles, discrepancy checks, precise timing). Not
-    /// used yet: kept so a setting saved now carries over when it is built; the settings page shows it as coming later.
+    /// Gets or sets speech-to-text of the whole video: used to generate subtitles when none can be found (see
+    /// <see cref="GenerateMissing"/>), with its own service and model (the built-in one by default, which is free; a paid
+    /// service is kept within the spending limits).
     /// </summary>
     public TranscriptionTier FullTranscript { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a subtitle is generated from a full transcript for a video the search found
+    /// nothing fitting for, in a wanted language that is also the audio's language (off by default). Generated subtitles
+    /// are labelled as such, don't stop the search for a real one, are replaced when one is found, and can be undone.
+    /// Needs the "Full transcript" speech-to-text switched on.
+    /// </summary>
+    public bool GenerateMissing { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many videos are transcribed to generate subtitles per night at most (0 to 200; 20 by default).
+    /// </summary>
+    public int MaxGeneratedPerNight { get; set; } = 20;
 
     /// <summary>
     /// Gets or sets the currency costs and limits are shown and set in (ISO 4217, e.g. <c>AUD</c>). Providers charge in

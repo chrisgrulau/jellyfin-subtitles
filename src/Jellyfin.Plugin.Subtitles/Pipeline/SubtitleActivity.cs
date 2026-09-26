@@ -17,7 +17,7 @@ public sealed record ActivityNote(string Name, string ShortOverview, string Over
 
 /// <summary>
 /// Copies what needs attention (something waiting for review, a folder that can't be written, a subtitle search the
-/// provider stopped) and subtitles that were added to Jellyfin's Activity log, so they're seen without opening the
+/// provider stopped) and subtitles that were added or generated to Jellyfin's Activity log, so they're seen without opening the
 /// plugin page (FAM-05). The same subtitle and outcome is written at most once a day.
 /// </summary>
 public sealed class SubtitleActivity
@@ -59,6 +59,7 @@ public sealed class SubtitleActivity
             : r.Status switch
             {
                 ResultStatus.Added => ("Shoal Subtitles added a subtitle: ", LogLevel.Information),
+                ResultStatus.Generated => ("Shoal Subtitles generated a subtitle: ", LogLevel.Information),
                 ResultStatus.CantWrite => ("Shoal Subtitles can't write beside: ", LogLevel.Warning),
                 _ => ((string?)null, LogLevel.None),
             };

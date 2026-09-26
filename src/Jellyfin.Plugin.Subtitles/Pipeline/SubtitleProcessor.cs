@@ -340,6 +340,12 @@ public sealed class SubtitleProcessor
     public SubtitleResult SaveEdited(string id, string fingerprint, IReadOnlyList<EditorCue> cues)
     {
         var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        if (r.Id.StartsWith(SubtitleGenerator.IdPrefix, StringComparison.Ordinal))
+        {
+            // Undo removes a generated subtitle only while it is as generated; edits would make it impossible to undo
+            throw new InvalidOperationException("A generated subtitle can't be edited here.");
+        }
+
         var bytes = File.ReadAllBytes(r.SubtitlePath);
         var current = SubtitleFiles.Fingerprint(bytes);
         if (!string.Equals(current, fingerprint, StringComparison.Ordinal))
@@ -518,6 +524,19 @@ public sealed class SubtitleProcessor
     public SubtitleResult Undo(string id)
     {
         var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        if (r.Status == ResultStatus.Generated && r.Changed)
+        {
+            try
+            {
+                SubtitleFiles.RemoveAdded(r.SubtitlePath, r.Fingerprint);
+                return Save(r with { Status = ResultStatus.Undone, Changed = false, Examples = [], Time = _clock.GetUtcNow(), Explanation = "Undone: the generated subtitle was removed (it won't be generated again on its own; a subtitle found later is still added)." });
+            }
+            catch (IOException ex)
+            {
+                throw new InvalidOperationException(ex.Message, ex);
+            }
+        }
+
         if (r.Status == ResultStatus.Added && r.Changed)
         {
             try
