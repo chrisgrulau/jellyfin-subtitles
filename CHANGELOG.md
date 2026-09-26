@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **FAM-02:** questions to the AI plugin (lines matched by meaning, the wording audit) carry text in every script as
+  it is, not escaped. They are fitted to its limit: shorter texts first, then fewer lines. Before, Cyrillic, Greek,
+  Hebrew or Arabic subtitles were six times their size, often refused, and the feature quietly did nothing.
+- **FAM-03:** an "off" answer from the AI plugin (switched off, or Subtitles not allowed) is quiet, like a missing
+  plugin. Other failures are shown in the result.
+- The shared source is updated.
+
+### Fixed
+
 - **SUB-14:** subtitles in legacy encodings are no longer rewritten as garbled text. Before, anything that wasn't
   UTF-8 or UTF-16 was read as Windows-1252 and written back as UTF-8. That garbled Cyrillic, Central European, Greek,
   Turkish, Hebrew, Arabic, Chinese, Japanese and Korean subtitles whenever the timing was corrected.

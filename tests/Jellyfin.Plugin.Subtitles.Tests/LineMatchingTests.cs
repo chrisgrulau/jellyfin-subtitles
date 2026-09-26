@@ -209,4 +209,29 @@ public partial class LineMatchingTests
         using var doc = JsonDocument.Parse(sent!);
         Assert.Equal(["subtitleLanguage", "heard", "lines"], doc.RootElement.EnumerateObject().Select(p => p.Name));
     }
+
+    // FAM-02: a large question in another script is fitted to the AI plugin's limit, and the answer is read against
+    // what was actually sent
+    [Fact]
+    public async Task A_large_cyrillic_question_is_fitted_to_the_limit()
+    {
+        object? sent = null;
+        var matcher = new AiLineMatcher(new AiChecks(5), (caller, purpose, instructions, data, schema, max, effort, ct) =>
+        {
+            sent = data;
+            return Task.FromResult(Ok("{\"verdict\":\"same\",\"pairs\":[{\"heard\":0,\"line\":0}],\"reason\":\"x\"}"));
+        });
+        IReadOnlyList<HeardPhrase> heard = [.. Enumerable.Range(0, 120).Select(i => new HeardPhrase(i, i, new string('ж', 150)))];
+        IReadOnlyList<CueLine> lines = [.. Enumerable.Range(0, 300).Select(i => new CueLine(i, i, new string('я', 150)))];
+
+        var match = await matcher.MatchAsync(heard, lines, "ru", TestContext.Current.CancellationToken);
+
+        Assert.True(Jellyfin.Plugin.Common.BridgeJson.Bytes(sent) <= Jellyfin.Plugin.Common.Ai.AiBridgeClient.MaxDataBytes);
+        Assert.Equal([new LinePair(0, 0)], match.Pairs);
+        Assert.Contains("жжж", JsonSerializer.Serialize(sent, Jellyfin.Plugin.Common.BridgeJson.Options), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Off_is_quiet()
+        => Assert.Equal(string.Empty, AiLineMatcher.Read(new AiReply(false, null, null, "Switched off.", "off"), 1, 1).Note);
 }
