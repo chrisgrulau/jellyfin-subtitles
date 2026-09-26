@@ -129,6 +129,13 @@ lines them up with the local-service word times the synchroniser was calibrated 
     makes it wait for review.
   - **Apply:** changes only lines whose text is unchanged and whose time is within 1.5 s. It then retimes a proposed
     correction and applies held-back clean-up, and Undo restores the original.
+  - **Earlier subtitles:** after each sync run, up to `MaxAuditsOfEarlierPerRun` results checked before the audit
+    existed are audited, oldest first. To qualify, a result must be in sync or corrected, not by meaning, not audited,
+    at the current pipeline version, with nothing pending and the same fingerprint.
+    - `TranscriptSynchroniser` transcribes again, and the audit runs only if it finds the file in sync. Otherwise the
+      result is marked audited with a note.
+    - No answer, such as when the allowance is used up, leaves the result for a later run. Attempts are capped, so an
+      exhausted allowance doesn't keep transcribing.
 - Agreement between independent sources outweighs a single model's confidence (default; can be switched to review).
 - Confidence is not comparable across models, so thresholds are per model (starting points: Deepgram word confidence
   ≥ 0.90 over a line; Whisper average log-probability ≥ −0.3 with compression-ratio and no-speech guards) and

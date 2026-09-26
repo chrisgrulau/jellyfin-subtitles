@@ -117,6 +117,9 @@ public sealed record SubtitleResult
     /// <summary>Gets where an added subtitle came from (source, release name, score), for provenance.</summary>
     public string? Origin { get; init; }
 
+    /// <summary>Gets a value indicating whether the wording was audited (so the nightly audit of earlier results skips it).</summary>
+    public bool Audited { get; init; }
+
     /// <summary>Gets lines whose meaning differs from what is said (from an audit), with suggested wording where given.</summary>
     public IReadOnlyList<LineFinding> Findings { get; init; } = [];
 

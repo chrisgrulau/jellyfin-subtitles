@@ -174,6 +174,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AuditWording { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets how many subtitles checked before the wording audit existed are audited per run, with
+    /// <see cref="AuditWording"/> (0 = none). They use what is left of the run's AI checks.
+    /// </summary>
+    public int MaxAuditsOfEarlierPerRun { get; set; } = 5;
+
+    /// <summary>
     /// Gets or sets the most AI checks in one run of a task (matching lines and audits together).
     /// </summary>
     public int MaxAiChecksPerRun { get; set; } = 20;

@@ -315,6 +315,11 @@
               <div class="fieldDescription checkboxFieldDescription">When a subtitle's timing is settled by speech-to-text, the AI plugin compares its lines with what is said during those few minutes and flags lines whose meaning differs (a wrong name or number, a missing "not", missing words). Suggested wording waits for your review in the results; it is never applied on its own, and Undo brings the original back.</div>
             </div>
             <div class="inputContainer">
+              <label class="inputLabel inputLabelUnfocused" for="MaxAuditsOfEarlierPerRun">Earlier subtitles audited per run</label>
+              <input id="MaxAuditsOfEarlierPerRun" type="number" is="emby-input" min="0" max="200" step="1" />
+              <div class="fieldDescription">Subtitles checked before the audit existed are audited a few at a time, oldest first, using what is left of the run's AI checks. 0 turns this off.</div>
+            </div>
+            <div class="inputContainer">
               <label class="inputLabel inputLabelUnfocused" for="MaxAiChecksPerRun">AI checks per run (at most)</label>
               <input id="MaxAiChecksPerRun" type="number" is="emby-input" min="0" max="500" step="1" />
               <div class="fieldDescription">Each is a fraction of a cent to a few cents, depending on the model.</div>
@@ -612,6 +617,7 @@
             page.querySelector('#AgreementDecides').checked = config.AgreementDecides;
             page.querySelector('#UseAi').checked = config.UseAi !== false;
             page.querySelector('#AuditWording').checked = config.AuditWording !== false;
+            page.querySelector('#MaxAuditsOfEarlierPerRun').value = config.MaxAuditsOfEarlierPerRun == null ? 5 : config.MaxAuditsOfEarlierPerRun;
             page.querySelector('#MaxAiChecksPerRun').value = config.MaxAiChecksPerRun == null ? 20 : config.MaxAiChecksPerRun;
             var cleanup = config.Cleanup || {};
             page.querySelector('#RemoveAdverts').checked = cleanup.RemoveAdverts;
@@ -669,6 +675,8 @@
             config.AgreementDecides = page.querySelector('#AgreementDecides').checked;
             config.UseAi = page.querySelector('#UseAi').checked;
             config.AuditWording = page.querySelector('#AuditWording').checked;
+            var earlier = parseInt(page.querySelector('#MaxAuditsOfEarlierPerRun').value, 10);
+            config.MaxAuditsOfEarlierPerRun = isNaN(earlier) ? 5 : Math.max(0, Math.min(200, earlier));
             var aiChecks = parseInt(page.querySelector('#MaxAiChecksPerRun').value, 10);
             config.MaxAiChecksPerRun = isNaN(aiChecks) ? 20 : Math.max(0, Math.min(500, aiChecks));
             var cleanup = config.Cleanup = config.Cleanup || {};

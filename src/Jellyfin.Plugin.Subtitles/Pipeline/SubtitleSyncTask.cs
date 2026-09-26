@@ -163,9 +163,41 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             progress.Report(100.0 * (i + 1) / todo.Count);
         }
 
+        if (policies.Auditor is not null && speech is not null && config.MaxAuditsOfEarlierPerRun > 0)
+        {
+            await AuditEarlierAsync(jobs, ffmpeg, speech, policies.Auditor, Math.Min(config.MaxAuditsOfEarlierPerRun, 200), cancellationToken).ConfigureAwait(false);
+        }
+
         if (config.CheckEmbeddedSubtitles)
         {
             await CheckEmbeddedAsync(config, wanted, ffmpeg, speech, policies, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // Subtitles checked before the wording audit existed, a few per run (oldest results first). Each attempt counts,
+    // answered or not, so a run whose AI checks are used up doesn't keep transcribing.
+    private async Task AuditEarlierAsync(IReadOnlyList<SubtitleJob> jobs, string ffmpeg, ISpeechToText speech, Audit.ITextAuditor auditor, int max, CancellationToken cancellationToken)
+    {
+        foreach (var job in jobs.Where(j => _processor.NeedsAudit(j.SubtitlePath)).OrderBy(j => _processor.LastChecked(j.SubtitlePath)).Take(max))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var result = await _processor.AuditAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, auditor, cancellationToken).ConfigureAwait(false);
+                if (result is not null)
+                {
+                    LogResult(_logger, job.Name, result.Status, result.Explanation);
+                }
+            }
+            catch (SpeechToTextException ex)
+            {
+                LogFailed(_logger, job.Name, ex.Message);
+                break;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
+            {
+                LogFailed(_logger, job.Name, ex.Message);
+            }
         }
     }
 
