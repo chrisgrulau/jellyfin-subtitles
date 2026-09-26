@@ -30,6 +30,10 @@ All notable changes to this project are documented here. The format follows
   - **Test** uses the permission box as currently ticked, before Save.
   - After **Check now** or **Find missing now**, results refresh every 10 seconds while the task runs, with its
     progress, instead of once after 15 seconds.
+- **SUB-19:** a video is no longer recorded as "Nothing fitting found" (and left for 30 days) when no subtitle provider
+  answered: none installed in Jellyfin, or every provider failing (for example SubDL down). It's searched again on the
+  next run; with no provider installed at all, the run stops early and says so in the log. (Failures inside Jellyfin's
+  own providers are handled by Jellyfin and still look like an empty answer.)
 
 ## [0.9.0-alpha] - 2026-09-26
 

@@ -10,7 +10,8 @@ namespace Jellyfin.Plugin.Subtitles.Candidates;
 /// <summary>
 /// Several sources as one: every source is searched (one that fails is skipped, so a site being down never stops the
 /// others; one whose daily allowance is used up is left out for the rest of the run) and a candidate is fetched from the
-/// source that offered it.
+/// source that offered it. When no source answered at all, the search throws <see cref="NoSourceAnsweredException"/>
+/// rather than returning an empty list, so the video isn't recorded as having nothing to offer.
 /// </summary>
 public sealed class CombinedSource : ICandidateSource
 {
@@ -38,11 +39,14 @@ public sealed class CombinedSource : ICandidateSource
         var all = new List<SubtitleCandidate>();
         var problems = new List<string>();
         Exception? stopped = null;
+        var answered = 0;
+        var unavailable = 0;
         foreach (var source in _sources.Where(s => !_outForToday.Contains(s.Name)))
         {
             try
             {
                 all.AddRange((await source.SearchAsync(itemId, language, cancellationToken).ConfigureAwait(false)).Select(c => c with { Source = source.Name }));
+                answered++;
             }
             catch (Exception ex) when (Pipeline.FindRules.StopsTheRun(ex))
             {
@@ -50,6 +54,11 @@ public sealed class CombinedSource : ICandidateSource
                 _outForToday.Add(source.Name);
                 problems.Add(source.Name + ": " + ex.Message);
                 stopped = ex;
+            }
+            catch (NoSourceAnsweredException ex)
+            {
+                problems.Add(source.Name + ": " + ex.Message);
+                unavailable += ex.NoneAvailable ? 1 : 0;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
@@ -63,6 +72,11 @@ public sealed class CombinedSource : ICandidateSource
         if (stopped is not null && _sources.All(s => _outForToday.Contains(s.Name)))
         {
             throw stopped;
+        }
+
+        if (answered == 0 && problems.Count > 0)
+        {
+            throw new NoSourceAnsweredException("No subtitle provider answered: " + string.Join("; ", problems)) { NoneAvailable = unavailable == problems.Count };
         }
 
         return all;

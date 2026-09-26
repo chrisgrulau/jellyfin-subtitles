@@ -146,6 +146,8 @@ public sealed class SubtitleFinder
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result.</returns>
     /// <exception cref="DownloadLimitReachedException">No downloads left today (nothing is recorded, so it is tried again).</exception>
+    /// <exception cref="NoSourceAnsweredException">No subtitle provider answered (none installed, or all failed): nothing
+    /// is recorded, so the video is searched again on the next run rather than counted as "nothing fitting found".</exception>
     public async Task<SubtitleResult> FindAsync(FindJob job, ICandidateSource source, IAudioSource audio, ISpeechToText? speech, Policies policies, int downloadsPerDay, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(job);

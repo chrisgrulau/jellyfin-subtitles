@@ -168,6 +168,16 @@ public sealed partial class SubtitleFindTask : IScheduledTask
                 LogLimit(_logger, ex.Message);
                 break;
             }
+            catch (NoSourceAnsweredException ex)
+            {
+                // Nothing is recorded, so the video is searched again next run; with no provider at all, the rest would
+                // find nothing either
+                LogNoSource(_logger, job.Name, ex.Message);
+                if (ex.NoneAvailable)
+                {
+                    break;
+                }
+            }
             catch (Exception ex) when (FindRules.StopsTheRun(ex))
             {
                 // The provider's own daily allowance is used up, or it can't sign in: every further search would fail too
@@ -263,6 +273,9 @@ public sealed partial class SubtitleFindTask : IScheduledTask
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: a subtitle provider couldn't be searched: {Problem}")]
     private static partial void LogSourceProblem(ILogger logger, string problem);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: {Name}: not searched, tried again next run: {Problem}")]
+    private static partial void LogNoSource(ILogger logger, string name, string problem);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: {Name}: the search failed: {Error}")]
     private static partial void LogFailed(ILogger logger, string name, string error);

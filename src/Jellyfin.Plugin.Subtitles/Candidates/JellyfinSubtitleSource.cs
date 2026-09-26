@@ -42,6 +42,12 @@ public sealed class JellyfinSubtitleSource : ICandidateSource
             return [];
         }
 
+        // Jellyfin answers an empty list when no provider is installed: that isn't "nothing offered"
+        if (_subtitles.GetSupportedProviders(video).Length == 0)
+        {
+            throw new NoSourceAnsweredException("No subtitle provider (such as the OpenSubtitles plugin) is installed in Jellyfin for this kind of video.") { NoneAvailable = true };
+        }
+
         // Not perfect-match only: fingerprint matches are scored highly, but other good releases are worth checking too
         var results = await _subtitles.SearchSubtitles(video, language, null, true, cancellationToken).ConfigureAwait(false);
         return [.. results.Select(ToCandidate)];
