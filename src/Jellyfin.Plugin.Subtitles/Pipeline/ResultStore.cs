@@ -142,19 +142,33 @@ public sealed record SubtitleResult
 /// per file for as long as the file exists (see <see cref="Prune"/>). Only past <see cref="MaxResults"/> (far beyond a
 /// large library) are the oldest plain results dropped, never one that can be undone, was added, waits for review, or
 /// holds back a search. Damaged or unreadable files never break the task.
+/// <para>
+/// Results are indexed by id and by path. The file is written in batches: a result that records a change to a file (or
+/// its undo), a review decision or an added subtitle is written at once; plain results are written every
+/// <see cref="SaveEvery"/> results or <see cref="SaveAfter"/>, and when a run ends (<see cref="Flush"/>). A crash loses
+/// at most those few plain results, and their files are simply checked again.
+/// </para>
 /// </summary>
-public sealed class ResultStore
+public sealed class ResultStore : IDisposable
 {
     /// <summary>The ceiling on kept results.</summary>
     public const int MaxResults = 200_000;
 
-    private readonly int _maxResults;
+    /// <summary>How many plain results may wait before the file is written.</summary>
+    public const int SaveEvery = 25;
+
+    /// <summary>How long plain results may wait before the file is written.</summary>
+    public static readonly TimeSpan SaveAfter = TimeSpan.FromSeconds(5);
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
+    private readonly int _maxResults;
     private readonly string _path;
     private readonly Lock _lock = new();
-    private List<SubtitleResult>? _results;
+    private Dictionary<string, SubtitleResult>? _byId;
+    private Dictionary<string, List<SubtitleResult>> _byPath = new(StringComparer.Ordinal);
+    private int _unsaved;
+    private long? _lastSave;
 
     /// <summary>
     /// Gets what is wrong with the results file, if anything (it couldn't be read, or it was damaged and set aside).
@@ -170,8 +184,7 @@ public sealed class ResultStore
         {
             lock (_lock)
             {
-                Load();
-                return _results is not null;
+                return Load() is not null;
             }
         }
     }
@@ -204,6 +217,20 @@ public sealed class ResultStore
     }
 
     /// <summary>
+    /// Whether recording a result must reach the disk at once rather than with the next batch: it records a change to a
+    /// file or its undo (the only record of how to undo it), a review decision, or an added subtitle.
+    /// </summary>
+    /// <param name="result">The new result.</param>
+    /// <param name="previous">The result it replaces, if any.</param>
+    /// <returns><c>true</c> to write at once.</returns>
+    public static bool SaveAtOnce(SubtitleResult result, SubtitleResult? previous)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return result.Changed || previous?.Changed == true || result.PendingReview || previous?.PendingReview == true
+            || result.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Declined;
+    }
+
+    /// <summary>
     /// Drops results for subtitle files that are gone, where the folder is still there (so an offline share never loses
     /// its results). "Nothing found" results are for files that don't exist yet and are kept.
     /// </summary>
@@ -216,16 +243,25 @@ public sealed class ResultStore
         ArgumentNullException.ThrowIfNull(folderExists);
         lock (_lock)
         {
-            var list = Load();
-            var removed = list.RemoveAll(r => r.Status != ResultStatus.NotFound
-                && !fileExists(r.SubtitlePath)
-                && Path.GetDirectoryName(r.SubtitlePath) is { } folder && folderExists(folder));
-            if (removed > 0)
+            if (Load() is not { } all)
             {
-                Save(list);
+                return 0;
             }
 
-            return removed;
+            var gone = all.Values.Where(r => r.Status != ResultStatus.NotFound
+                && !fileExists(r.SubtitlePath)
+                && Path.GetDirectoryName(r.SubtitlePath) is { } folder && folderExists(folder)).ToList();
+            foreach (var r in gone)
+            {
+                Unindex(r);
+            }
+
+            if (gone.Count > 0)
+            {
+                Save();
+            }
+
+            return gone.Count;
         }
     }
 
@@ -244,7 +280,7 @@ public sealed class ResultStore
     {
         lock (_lock)
         {
-            return [.. Load().OrderByDescending(r => r.Time)];
+            return Load() is { } all ? [.. all.Values.OrderByDescending(r => r.Time)] : [];
         }
     }
 
@@ -255,9 +291,26 @@ public sealed class ResultStore
     /// <returns>The result, or <c>null</c>.</returns>
     public SubtitleResult? Get(string id)
     {
+        ArgumentNullException.ThrowIfNull(id);
         lock (_lock)
         {
-            return Load().FirstOrDefault(r => r.Id == id);
+            return Load() is null ? null : Find(id);
+        }
+    }
+
+    /// <summary>
+    /// Finds a result for one action from the settings page (apply, undo, edit …). This compares ids one by one rather
+    /// than using the page's id as an index key, so the analysers still see that the file paths acted on come from this
+    /// store, not from the request; one scan per click costs nothing. Runs use <see cref="Get"/>.
+    /// </summary>
+    /// <param name="id">Result id, as sent by the page.</param>
+    /// <returns>The result, or <c>null</c>.</returns>
+    public SubtitleResult? FindForRequest(string id)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        lock (_lock)
+        {
+            return Load() is { } all ? all.Values.FirstOrDefault(r => string.Equals(r.Id, id, StringComparison.Ordinal)) : null;
         }
     }
 
@@ -268,9 +321,10 @@ public sealed class ResultStore
     /// <returns>The result, or <c>null</c>.</returns>
     public SubtitleResult? ForPath(string subtitlePath)
     {
+        ArgumentNullException.ThrowIfNull(subtitlePath);
         lock (_lock)
         {
-            return Load().Where(r => string.Equals(r.SubtitlePath, subtitlePath, StringComparison.Ordinal)).OrderByDescending(r => r.Time).FirstOrDefault();
+            return Load() is not null && _byPath.TryGetValue(subtitlePath, out var list) ? list.MaxBy(r => r.Time) : null;
         }
     }
 
@@ -281,15 +335,16 @@ public sealed class ResultStore
     /// <returns>Whether there was one.</returns>
     public bool Remove(string id)
     {
+        ArgumentNullException.ThrowIfNull(id);
         lock (_lock)
         {
-            var list = Load();
-            if (list.RemoveAll(r => r.Id == id) == 0)
+            if (Load() is not { } all || !all.TryGetValue(id, out var r))
             {
                 return false;
             }
 
-            Save(list);
+            Unindex(r);
+            Save();
             return true;
         }
     }
@@ -303,45 +358,103 @@ public sealed class ResultStore
     /// Adds or replaces the result for a subtitle.
     /// </summary>
     /// <param name="result">The result.</param>
+    /// <exception cref="InvalidOperationException">The results file can't be read, so nothing is recorded.</exception>
     public void Put(SubtitleResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
         lock (_lock)
         {
-            var list = Load();
-            list.RemoveAll(r => r.Id == result.Id);
-            list.Add(result);
-            if (list.Count > _maxResults)
+            // Never write over a results file that couldn't be read (its results were never loaded)
+            var all = Load() ?? throw new InvalidOperationException(Problem ?? "The results file can't be read, so nothing is recorded.");
+            all.TryGetValue(result.Id, out var previous);
+            if (previous is not null)
+            {
+                Unindex(previous);
+            }
+
+            Index(result);
+            if (all.Count > _maxResults)
             {
                 // Past the ceiling, the oldest results that nothing depends on go first
                 var now = result.Time;
-                var droppable = list.Where(r => !MustKeep(r, now) && r.Id != result.Id).OrderBy(r => r.Time).Take(list.Count - _maxResults).ToHashSet();
-                list.RemoveAll(droppable.Contains);
+                foreach (var r in all.Values.Where(r => !MustKeep(r, now) && r.Id != result.Id).OrderBy(r => r.Time).Take(all.Count - _maxResults).ToList())
+                {
+                    Unindex(r);
+                }
             }
 
-            Save(list);
+            _unsaved++;
+            if (SaveAtOnce(result, previous) || _unsaved >= SaveEvery || _lastSave is not { } last || Environment.TickCount64 - last >= (long)SaveAfter.TotalMilliseconds)
+            {
+                Save();
+            }
         }
 
         Recorded?.Invoke(result);
     }
 
-    private List<SubtitleResult> Load()
+    /// <summary>
+    /// Writes any results still waiting (at the end of a run, and when the server stops).
+    /// </summary>
+    public void Flush()
     {
-        if (_results is not null)
+        lock (_lock)
         {
-            return _results;
+            if (_unsaved > 0 && _byId is not null)
+            {
+                Save();
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => Flush();
+
+    private SubtitleResult? Find(string id) => _byId!.TryGetValue(id, out var r) ? r : null;
+
+    private void Index(SubtitleResult r)
+    {
+        _byId![r.Id] = r;
+        if (!_byPath.TryGetValue(r.SubtitlePath, out var list))
+        {
+            _byPath[r.SubtitlePath] = list = [];
         }
 
+        list.Add(r);
+    }
+
+    private void Unindex(SubtitleResult r)
+    {
+        _byId!.Remove(r.Id);
+        if (_byPath.TryGetValue(r.SubtitlePath, out var list))
+        {
+            list.RemoveAll(x => x.Id == r.Id);
+            if (list.Count == 0)
+            {
+                _byPath.Remove(r.SubtitlePath);
+            }
+        }
+    }
+
+    // null while the file can't be read
+    private Dictionary<string, SubtitleResult>? Load()
+    {
+        if (_byId is not null)
+        {
+            return _byId;
+        }
+
+        List<SubtitleResult>? loaded;
         try
         {
-            _results = File.Exists(_path) ? JsonSerializer.Deserialize<List<SubtitleResult>>(File.ReadAllText(_path), JsonOptions) : null;
+            loaded = File.Exists(_path) ? JsonSerializer.Deserialize<List<SubtitleResult>>(File.ReadAllText(_path), JsonOptions) : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Unreadable for now (locked, permissions, a share hiccup): this file holds the undo records, so it is never
             // replaced. Nothing is cached, so nothing can be saved over it, and the next access reads it again.
             Problem = "The results file can't be read right now (" + ex.GetType().Name + "); nothing is checked or recorded until it can be.";
-            return [];
+            return null;
         }
         catch (JsonException)
         {
@@ -355,34 +468,41 @@ public sealed class ResultStore
             catch (Exception moveEx) when (moveEx is IOException or UnauthorizedAccessException)
             {
                 Problem = "The results file is damaged and couldn't be set aside; nothing is recorded until it is moved or deleted.";
-                return [];
+                return null;
             }
 
-            _results = null;
+            loaded = null;
         }
 
-        _results = [.. (_results ?? []).Where(r => r is not null && r.Id is not null && r.SubtitlePath is not null)];
+        _byId = new Dictionary<string, SubtitleResult>(StringComparer.Ordinal);
+        _byPath = new Dictionary<string, List<SubtitleResult>>(StringComparer.Ordinal);
+        foreach (var r in (loaded ?? []).Where(r => r is not null && r.Id is not null && r.SubtitlePath is not null))
+        {
+            if (_byId.TryGetValue(r.Id, out var older))
+            {
+                Unindex(older);
+            }
+
+            Index(r);
+        }
+
         if (Problem is not null && Problem.StartsWith("The results file can't", StringComparison.Ordinal))
         {
             Problem = null;
         }
 
-        return _results;
+        return _byId;
     }
 
-    private void Save(List<SubtitleResult> list)
+    private void Save()
     {
-        // Never write over a results file that couldn't be read (its list was never loaded)
-        if (!ReferenceEquals(list, _results))
-        {
-            throw new InvalidOperationException(Problem ?? "The results file can't be read, so nothing is recorded.");
-        }
-
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path + ".tmp", JsonSerializer.Serialize(list, JsonOptions));
+            File.WriteAllText(_path + ".tmp", JsonSerializer.Serialize(_byId!.Values, JsonOptions));
             File.Move(_path + ".tmp", _path, overwrite: true);
+            _unsaved = 0;
+            _lastSave = Environment.TickCount64;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

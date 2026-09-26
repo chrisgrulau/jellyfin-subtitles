@@ -32,9 +32,8 @@ public sealed class OpenAiCompatibleSpeechToText : HttpSpeechToText
     /// <param name="address">The API base address, ending in <c>/v1/</c> (e.g. <c>http://127.0.0.1:8000/v1/</c>).</param>
     /// <param name="key">API key, if the service needs one.</param>
     /// <param name="model">Model name; empty for the service's default.</param>
-    /// <param name="clock">Clock.</param>
-    public OpenAiCompatibleSpeechToText(HttpClient http, string id, Uri address, string? key, string model, TimeProvider? clock = null)
-        : base(http, key, clock)
+    public OpenAiCompatibleSpeechToText(HttpClient http, string id, Uri address, string? key, string model)
+        : base(http, key)
     {
         ArgumentNullException.ThrowIfNull(address);
         ArgumentException.ThrowIfNullOrWhiteSpace(id);

@@ -42,6 +42,31 @@ public sealed class PipelineTests : IDisposable
         Assert.Equal(Srt, File.ReadAllText(path));
     }
 
+    // SUB-24: a rewritten subtitle (and an undone one) keeps the original's permissions
+    [Fact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void A_replaced_or_restored_file_keeps_its_permissions()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var path = Path.Combine(_dir, "Film.fr.srt");
+        File.WriteAllText(path, Srt);
+        const UnixFileMode Shared = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite;
+        File.SetUnixFileMode(path, Shared);
+        var files = new SubtitleFiles(Path.Combine(_dir, "backups"));
+
+        var (backup, written) = files.Replace(path, SubtitleFiles.Fingerprint(File.ReadAllBytes(path)), Encoding.UTF8.GetBytes("changed"));
+        Assert.Equal(Shared, File.GetUnixFileMode(path));
+
+        File.SetUnixFileMode(path, Shared | UnixFileMode.OtherRead);
+        files.Restore(path, backup, written);
+        Assert.Equal(Shared | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
+        Assert.Equal(Srt, File.ReadAllText(path));
+    }
+
     [Fact]
     public void A_file_changed_since_it_was_checked_is_not_replaced()
     {
@@ -95,6 +120,58 @@ public sealed class PipelineTests : IDisposable
 
         File.WriteAllText(file, "{ nope");
         Assert.Empty(new ResultStore(file).All());
+    }
+
+    // SUB-30: plain results are written in batches; undo records at once
+    [Fact]
+    public void Plain_results_are_written_in_batches_and_undo_records_at_once()
+    {
+        var file = Path.Combine(_dir, "batched.json");
+        var store = new ResultStore(file);
+        var t = DateTimeOffset.UnixEpoch;
+        store.Put(new SubtitleResult { Id = "first", SubtitlePath = "/x/first.srt", Status = ResultStatus.InSync, Time = t });
+        for (var i = 0; i < 5; i++)
+        {
+            store.Put(new SubtitleResult { Id = "p" + i, SubtitlePath = "/x/p" + i + ".srt", Status = ResultStatus.InSync, Time = t.AddMinutes(i) });
+        }
+
+        // The first result is written straight away; the next few wait for the batch
+        Assert.Single(new ResultStore(file).All());
+
+        store.Put(new SubtitleResult { Id = "changed", SubtitlePath = "/x/c.srt", Status = ResultStatus.Corrected, Changed = true, Backup = "b", Time = t.AddHours(1) });
+        Assert.Equal(7, new ResultStore(file).All().Count);
+
+        for (var i = 0; i < ResultStore.SaveEvery; i++)
+        {
+            store.Put(new SubtitleResult { Id = "q" + i, SubtitlePath = "/x/q" + i + ".srt", Status = ResultStatus.InSync, Time = t.AddHours(2) });
+        }
+
+        Assert.Equal(7 + ResultStore.SaveEvery, new ResultStore(file).All().Count);
+
+        store.Put(new SubtitleResult { Id = "last", SubtitlePath = "/x/last.srt", Status = ResultStatus.InSync, Time = t.AddHours(3) });
+        store.Flush();
+        Assert.Equal(8 + ResultStore.SaveEvery, new ResultStore(file).All().Count);
+    }
+
+    [Fact]
+    public void Results_are_found_by_id_and_by_path()
+    {
+        var store = new ResultStore(Path.Combine(_dir, "indexed.json"));
+        var t = DateTimeOffset.UnixEpoch;
+        store.Put(new SubtitleResult { Id = "find-1", SubtitlePath = "/x/a.en.srt", Status = ResultStatus.Added, Time = t });
+        store.Put(new SubtitleResult { Id = "sync-1", SubtitlePath = "/x/a.en.srt", Status = ResultStatus.InSync, Time = t.AddDays(1) });
+        store.Put(new SubtitleResult { Id = "sync-1", SubtitlePath = "/x/moved.en.srt", Status = ResultStatus.InSync, Time = t.AddDays(2) });
+
+        Assert.Equal("find-1", store.ForPath("/x/a.en.srt")!.Id);
+        Assert.Equal("sync-1", store.ForPath("/x/moved.en.srt")!.Id);
+        Assert.Equal("/x/moved.en.srt", store.Get("sync-1")!.SubtitlePath);
+        Assert.Same(store.Get("find-1"), store.FindForRequest("find-1"));
+
+        Assert.True(store.Remove("find-1"));
+        Assert.Null(store.ForPath("/x/a.en.srt"));
+        Assert.Null(store.Get("find-1"));
+        Assert.Equal(1, store.Prune(_ => false, _ => true));
+        Assert.Empty(store.All());
     }
 
     private sealed class NoAudio : IAudioSource

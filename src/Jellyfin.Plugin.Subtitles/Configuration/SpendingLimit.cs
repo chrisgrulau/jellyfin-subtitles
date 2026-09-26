@@ -73,17 +73,4 @@ public static class SpendingLimit
     /// <param name="limit">The effective limit (see <see cref="Monthly"/>).</param>
     /// <returns><c>false</c> when the limit is 0.</returns>
     public static bool AllowsPaidUsage(decimal? limit) => limit is null || limit > 0;
-
-    /// <summary>
-    /// Whether the built-in speech-to-text is chosen for a use that's switched on, but hasn't been allowed to download
-    /// yet (the settings page then asks).
-    /// </summary>
-    /// <param name="tiers">The speech-to-text uses.</param>
-    /// <param name="allowed">Whether the download has been allowed.</param>
-    /// <returns><c>true</c> if consent is still needed.</returns>
-    public static bool NeedsBuiltInConsent(IEnumerable<TranscriptionTier> tiers, bool allowed)
-    {
-        ArgumentNullException.ThrowIfNull(tiers);
-        return !allowed && tiers.Any(t => t is { Enabled: true } && string.Equals(t.Provider, TranscriptionTier.BuiltIn, StringComparison.OrdinalIgnoreCase));
-    }
 }

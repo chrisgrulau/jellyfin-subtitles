@@ -153,6 +153,29 @@ public sealed class FinderTests : IDisposable
         Assert.True(finder.NeedsSearch(job));
     }
 
+    // SUB-19: a search no provider answered isn't "nothing fitting found"
+    [Fact]
+    public async Task When_no_provider_answers_nothing_is_recorded()
+    {
+        var (finder, store, job, _) = Setup();
+        var audio = new Audio(Script("Real"), 0);
+
+        await Assert.ThrowsAsync<NoSourceAnsweredException>(() => finder.FindAsync(job, new CombinedSource([new Down()]), audio, audio, Auto, 100, CancellationToken.None));
+
+        Assert.True(finder.NeedsSearch(job));
+        Assert.Null(store.Get(SubtitleFinder.IdFor(job.VideoPath, job.Language)));
+    }
+
+    private sealed class Down : ICandidateSource
+    {
+        public string Name => "Down";
+
+        public Task<IReadOnlyList<SubtitleCandidate>> SearchAsync(Guid itemId, string language, CancellationToken cancellationToken)
+            => throw new System.Net.Http.HttpRequestException("unreachable");
+
+        public Task<FetchedSubtitle?> FetchAsync(SubtitleCandidate candidate, CancellationToken cancellationToken) => Task.FromResult<FetchedSubtitle?>(null);
+    }
+
     [Fact]
     public async Task No_downloads_left_means_nothing_is_recorded()
     {

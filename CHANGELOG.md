@@ -5,6 +5,55 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **SUB-30:** `results.json` is no longer rewritten whole for every result. Plain results are written in batches (every
+  25 results or 5 seconds, and when a run ends or the server stops); a result that records a change to a file or its
+  undo, a review decision or an added subtitle is still written at once. Results are indexed by id and by path, so large
+  libraries don't search the whole list for each file.
+- **FAM-08:** settings that did nothing are shown disabled as "coming later" instead of looking active: the **Full
+  transcript** use, **Tune confidence thresholds automatically** and **Let agreement between sources settle
+  disagreements**. Saving the page no longer changes them. The README and design notes say they're planned. Unused code
+  was removed (`SpeechToTextException.RetryAfter` and `NeedsAttention`, `MeteredSpeechToText.Refused`,
+  `SpendingLimit.NeedsBuiltInConsent`).
+
+### Fixed
+
+- **SUB-22:** the built-in speech-to-text is no longer downloaded on servers that can't run it. On musl systems
+  (Alpine-based images) and with glibc older than 2.35, the settings page, Test and the nightly run say so plainly and
+  suggest a local or cloud service instead; nothing is downloaded.
+- **SUB-23:** **Find a local service** works when Jellyfin runs in a container (Docker or Podman). It then also looks
+  for the suggested service by name and on the host, and suggests running it on a Docker network shared with Jellyfin
+  (address `http://speaches:8000/v1`), or on the host with `--add-host=host.docker.internal:host-gateway`, instead of a
+  port published only on the host's loopback, which a container can't reach.
+- **SUB-24:** a rewritten subtitle, and one put back by Undo, keeps the original's permissions: on Linux and macOS its
+  mode (so group write access for other tools survives), on Windows its access list (the file is swapped in with
+  `File.Replace`). The owner and group still become Jellyfin's user where the file is written.
+- **SUB-25:** a built-in speech-to-text download that stops arriving (an expired NAT entry, flaky Wi-Fi) gives up after
+  60 seconds without data and is tried again later. Before, it could wait until the server restarted, and the nightly
+  tasks and Ingest's transcript requests queued behind it.
+- **SUB-27:** after **Create a transcription-only key**, the settings page shows which key now reads the Deepgram
+  balance, as the server set it. Before, the page kept its old choice and the next Save wrote it back, so reading the
+  balance failed with the limited key. The page and the result now also say the new key is created in your Deepgram
+  project and stays there if the plugin is removed.
+- **SUB-29:**
+  - The message asking for permission to download the built-in speech-to-text named the box "above"; it's below the
+    services, and the message now names it.
+  - **Test** uses the permission box as currently ticked, before Save.
+  - After **Check now** or **Find missing now**, results refresh every 10 seconds while the task runs, with its
+    progress, instead of once after 15 seconds.
+- **SUB-19:** a video is no longer recorded as "Nothing fitting found" (and left for 30 days) when no subtitle provider
+  answered: none installed in Jellyfin, or every provider failing (for example SubDL down). It's searched again on the
+  next run; with no provider installed at all, the run stops early and says so in the log. (Failures inside Jellyfin's
+  own providers are handled by Jellyfin and still look like an empty answer.)
+- **FAM-07 (settings page):**
+  - **Copy commands** works over plain HTTP, where the browser has no clipboard: the commands are shown selected in a
+    text box, ready to copy by hand. Before, the button did nothing.
+  - Saving a key shows the server's actual reason when it fails (for example that the data folder can't be written),
+    not always "That doesn't look like an API key."
+  - Status messages (test results, key and task messages, the local-service search) are announced to screen readers.
+  - The results and editor tables scroll inside their own box on narrow screens, so the page doesn't scroll sideways.
+
 ## [0.9.0-alpha] - 2026-09-26
 
 ### Fixed

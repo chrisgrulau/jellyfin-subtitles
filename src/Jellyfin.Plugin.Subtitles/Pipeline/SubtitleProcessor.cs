@@ -74,6 +74,11 @@ public sealed class SubtitleProcessor
     }
 
     /// <summary>
+    /// Writes results still waiting to be saved (at the end of a run).
+    /// </summary>
+    public void FlushResults() => _results.Flush();
+
+    /// <summary>
     /// Drops results for subtitle files that were deleted (see <see cref="ResultStore.Prune"/>).
     /// </summary>
     /// <returns>How many were dropped.</returns>
@@ -300,7 +305,7 @@ public sealed class SubtitleProcessor
     /// </summary>
     /// <param name="id">Result id.</param>
     /// <returns>The result, or <c>null</c>.</returns>
-    public SubtitleResult? Get(string id) => _results.Get(id);
+    public SubtitleResult? Get(string id) => _results.FindForRequest(id);
 
     /// <summary>
     /// Opens a subtitle this plugin has a result for, for editing by hand.
@@ -309,7 +314,7 @@ public sealed class SubtitleProcessor
     /// <returns>The lines, or <c>null</c> if there is no such result or the file can't be read.</returns>
     public EditorView? LoadForEditing(string id)
     {
-        if (_results.Get(id) is not { } r || !File.Exists(r.SubtitlePath))
+        if (_results.FindForRequest(id) is not { } r || !File.Exists(r.SubtitlePath))
         {
             return null;
         }
@@ -334,7 +339,7 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such result, the file changed since, or the edit isn't valid.</exception>
     public SubtitleResult SaveEdited(string id, string fingerprint, IReadOnlyList<EditorCue> cues)
     {
-        var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
         var bytes = File.ReadAllBytes(r.SubtitlePath);
         var current = SubtitleFiles.Fingerprint(bytes);
         if (!string.Equals(current, fingerprint, StringComparison.Ordinal))
@@ -455,7 +460,7 @@ public sealed class SubtitleProcessor
     public SubtitleResult Apply(string id, Policies policies)
     {
         ArgumentNullException.ThrowIfNull(policies);
-        var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
         if (!r.PendingReview)
         {
             throw new InvalidOperationException("Nothing is waiting for review for this subtitle.");
@@ -512,7 +517,7 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">Nothing to undo, or the file changed since.</exception>
     public SubtitleResult Undo(string id)
     {
-        var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
         if (r.Status == ResultStatus.Added && r.Changed)
         {
             try
@@ -656,7 +661,7 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">Nothing waits for review.</exception>
     public SubtitleResult Decline(string id)
     {
-        var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
         if (!r.PendingReview)
         {
             throw new InvalidOperationException("Nothing is waiting for review for this subtitle.");
@@ -683,7 +688,7 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such result, or the file holds this plugin's changes.</exception>
     public void CheckAgain(string id)
     {
-        var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
         if (r.Changed && r.Status != ResultStatus.Added)
         {
             throw new InvalidOperationException("This subtitle holds this plugin's changes: undo them first, then check it again.");

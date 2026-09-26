@@ -349,7 +349,7 @@ public class SubtitlesController : ControllerBase
     [Consumes(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<TestResult>> LimitDeepgramKey([FromBody, Required] LimitKeyRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<LimitKeyResult>> LimitDeepgramKey([FromBody, Required] LimitKeyRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (_keys.Get(SpeechToTextFactory.Deepgram) is not { } admin)
@@ -357,41 +357,44 @@ public class SubtitlesController : ControllerBase
             return BadRequest("Add the Deepgram key first.");
         }
 
+        var config = SubtitlesPlugin.Instance?.Configuration;
+        var before = config?.DeepgramBalance ?? BalanceSource.Off;
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(30);
         try
         {
             if (!await DeepgramAccount.CanReadBillingAsync(http, admin, cancellationToken).ConfigureAwait(false))
             {
-                return new TestResult(false, "The Deepgram key is already a limited key; nothing to change.");
+                return new LimitKeyResult(false, "The Deepgram key is already a limited key; nothing to change.", before);
             }
 
             var limited = await DeepgramAccount.CreateTranscriptionKeyAsync(http, admin, "Shoal Subtitles (transcription only, created by the plugin)", cancellationToken).ConfigureAwait(false);
             _keys.Set(SpeechToTextFactory.Deepgram, limited);
-            var config = SubtitlesPlugin.Instance?.Configuration;
             if (request.KeepForBalance)
             {
                 _keys.Set(DeepgramAccount.BillingKey, admin);
-                if (config is not null)
-                {
-                    config.DeepgramBalance = BalanceSource.SeparateKey;
-                    SubtitlesPlugin.Instance!.SaveConfiguration();
-                }
             }
-            else if (config is { DeepgramBalance: BalanceSource.TranscriptionKey })
+
+            // The page applies the resulting setting too, so its next Save doesn't write the old one back
+            var after = DeepgramAccount.BalanceAfterLimiting(before, request.KeepForBalance);
+            if (config is not null && after != before)
             {
-                config.DeepgramBalance = BalanceSource.Off;
+                config.DeepgramBalance = after;
                 SubtitlesPlugin.Instance!.SaveConfiguration();
             }
 
             DeepgramAccount.ClearCache();
-            return new TestResult(true, request.KeepForBalance
-                ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
-                : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.");
+            const string Stays = " The new key is in your Deepgram project and stays there if this plugin is removed; delete it in Deepgram's console when no longer needed.";
+            return new LimitKeyResult(
+                true,
+                (request.KeepForBalance
+                    ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
+                    : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.") + Stays,
+                after);
         }
         catch (SpeechToTextException ex)
         {
-            return new TestResult(false, ex.Message);
+            return new LimitKeyResult(false, ex.Message, before);
         }
     }
 
@@ -408,9 +411,10 @@ public class SubtitlesController : ControllerBase
         var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(10);
-        var found = await LocalServices.FindAsync(http, config.LocalServiceUrl, cancellationToken).ConfigureAwait(false);
+        var inContainer = LocalServices.InContainer();
+        var found = await LocalServices.FindAsync(http, config.LocalServiceUrl, inContainer, cancellationToken).ConfigureAwait(false);
         var accel = _serverConfig.GetEncodingOptions().HardwareAccelerationType.ToString();
-        return new LocalServicesResult(found, accel, LocalServices.Suggest(accel));
+        return new LocalServicesResult(found, accel, LocalServices.Suggest(accel, inContainer));
     }
 
     /// <summary>
@@ -436,6 +440,19 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
+    /// Whether the built-in speech-to-text can run on this server, checked before anything is downloaded.
+    /// </summary>
+    /// <returns>The status.</returns>
+    [HttpGet("BuiltIn")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<BuiltInStatus> BuiltInStatusOf()
+        => new BuiltInStatus(
+            _builtIn.Platform is not null && _builtIn.Problem is null,
+            _builtIn.Platform is null
+                ? "The built-in speech-to-text has no build for this server's system. Use a local speech-to-text service or a cloud service instead."
+                : _builtIn.Problem);
+
+    /// <summary>
     /// Checks that a speech-to-text service answers, by sending it one second of near-silence (for a paid service this
     /// costs a small fraction of a cent).
     /// </summary>
@@ -452,7 +469,7 @@ public class SubtitlesController : ControllerBase
         var paidAllowed = SpendingLimit.AllowsPaidUsage(SpendingLimit.Monthly(config.MonthlyBudget, config.NoSpendingLimit));
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(60);
-        var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, config.AllowBuiltInDownload, _keys, http, _builtIn);
+        var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, request.AllowBuiltInDownload ?? config.AllowBuiltInDownload, _keys, http, _builtIn);
         if (service is null)
         {
             return new TestResult(false, problem ?? "Can't be used.");
@@ -520,6 +537,12 @@ public sealed record TestRequest
     /// <summary>Gets the local service address as currently entered (not yet saved).</summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "As typed on the settings page; checked by the factory.")]
     public string? LocalServiceUrl { get; init; }
+
+    /// <summary>
+    /// Gets whether the built-in download is allowed, as currently ticked on the page (not yet saved); <c>null</c> for
+    /// the saved setting.
+    /// </summary>
+    public bool? AllowBuiltInDownload { get; init; }
 }
 
 /// <summary>
@@ -528,6 +551,13 @@ public sealed record TestRequest
 /// <param name="Ok">Whether the service answered.</param>
 /// <param name="Message">What to show (keys removed).</param>
 public sealed record TestResult(bool Ok, string Message);
+
+/// <summary>
+/// Whether the built-in speech-to-text can run on this server.
+/// </summary>
+/// <param name="Available">Whether it can be downloaded and run.</param>
+/// <param name="Problem">Why not, in plain language.</param>
+public sealed record BuiltInStatus(bool Available, string? Problem);
 
 /// <summary>
 /// This month's spending on paid services.
@@ -559,6 +589,14 @@ public sealed record LocalServicesResult(IReadOnlyList<FoundService> Found, stri
 /// <param name="Balance">The credit balance, if read.</param>
 /// <param name="Problem">Why something couldn't be shown.</param>
 public sealed record DeepgramStatus(bool HasKey, bool HasBillingKey, BalanceSource BalanceSource, bool? KeyIsAdmin, DeepgramBalance? Balance, string? Problem);
+
+/// <summary>
+/// Result of <see cref="SubtitlesController.LimitDeepgramKey"/>.
+/// </summary>
+/// <param name="Ok">Whether the key was swapped.</param>
+/// <param name="Message">What to show.</param>
+/// <param name="BalanceSource">Which key reads the balance now (the page applies it before its next Save).</param>
+public sealed record LimitKeyResult(bool Ok, string Message, BalanceSource BalanceSource);
 
 /// <summary>
 /// Body of <see cref="SubtitlesController.LimitDeepgramKey"/>.

@@ -115,6 +115,22 @@ public class SubDlTests
         await Assert.ThrowsAsync<RateLimitExceededException>(() => onlyLimited.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
     }
 
+    // SUB-19: when no source answered, that isn't "nothing offered"
+    [Fact]
+    public async Task When_no_source_answers_the_search_says_so_instead_of_returning_nothing()
+    {
+        var outage = new CombinedSource([new Listed("A") { Throw = new HttpRequestException("down") }, new Listed("B") { Throw = new HttpRequestException("down") }]);
+        var ex = await Assert.ThrowsAsync<NoSourceAnsweredException>(() => outage.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
+        Assert.False(ex.NoneAvailable);
+
+        var none = new CombinedSource([new Listed("A") { Throw = new NoSourceAnsweredException("none installed") { NoneAvailable = true } }]);
+        Assert.True((await Assert.ThrowsAsync<NoSourceAnsweredException>(() => none.SearchAsync(Item, "eng", TestContext.Current.CancellationToken))).NoneAvailable);
+
+        // One answering is enough, even with nothing to offer
+        var partly = new CombinedSource([new Listed("A") { Throw = new HttpRequestException("down") }, new Listed("B")]);
+        Assert.Single(await partly.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
+    }
+
     // Named like the OpenSubtitles plugin's exception, which is matched by name
     private sealed class RateLimitExceededException(string message) : Exception(message);
 

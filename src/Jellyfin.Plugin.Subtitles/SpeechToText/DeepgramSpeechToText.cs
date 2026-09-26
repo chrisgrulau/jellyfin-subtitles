@@ -26,9 +26,8 @@ public sealed class DeepgramSpeechToText : HttpSpeechToText
     /// <param name="http">HTTP client.</param>
     /// <param name="key">API key.</param>
     /// <param name="model">Model name; empty for <see cref="DefaultModel"/>.</param>
-    /// <param name="clock">Clock.</param>
-    public DeepgramSpeechToText(HttpClient http, string key, string model, TimeProvider? clock = null)
-        : base(http, key, clock)
+    public DeepgramSpeechToText(HttpClient http, string key, string model)
+        : base(http, key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model.Trim();

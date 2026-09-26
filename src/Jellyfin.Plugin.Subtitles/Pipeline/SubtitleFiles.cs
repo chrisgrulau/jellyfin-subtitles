@@ -243,12 +243,26 @@ public sealed class SubtitleFiles
         File.Delete(subtitlePath);
     }
 
+    // The new content goes to a temporary file that takes the place of the original, keeping how the original could be
+    // used: on Unix its permission bits are copied (so group write access for other tools or people survives); on
+    // Windows File.Replace keeps the original's access list. The owner and group can't be kept without privileges.
     private static void WriteAtomically(string path, byte[] content)
     {
         var temp = Path.Combine(Path.GetDirectoryName(path)!, ".shoal-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
             File.WriteAllBytes(temp, content);
+            var exists = File.Exists(path);
+            if (exists && !OperatingSystem.IsWindows())
+            {
+                CopyMode(path, temp);
+            }
+
+            if (exists && OperatingSystem.IsWindows() && TryReplace(temp, path))
+            {
+                return;
+            }
+
             File.Move(temp, path, overwrite: true);
         }
         finally
@@ -257,6 +271,33 @@ public sealed class SubtitleFiles
             {
                 File.Delete(temp);
             }
+        }
+    }
+
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    private static void CopyMode(string from, string to)
+    {
+        try
+        {
+            File.SetUnixFileMode(to, File.GetUnixFileMode(from));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Some shares don't allow changing modes: the file keeps the default mode, as before
+        }
+    }
+
+    // Some file systems (network shares, FAT) don't support File.Replace; a plain rename is used there
+    private static bool TryReplace(string temp, string path)
+    {
+        try
+        {
+            File.Replace(temp, path, destinationBackupFileName: null, ignoreMetadataErrors: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
+        {
+            return false;
         }
     }
 }

@@ -73,12 +73,17 @@ public static class SpeechToTextFactory
                 case BuiltIn:
                     if (!builtInAllowed)
                     {
-                        return (null, "The built-in speech-to-text needs your permission to download first (see above).");
+                        return (null, "The built-in speech-to-text needs your permission to download first: tick \"Allow the built-in speech-to-text to download and run\" on the settings page (below the services).");
                     }
 
                     if (builtIn?.Platform is null)
                     {
                         return (null, "The built-in speech-to-text has no build for this server's system. Choose a local service or a cloud provider.");
+                    }
+
+                    if (builtIn.Problem is { } systemProblem)
+                    {
+                        return (null, systemProblem);
                     }
 
                     return BuiltInSource.ModelName(model) is { } builtInModel

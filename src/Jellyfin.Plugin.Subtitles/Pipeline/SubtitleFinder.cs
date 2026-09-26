@@ -115,6 +115,11 @@ public sealed class SubtitleFinder
     /// <summary>Gets whether anything has been checked or searched yet (an install that has run before counts as set up).</summary>
     public bool HasResults => _results.All().Count > 0;
 
+    /// <summary>
+    /// Writes results still waiting to be saved (at the end of a run).
+    /// </summary>
+    public void FlushResults() => _results.Flush();
+
     /// <summary>Gets whether results can be recorded now (the results file is readable).</summary>
     public bool ResultsReadable => _results.Readable;
 
@@ -146,6 +151,8 @@ public sealed class SubtitleFinder
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result.</returns>
     /// <exception cref="DownloadLimitReachedException">No downloads left today (nothing is recorded, so it is tried again).</exception>
+    /// <exception cref="NoSourceAnsweredException">No subtitle provider answered (none installed, or all failed): nothing
+    /// is recorded, so the video is searched again on the next run rather than counted as "nothing fitting found".</exception>
     public async Task<SubtitleResult> FindAsync(FindJob job, ICandidateSource source, IAudioSource audio, ISpeechToText? speech, Policies policies, int downloadsPerDay, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(job);
