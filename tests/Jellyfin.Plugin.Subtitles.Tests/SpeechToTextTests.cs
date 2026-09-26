@@ -146,7 +146,8 @@ public class SpeechToTextTests
     [InlineData("fre", "fr")]
     [InlineData("ger", "de")]
     [InlineData("en-US", "en")]
-    [InlineData("English", null)]
+    [InlineData("English", "en")]
+    [InlineData("Klingon-ish", null)]
     [InlineData(null, null)]
     public void Language_codes_become_two_letters(string? code, string? expected) => Assert.Equal(expected, Languages.ToTwoLetter(code));
 

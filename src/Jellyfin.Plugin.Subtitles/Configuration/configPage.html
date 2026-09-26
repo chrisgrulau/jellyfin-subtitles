@@ -85,7 +85,7 @@
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="Languages">Subtitle languages</label>
             <input id="Languages" type="text" is="emby-input" placeholder="eng" />
-            <div class="fieldDescription">Three-letter codes, comma separated (e.g. <code>eng, fre</code>).</div>
+            <div class="fieldDescription">Comma separated: codes or names (e.g. <code>eng, fr, German</code>). Anything that isn't a language is ignored and noted in the log.</div>
           </div>
 
           <div class="checkboxContainer checkboxContainer-withDescription">
@@ -809,7 +809,7 @@
           Dashboard.showLoadingMsg();
           ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             config.Enabled = page.querySelector('#Enabled').checked;
-            config.Languages = page.querySelector('#Languages').value.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(function (s) { return /^[a-z]{3}$/.test(s); });
+            config.Languages = page.querySelector('#Languages').value.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0 && s.length <= 40; });
             if (!config.Languages.length) { config.Languages = ['eng']; }
             config.TimingFixes = page.querySelector('#TimingFixes').value;
             config.LocalServiceUrl = page.querySelector('#LocalServiceUrl').value.trim();
