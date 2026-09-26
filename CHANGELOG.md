@@ -32,7 +32,8 @@ All notable changes to this project are documented here. The format follows
     sync check's requests are unchanged.
 - **Stage 4: whole-file check.** A doubtful subtitle is compared line by line with a full transcript of its video, and
   the lines that differ wait for your review: **Check whole file for doubtful subtitles** (off by default), and **Check
-  whole file** on any subtitle in the results (checked on the next run, even with the switch off).
+  whole file** on any subtitle in the results (checked on the next run, even with the switch off; a subtitle that
+  can't be checked, such as one whose language isn't the audio's, is refused with the reason).
   - Doubtful means: the timing check was unclear or settled by few matching words, or the AI wording audit flagged
     lines. Generated subtitles, translations and subtitles in another language than the audio's are never checked.
   - Finds lines heard but missing, lines with nothing heard (not sound descriptions, music or short interjections), and

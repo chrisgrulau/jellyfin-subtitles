@@ -135,7 +135,7 @@ A subtitle that looks doubtful can be compared, line by line, with a full transc
 - **Which subtitles:** only doubtful ones: the timing check was unclear, or settled by only a few matching words, or the
   AI wording audit flagged lines; and any you pick with **Check whole file** in the results (even with the switch off).
   Never generated subtitles (they are the transcript), translations matched by meaning, or subtitles in a language other
-  than the audio's.
+  than the audio's (or not among your subtitle languages); **Check whole file** says so when you pick one.
 - **What it finds:** lines heard but missing from the subtitle (at least 4 words over 1.5 seconds with no line shown);
   lines with nothing heard around them (sound descriptions, music and short interjections are left alone); and lines
   whose names, numbers or negations ("not", "never", "no" …) differ from what is said, or that leave out most of what

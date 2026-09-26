@@ -216,7 +216,7 @@ public sealed class WholeFileTests : IDisposable
         var speech = new Hears(DiscrepancyTests.Said(DiscrepancyTests.Script));
         var french = File_("French", DiscrepancyTests.Script, audio: "fre", change: r => r with { WholeFileRequested = true });
         var noted = await Check(french, speech);
-        Assert.Contains("another language", noted!.Explanation, StringComparison.Ordinal);
+        Assert.Contains(WholeFileChecker.NotInLanguage, noted!.Explanation, StringComparison.Ordinal);
         Assert.False(noted.WholeFileRequested);
         Assert.Empty(noted.Findings);
 
@@ -375,16 +375,53 @@ public sealed class WholeFileTests : IDisposable
     }
 
     [Fact]
-    public void A_check_is_asked_for_from_the_results_but_not_for_generated_subtitles()
+    public void A_check_is_asked_for_only_for_files_the_run_can_check()
     {
         var job = File_("Film", DiscrepancyTests.Script, ResultStatus.InSync);
-        var r = _processor.RequestWholeFileCheck(ResultStore.IdFor(job.SubtitlePath));
-        Assert.True(r.WholeFileRequested);
+        var id = ResultStore.IdFor(job.SubtitlePath);
+        var (r, refused) = _processor.RequestWholeFileCheck(id, _ => job, English);
+        Assert.Null(refused);
+        Assert.True(r!.WholeFileRequested);
         Assert.True(Result(job).WholeFileRequested);
 
+        // Audio in another language, a language not wanted, not in the library: refused with the reason, nothing queued
+        var french = File_("French audio", DiscrepancyTests.Script, ResultStatus.InSync, audio: "fre");
+        var frenchId = ResultStore.IdFor(french.SubtitlePath);
+        Assert.Equal((null, WholeFileChecker.NotInLanguage), _processor.RequestWholeFileCheck(frenchId, _ => french, English));
+        var other = File_("Other", DiscrepancyTests.Script, ResultStatus.InSync);
+        Assert.Equal(WholeFileChecker.NotInLanguage, _processor.RequestWholeFileCheck(ResultStore.IdFor(other.SubtitlePath), _ => other, ["fre"]).Refused);
+        Assert.Contains("in the library", _processor.RequestWholeFileCheck(ResultStore.IdFor(other.SubtitlePath), _ => null, English).Refused, StringComparison.Ordinal);
+        Assert.False(Result(french).WholeFileRequested);
+        Assert.False(Result(other).WholeFileRequested);
+
+        // Matched by meaning, generated, embedded
+        var meaning = File_("Meaning", DiscrepancyTests.Script, ResultStatus.InSync, change: x => x with { Stage = SyncCheck.ByMeaningStage });
+        Assert.Contains("matched by meaning", _processor.RequestWholeFileCheck(ResultStore.IdFor(meaning.SubtitlePath), _ => meaning, English).Refused, StringComparison.Ordinal);
         var generatedPath = Path.Combine(_dir, "Film.en.generated.srt");
         File.WriteAllText(generatedPath, "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
         _store.Put(new SubtitleResult { Id = SubtitleGenerator.IdFor(job.VideoPath, "eng"), SubtitlePath = generatedPath, Status = ResultStatus.Generated });
-        Assert.Throws<InvalidOperationException>(() => _processor.RequestWholeFileCheck(SubtitleGenerator.IdFor(job.VideoPath, "eng")));
+        Assert.Contains("generated", _processor.RequestWholeFileCheck(SubtitleGenerator.IdFor(job.VideoPath, "eng"), _ => job, English).Refused, StringComparison.Ordinal);
+        _store.Put(new SubtitleResult { Id = "emb-1", SubtitlePath = job.VideoPath, Status = ResultStatus.InSync });
+        Assert.Contains("beside its video", _processor.RequestWholeFileCheck("emb-1", _ => job, English).Refused, StringComparison.Ordinal);
+
+        // No such result
+        Assert.Throws<InvalidOperationException>(() => _processor.RequestWholeFileCheck("nothing", _ => job, English));
+    }
+
+    [Fact]
+    public void Queued_files_the_run_can_no_longer_check_leave_the_queue_with_the_reason()
+    {
+        var reachable = File_("Film", DiscrepancyTests.Script, change: r => r with { WholeFileRequested = true });
+        var french = File_("French audio", DiscrepancyTests.Script, audio: "fre", change: r => r with { WholeFileRequested = true });
+        var gone = File_("Not wanted any more", DiscrepancyTests.Script, change: r => r with { WholeFileRequested = true });
+
+        // The library walk no longer lists the third (its language was taken off the wanted list)
+        Assert.Equal(2, _checker.ClearUnreachable([reachable, french], English));
+        Assert.True(Result(reachable).WholeFileRequested);
+        Assert.False(Result(french).WholeFileRequested);
+        Assert.Contains(WholeFileChecker.NotInLanguage, Result(french).Explanation, StringComparison.Ordinal);
+        Assert.False(Result(gone).WholeFileRequested);
+        Assert.Contains("in the library", Result(gone).Explanation, StringComparison.Ordinal);
+        Assert.Equal([reachable], _checker.Choose([reachable, french, gone], English, automatic: false, max: 5));
     }
 }

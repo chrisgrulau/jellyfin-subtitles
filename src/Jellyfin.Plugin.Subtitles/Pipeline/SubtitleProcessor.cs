@@ -616,25 +616,30 @@ public sealed class SubtitleProcessor
 
     /// <summary>
     /// Asks for a subtitle file to be compared whole with a full transcript of its video on the next run of the full
-    /// transcripts task (the request returns at once).
+    /// transcripts task (the request returns at once). A file the run can't check is refused with the reason, by the
+    /// run's own rules (see <see cref="WholeFileChecker.Ineligible"/>), so nothing waits in the queue for ever.
     /// </summary>
     /// <param name="id">Result id.</param>
-    /// <returns>The updated result.</returns>
-    /// <exception cref="InvalidOperationException">No such result, or not a subtitle file that can be compared.</exception>
-    public SubtitleResult RequestWholeFileCheck(string id)
+    /// <param name="jobFor">The subtitle as the library lists it (video, language, audio track), or <c>null</c>.</param>
+    /// <param name="wanted">The wanted languages, in order.</param>
+    /// <returns>The updated result, or why it can't be checked.</returns>
+    /// <exception cref="InvalidOperationException">No such result.</exception>
+    public (SubtitleResult? Result, string? Refused) RequestWholeFileCheck(string id, Func<SubtitleResult, SubtitleJob?> jobFor, IReadOnlyList<string> wanted)
     {
+        ArgumentNullException.ThrowIfNull(jobFor);
+        ArgumentNullException.ThrowIfNull(wanted);
         var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
-        if (r.Id.StartsWith(SubtitleGenerator.IdPrefix, StringComparison.Ordinal) || SubtitleGenerator.IsGenerated(r.SubtitlePath))
+        if (WholeFileChecker.Ineligible(r, jobFor(r), wanted) is { } why)
         {
-            throw new InvalidOperationException("A generated subtitle is the transcript already: there's nothing to compare it with.");
+            return (null, why);
         }
 
-        if (r.Id.StartsWith("emb-", StringComparison.Ordinal) || r.Status is ResultStatus.NotFound or ResultStatus.TooLarge || !File.Exists(r.SubtitlePath))
+        if (!File.Exists(r.SubtitlePath))
         {
-            throw new InvalidOperationException("Only a subtitle file beside its video can be checked whole.");
+            return (null, "The subtitle file isn't there any more.");
         }
 
-        return r.WholeFileRequested ? r : Save(r with { WholeFileRequested = true });
+        return (r.WholeFileRequested ? r : Save(r with { WholeFileRequested = true }), null);
     }
 
     /// <summary>

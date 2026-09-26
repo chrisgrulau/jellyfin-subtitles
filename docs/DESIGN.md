@@ -187,8 +187,12 @@ for review, never applied on their own.
 
 - **Switch:** `CheckWholeFile` (off by default) for doubtful subtitles; **Check whole file** in the results
   (`POST Subtitles/Results/{id}/CheckWholeFile`) queues any subtitle file (`SubtitleResult.WholeFileRequested`) whatever
-  the switch, answering at once. Refused for generated subtitles, embedded tracks and results without a file. Needs the
-  Full transcript tier; the page switches it on with the switch.
+  the switch, answering at once. A file the run could never check is refused with 400 and the reason, which the page
+  shows, by the run's own rules (`WholeFileChecker.Ineligible`): generated subtitles, embedded tracks, results without a
+  file, subtitles matched by meaning, a subtitle its video in the library doesn't list, and a language that isn't wanted
+  or isn't the audio's. Should a queued file become unreachable later (the settings or library changed), the run clears
+  its flag and notes why in its result (`ClearUnreachable`). Needs the Full transcript tier; the page switches it on with
+  the switch.
 - **Where it runs:** a step of the full-transcript task (`ShoalSubtitlesGenerate`, 05:00), sharing its time budget
   (`MaxGenerateHours`, counted from when the task began) so whole videos are transcribed one at a time: first the files
   asked for (someone is waiting), then generation, then doubtful files. At most `MaxWholeFileChecksPerNight` (5, 0–200)

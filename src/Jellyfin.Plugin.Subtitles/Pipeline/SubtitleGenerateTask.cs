@@ -158,6 +158,8 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         // Files picked in the results first (someone is waiting for them), then generation, then doubtful files
         if (asked)
         {
+            // Picked files the run can't reach (the settings or the library changed since) leave the queue, with the reason
+            _checker.ClearUnreachable(Files(), wanted);
             var outcome = await CheckWholeAsync(run, config, tier, setup, settings, _checker.Choose(Files(), wanted, automatic: false, maxWhole), budget, began, cancellationToken).ConfigureAwait(false);
             checks += outcome?.Checked + outcome?.Failed ?? 0;
             if (outcome?.StoppedBy is not null || outcome?.OutOfTime is not null)

@@ -120,6 +120,78 @@ public sealed class WholeFileChecker
             : wanted.Count > 0 && string.Equals(Languages.ToTwoLetter(wanted[0]), language, StringComparison.Ordinal);
     }
 
+    /// <summary>Why a subtitle not in a wanted language matching the audio's can't be checked.</summary>
+    public const string NotInLanguage = "Only subtitles in a wanted language that matches the audio can be checked against a full transcript.";
+
+    /// <summary>
+    /// Why a subtitle can't be compared with a full transcript, by the same rules the nightly run uses: it must be a
+    /// subtitle file beside a film or episode in the library (not generated, not an embedded track), not matched by
+    /// meaning, in a wanted language that is the audio's.
+    /// </summary>
+    /// <param name="r">Its result.</param>
+    /// <param name="job">The subtitle as the library lists it, or <c>null</c> if the library doesn't list it.</param>
+    /// <param name="wanted">The wanted languages, in order.</param>
+    /// <returns>The reason, in plain words, or <c>null</c> when it can be checked.</returns>
+    public static string? Ineligible(SubtitleResult r, SubtitleJob? job, IReadOnlyList<string> wanted)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        ArgumentNullException.ThrowIfNull(wanted);
+        if (r.Id.StartsWith(SubtitleGenerator.IdPrefix, StringComparison.Ordinal) || SubtitleGenerator.IsGenerated(r.SubtitlePath))
+        {
+            return "A generated subtitle is the transcript already: there's nothing to compare it with.";
+        }
+
+        if (r.Id.StartsWith("emb-", StringComparison.Ordinal) || r.Status is ResultStatus.NotFound or ResultStatus.TooLarge)
+        {
+            return "Only a subtitle file beside its video can be checked against a full transcript.";
+        }
+
+        if (r.Stage == SyncCheck.ByMeaningStage)
+        {
+            return "This subtitle was matched by meaning (a translation or paraphrase), so its lines can't be compared word for word with what is said.";
+        }
+
+        if (job is null)
+        {
+            return "Only a subtitle file beside a film or episode in the library can be checked against a full transcript.";
+        }
+
+        var language = Languages.ToTwoLetter(job.Language);
+        return language is null || !wanted.Any(w => string.Equals(Languages.ToTwoLetter(w), language, StringComparison.Ordinal)) || !SameLanguage(job, wanted)
+            ? NotInLanguage
+            : null;
+    }
+
+    /// <summary>
+    /// Clears the queue flag of files asked for that the run can't check (the settings or the library changed since they
+    /// were picked), noting why in their results.
+    /// </summary>
+    /// <param name="jobs">The subtitle files beside the library's videos, in the wanted languages.</param>
+    /// <param name="wanted">The wanted languages, in order.</param>
+    /// <returns>How many were cleared.</returns>
+    public int ClearUnreachable(IEnumerable<SubtitleJob> jobs, IReadOnlyList<string> wanted)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+        ArgumentNullException.ThrowIfNull(wanted);
+        var byPath = new Dictionary<string, SubtitleJob>(StringComparer.Ordinal);
+        foreach (var j in jobs)
+        {
+            byPath.TryAdd(j.SubtitlePath, j);
+        }
+
+        var cleared = 0;
+        foreach (var r in _results.All().Where(r => r.WholeFileRequested).ToList())
+        {
+            if (Ineligible(r, byPath.GetValueOrDefault(r.SubtitlePath), wanted) is { } why)
+            {
+                Note(r, string.Empty, "not compared: " + why, false);
+                cleared++;
+            }
+        }
+
+        return cleared;
+    }
+
     /// <summary>
     /// The result a subtitle file's whole-file check belongs to: the file's own, or the search's for a subtitle it added.
     /// </summary>
@@ -207,9 +279,9 @@ public sealed class WholeFileChecker
             return null;
         }
 
-        if (!SameLanguage(job, settings.Wanted))
+        if (Ineligible(r, job, settings.Wanted) is { } why)
         {
-            return Note(r, setup, "not compared: the audio is in another language than the subtitle's, and only speech in the subtitle's own language can be compared with it.", false);
+            return Note(r, setup, "not compared: " + why, false);
         }
 
         var document = SubtitleReader.Read(bytes, job.SubtitlePath);
