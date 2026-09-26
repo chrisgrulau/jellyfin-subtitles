@@ -387,6 +387,32 @@ works, just without AI tiebreakers.
   tier's service transcribes it, and a paid service is wrapped in `MeteredSpeechToText` under the caller's purpose. A
   semaphore lets only one transcription run at a time, so the built-in service never runs twice at once.
 
+## New videos
+
+`NewItemsHost` (a hosted service) listens to `ILibraryManager.ItemAdded` and `ItemUpdated` for films and episodes (not
+for artwork-only updates) and queues them in `NewItemsWaiting`: one entry per video, "added" winning over "changed",
+at most 500 (the rest are left to the nightly tasks). Each report re-arms one timer for the quiet delay
+(`NewItemsDelayMinutes`, 10 by default), so the batch runs once nothing has arrived for that long. The handler itself is
+cheap and never throws; it runs on Jellyfin's scanning thread.
+
+A batch runs the nightly tasks' own code (`SubtitleSyncTask.RunForAsync`, then `SubtitleFindTask.RunForAsync`), made
+through dependency injection, with the walk limited to the batch's videos. So every rule applies unchanged: the setup
+gate, the results file being readable, the library picker, languages, files and videos per run, downloads per day
+(`DownloadLedger`) and spending (`SpendLedger`). Differences, on purpose:
+
+- A video that only changed (typically a new subtitle file beside it) has only files the results don't know checked,
+  and isn't searched for: Jellyfin reports videos as changed for many reasons, and the nightly run sees to the rest.
+- No pruning of results and no audit of earlier results (both whole-library chores).
+- The day's new-video runs share one run's allowance of AI checks (`DailyAiChecks`), so frequent small runs never ask
+  more than one nightly run may.
+- Generating stays nightly (hours of CPU). A new video the search found nothing for gets its "not found" result like
+  any other and is a candidate for the next night's generation.
+
+`RunGate` keeps this apart from the nightly tasks: they share the gate; a new-video run (and "Restore all originals")
+needs it alone. A scheduled task that starts during a new-video run waits for it; a new-video batch that finds a
+scheduled task running is put back and tried again after another quiet delay. The queue is in memory: after a restart,
+the nightly tasks pick up whatever was waiting.
+
 ## Libraries
 
 `LibraryScope` decides which videos the plugin works on. The server's film, show and mixed libraries are read from

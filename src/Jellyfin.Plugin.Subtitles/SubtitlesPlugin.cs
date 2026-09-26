@@ -47,6 +47,7 @@ public class SubtitlesPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
             c.MaxSubtitlesPerRun = Math.Clamp(c.MaxSubtitlesPerRun, 1, 5000);
             c.MaxFindsPerRun = Math.Clamp(c.MaxFindsPerRun, 1, 1000);
             c.MaxDownloadsPerDay = Math.Clamp(c.MaxDownloadsPerDay, 0, 10000);
+            c.NewItemsDelayMinutes = Math.Clamp(c.NewItemsDelayMinutes, 1, 1440);
             var excluded = (c.ExcludedLibraries ?? []).Select(Pipeline.LibraryScope.NormaliseId).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
             c.ExcludedLibraries = [.. excluded];
             var languages = LanguageSettings.EffectiveLanguages(c.Languages);

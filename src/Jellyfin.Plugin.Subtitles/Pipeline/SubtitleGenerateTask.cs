@@ -36,6 +36,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     private readonly Spending _spending;
     private readonly SubtitleGenerator _generator;
     private readonly WholeFileChecker _checker;
+    private readonly RunGate _gate;
     private readonly ILogger<SubtitleGenerateTask> _logger;
 
     /// <summary>
@@ -51,9 +52,11 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     /// <param name="spending">Prices, spend ledger and exchange rates.</param>
     /// <param name="generator">The generator.</param>
     /// <param name="checker">The whole-file check.</param>
+    /// <param name="gate">Keeps this task and other work on subtitle files apart.</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleGenerateTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleGenerator generator, WholeFileChecker checker, ILogger<SubtitleGenerateTask> logger)
+    public SubtitleGenerateTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleGenerator generator, WholeFileChecker checker, RunGate gate, ILogger<SubtitleGenerateTask> logger)
     {
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
         _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
@@ -92,6 +95,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
+        using var hold = await _gate.EnterSharedAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await RunAsync(progress, cancellationToken).ConfigureAwait(false);

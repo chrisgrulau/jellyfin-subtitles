@@ -68,7 +68,7 @@
             <label class="subs-muted">Show <select id="ResFilter" class="subs-filter"><option value="">Everything</option><option value="waiting">Waiting for review</option><option value="wholefile">Differs from what is said (whole file)</option><option value="queued">Whole-file check queued</option></select></label>
             <input id="ResSearch" type="search" class="subs-filter" placeholder="Find a video" aria-label="Find a video" />
           </div>
-          <p class="subs-muted">Subtitle files beside your films and episodes are checked daily, and subtitles are found for videos that have none in your languages (Scheduled Tasks → Shoal); if switched on, subtitles are generated for videos nothing could be found for. Corrections follow the timing setting below; every change keeps the original, and every added or generated subtitle can be removed with Undo.</p>
+          <p class="subs-muted">Subtitle files beside your films and episodes are checked daily, and subtitles are found for videos that have none in your languages (Scheduled Tasks → Shoal); new videos are handled a few minutes after they are added; if switched on, subtitles are generated for videos nothing could be found for. Corrections follow the timing setting below; every change keeps the original, and every added or generated subtitle can be removed with Undo.</p>
           <div id="Editor" class="subs-editor" hidden>
             <div class="subs-editor-bar">
               <div style="flex:1 1 100%"><strong id="EdTitle"></strong> <span id="EdFile" class="subs-muted"></span></div>
@@ -112,6 +112,18 @@
               <span>Find subtitles for videos that have none</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">Searches your subtitle providers (such as the OpenSubtitles plugin), checks the best candidates against the audio, and adds one only if it fits. Existing subtitle files are never replaced.</div>
+          </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="HandleNewItems" type="checkbox" is="emby-checkbox" />
+              <span>Handle new videos soon after they're added</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">When films or episodes are added (or a subtitle file appears beside one), their subtitles are checked and missing ones searched for a few minutes later, instead of the next night. The same limits apply (files and videos per run, downloads per day, spending; the day's new-video runs share one run's AI checks), and it waits while a scheduled task runs. Generating subtitles stays nightly.</div>
+          </div>
+          <div class="inputContainer" id="NewItemsOptions">
+            <label class="inputLabel inputLabelUnfocused" for="NewItemsDelayMinutes">Wait after the last video is added (minutes)</label>
+            <input id="NewItemsDelayMinutes" type="number" min="1" max="1440" step="1" is="emby-input" />
+            <div class="fieldDescription">Default 10 (1 to 1440). Each new video starts the wait over, so a whole season being filed is handled in one go.</div>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
@@ -1049,6 +1061,7 @@
           var checkingWhole = page.querySelector('#CheckWholeFile').checked;
           var queued = lastResults.some(function (r) { return r.WholeFileRequested; });
           page.querySelector('#GenerateOptions').hidden = !generating;
+          page.querySelector('#NewItemsOptions').hidden = !page.querySelector('#HandleNewItems').checked;
           page.querySelector('#WholeFileOptions').hidden = !checkingWhole;
           page.querySelector('#TranscriptHoursBox').hidden = !generating && !checkingWhole;
           page.querySelector('#GenerateNow').hidden = !generating && !checkingWhole && !queued;
@@ -1090,6 +1103,8 @@
             page.querySelector('#LocalServiceUrl').value = config.LocalServiceUrl || '';
             page.querySelector('#MaxSubtitlesPerRun').value = config.MaxSubtitlesPerRun || 50;
             page.querySelector('#FindMissing').checked = config.FindMissing !== false;
+            page.querySelector('#HandleNewItems').checked = config.HandleNewItems !== false;
+            page.querySelector('#NewItemsDelayMinutes').value = config.NewItemsDelayMinutes == null ? 10 : config.NewItemsDelayMinutes;
             page.querySelector('#GenerateMissing').checked = config.GenerateMissing === true;
             page.querySelector('#MaxGeneratedPerNight').value = config.MaxGeneratedPerNight == null ? 20 : config.MaxGeneratedPerNight;
             page.querySelector('#MaxGenerateHours').value = config.MaxGenerateHours == null ? 4 : config.MaxGenerateHours;
@@ -1127,6 +1142,9 @@
             config.LocalServiceUrl = page.querySelector('#LocalServiceUrl').value.trim();
             config.MaxSubtitlesPerRun = Math.min(5000, Math.max(1, parseInt(page.querySelector('#MaxSubtitlesPerRun').value, 10) || 50));
             config.FindMissing = page.querySelector('#FindMissing').checked;
+            config.HandleNewItems = page.querySelector('#HandleNewItems').checked;
+            var newDelay = parseInt(page.querySelector('#NewItemsDelayMinutes').value, 10);
+            config.NewItemsDelayMinutes = isNaN(newDelay) ? 10 : Math.max(1, Math.min(1440, newDelay));
             config.GenerateMissing = page.querySelector('#GenerateMissing').checked;
             var perNight = parseInt(page.querySelector('#MaxGeneratedPerNight').value, 10);
             config.MaxGeneratedPerNight = isNaN(perNight) ? 20 : Math.max(0, Math.min(200, perNight));

@@ -168,6 +168,21 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool CountImageSubtitles { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether videos are handled soon after they are added to the library (on by
+    /// default): once nothing new has been added for <see cref="NewItemsDelayMinutes"/>, their subtitle files are checked
+    /// and missing subtitles searched for, as the nightly tasks would, within the same limits. A new subtitle file beside
+    /// a video is checked the same way. Generating subtitles stays nightly. Like everything else, nothing happens on a
+    /// new install until the settings page has been saved once.
+    /// </summary>
+    public bool HandleNewItems { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets how many minutes after the last video was added new videos are handled (1 to 1440; 10 by default),
+    /// so a season being filed is handled in one go.
+    /// </summary>
+    public int NewItemsDelayMinutes { get; set; } = 10;
+
     // ---- Advanced ----
 
     /// <summary>Gets or sets how many videos one search run looks for subtitles for at most.</summary>

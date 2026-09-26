@@ -68,6 +68,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Bridge.SpeechBridgeService>();
         serviceCollection.AddHostedService<Bridge.SpeechBridgeHost>();
 
+        // The nightly tasks share the gate; handling new videos and restoring all originals each need it alone. New videos
+        // are queued from Jellyfin's item events and handled after a quiet delay.
+        serviceCollection.AddSingleton<RunGate>();
+        serviceCollection.AddHostedService<NewItemsHost>();
+
         serviceCollection.AddSingleton(sp => new SubtitleFinder(sp.GetRequiredService<ResultStore>(), new DownloadLedger(Path.Combine(DataFolder(sp), "downloads.json"))));
     }
 

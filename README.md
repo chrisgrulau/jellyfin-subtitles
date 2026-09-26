@@ -89,6 +89,11 @@ when none can be found** or **Check whole file for doubtful subtitles**, or pick
 makes subtitles from a full transcript for videos the search found nothing for, and compares doubtful subtitles with a
 full transcript; see below.
 
+New videos don't wait for the night: a few minutes after films or episodes are added (10 by default, counted from the
+last one, so a whole season is handled together), their subtitles are checked and missing ones searched for, within the
+same limits (**Handle new videos soon after they're added**, on by default). A subtitle file that appears beside a
+video is checked the same way. Generating subtitles stays nightly.
+
 All three tasks work on every film and show library unless you untick some under **Libraries** on the settings page
 (for example anime or children's libraries).
 

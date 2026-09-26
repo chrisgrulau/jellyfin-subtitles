@@ -848,6 +848,13 @@ public sealed class SubtitleProcessor
         _results.Remove(id);
     }
 
+    /// <summary>
+    /// Whether the plugin has any result for a subtitle file (checked, or added by it).
+    /// </summary>
+    /// <param name="subtitlePath">The file.</param>
+    /// <returns><c>true</c> if it has seen it.</returns>
+    public bool Knows(string subtitlePath) => _results.ForPath(subtitlePath) is not null;
+
     /// <summary>Gets whether any subtitle has been checked yet (an install that has run before counts as set up).</summary>
     public bool HasResults => _results.All().Count > 0;
 
