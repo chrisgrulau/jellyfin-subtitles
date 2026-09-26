@@ -157,4 +157,17 @@ public class PluginConfiguration : BasePluginConfiguration
     /// when off, such disagreements go to review.
     /// </summary>
     public bool AgreementDecides { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the family's AI plugin is asked when the audio check can't decide because
+    /// the subtitle's wording differs from what is said (a translation, a paraphrase, dense dialogue). It pairs heard
+    /// phrases with subtitle lines by meaning; the pairs must still agree on one timing. Only if the AI plugin is
+    /// installed and allows Subtitles; its spending limits apply.
+    /// </summary>
+    public bool UseAi { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the most AI checks in one run of a task.
+    /// </summary>
+    public int MaxAiChecksPerRun { get; set; } = 20;
 }

@@ -32,7 +32,8 @@ public sealed record SubtitleJob(Guid ItemId, string Name, string VideoPath, str
 /// <param name="Timing">Timing corrections (shift, frame rate, overlaps, brief lines).</param>
 /// <param name="Text">Wording changes (merged repeats, removed sound descriptions).</param>
 /// <param name="Cleanup">Clean-up settings.</param>
-public sealed record Policies(ChangePolicy Timing, ChangePolicy Text, CleanupSettings Cleanup);
+/// <param name="Matcher">Pairs heard phrases with subtitle lines by meaning when exact words can't settle the timing (optional).</param>
+public sealed record Policies(ChangePolicy Timing, ChangePolicy Text, CleanupSettings Cleanup, Sync.ILineMatcher? Matcher = null);
 
 /// <summary>
 /// Checks one subtitle and applies (or proposes) a timing correction according to the timing policy; applies or undoes
@@ -162,7 +163,7 @@ public sealed class SubtitleProcessor
             return Save(result with { Status = ResultStatus.Failed, Explanation = "Not a readable text subtitle." });
         }
 
-        var outcome = await new SyncCheck(audio, speech, refine: speech is not null)
+        var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;

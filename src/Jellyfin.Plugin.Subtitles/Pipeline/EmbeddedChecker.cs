@@ -119,7 +119,7 @@ public sealed class EmbeddedChecker
             return Save(result with { Status = ResultStatus.Failed, Explanation = "The " + track + " couldn't be read as text subtitles." });
         }
 
-        var outcome = await new SyncCheck(audio, speech, refine: speech is not null)
+        var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;

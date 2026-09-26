@@ -103,11 +103,12 @@ public static partial class TranscriptAligner
     /// </summary>
     /// <param name="anchors">The anchors.</param>
     /// <param name="wordLag">The lag to subtract (<see cref="WordLag"/> for real transcripts).</param>
+    /// <param name="minimumAnchors">The fewest agreeing anchors that count (fewer for anchors matched by meaning).</param>
     /// <returns>The correction.</returns>
-    public static SyncModel Solve(IReadOnlyList<Anchor> anchors, double wordLag = WordLag)
+    public static SyncModel Solve(IReadOnlyList<Anchor> anchors, double wordLag = WordLag, int minimumAnchors = MinimumAnchors)
     {
         ArgumentNullException.ThrowIfNull(anchors);
-        if (anchors.Count < MinimumAnchors)
+        if (anchors.Count < minimumAnchors)
         {
             return new SyncModel(SyncStatus.Unreliable, 1, 0, 0, [], string.Create(CultureInfo.InvariantCulture, $"Only {anchors.Count} words could be matched between the subtitles and the audio; they may be for something else."));
         }
@@ -143,8 +144,8 @@ public static partial class TranscriptAligner
 
         var b = best!.Value;
         var share = b.Agreeing.Count / (double)anchors.Count;
-        var confidence = Math.Clamp(share * Math.Min(1, b.Agreeing.Count / (3.0 * MinimumAnchors)), 0, 1);
-        if (b.Agreeing.Count < MinimumAnchors || share < 0.4)
+        var confidence = Math.Clamp(share * Math.Min(1, b.Agreeing.Count / (3.0 * minimumAnchors)), 0, 1);
+        if (b.Agreeing.Count < minimumAnchors || share < 0.4)
         {
             return new SyncModel(SyncStatus.Unreliable, 1, 0, confidence, [], string.Create(CultureInfo.InvariantCulture, $"The matched words don't agree on one timing ({b.Agreeing.Count} of {anchors.Count} agree); the subtitles may be for another cut."));
         }

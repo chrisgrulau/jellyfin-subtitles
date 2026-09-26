@@ -106,6 +106,16 @@ lines them up with the local-service word times the synchroniser was calibrated 
 - Timing fixes: automatic by default. Text changes: review by default; never silent.
 - A subtitle line is flagged only when the transcript is confident **and** the difference is meaningful (names, numbers,
   negations, missing lines). With the AI plugin installed, it judges meaning vs wording.
+- Lines matched by meaning (stage 3 of the audio check):
+  - **When:** speech-to-text heard at least 40 words, but exact three-word matches couldn't settle the timing.
+  - **What the line matcher gets:** the heard words grouped into phrases (split at pauses of 0.7 s, sentence ends, or
+    every 14 words), and the subtitle lines within 150 s of each heard stretch (at most 300). The AI plugin is the
+    matcher, with purpose `subtitles.lines` and at most `MaxAiChecksPerRun` questions per task run.
+  - **What it answers:** "same", with pairs; "different"; or "unsure".
+  - **Pairs:** each pair must name an offered phrase and line and neither may be reused. Each becomes an anchor (line
+    start against phrase start), and the usual solver needs at least 6 of them agreeing within 0.5 s on one shift and
+    frame-rate ratio. Pairs that don't agree change nothing.
+  - **"Different":** confirms "another language / something else".
 - Agreement between independent sources outweighs a single model's confidence (default; can be switched to review).
 - Confidence is not comparable across models, so thresholds are per model (starting points: Deepgram word confidence
   ≥ 0.90 over a line; Whisper average log-probability ≥ −0.3 with compression-ratio and no-speech guards) and

@@ -300,6 +300,18 @@
               </label>
               <div class="fieldDescription checkboxFieldDescription">When off, any disagreement is held for your review, even when independent sources agree.</div>
             </div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="UseAi" type="checkbox" is="emby-checkbox" />
+                <span>Ask the AI plugin when the wording differs from what is said</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">When speech is heard but the subtitle's words don't match it (a translation, a paraphrase, dense dialogue), the Shoal AI plugin pairs what is said with subtitle lines by meaning; those pairs must still agree on one timing. Sends a few minutes of heard phrases and nearby subtitle lines, nothing else. Only if the AI plugin is installed and allows Subtitles; its spending limits apply.</div>
+            </div>
+            <div class="inputContainer">
+              <label class="inputLabel inputLabelUnfocused" for="MaxAiChecksPerRun">AI checks per run (at most)</label>
+              <input id="MaxAiChecksPerRun" type="number" is="emby-input" min="0" max="500" step="1" />
+              <div class="fieldDescription">Each is a fraction of a cent to a few cents, depending on the model.</div>
+            </div>
           </details>
 
           <div style="margin-top:2em">
@@ -586,6 +598,8 @@
             loadDeepgram(false);
             page.querySelector('#SelfCalibration').checked = config.SelfCalibration;
             page.querySelector('#AgreementDecides').checked = config.AgreementDecides;
+            page.querySelector('#UseAi').checked = config.UseAi !== false;
+            page.querySelector('#MaxAiChecksPerRun').value = config.MaxAiChecksPerRun == null ? 20 : config.MaxAiChecksPerRun;
             var cleanup = config.Cleanup || {};
             page.querySelector('#RemoveAdverts').checked = cleanup.RemoveAdverts;
             page.querySelector('#RemoveSoundDescriptions').checked = cleanup.RemoveSoundDescriptions;
@@ -640,6 +654,9 @@
             config.DeepgramBalance = page.querySelector('#DeepgramBalance').value;
             config.SelfCalibration = page.querySelector('#SelfCalibration').checked;
             config.AgreementDecides = page.querySelector('#AgreementDecides').checked;
+            config.UseAi = page.querySelector('#UseAi').checked;
+            var aiChecks = parseInt(page.querySelector('#MaxAiChecksPerRun').value, 10);
+            config.MaxAiChecksPerRun = isNaN(aiChecks) ? 20 : Math.max(0, Math.min(500, aiChecks));
             var cleanup = config.Cleanup = config.Cleanup || {};
             cleanup.RemoveAdverts = page.querySelector('#RemoveAdverts').checked;
             cleanup.RemoveSoundDescriptions = page.querySelector('#RemoveSoundDescriptions').checked;
