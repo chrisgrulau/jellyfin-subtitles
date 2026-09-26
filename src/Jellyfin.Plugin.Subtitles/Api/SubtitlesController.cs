@@ -436,6 +436,19 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
+    /// Whether the built-in speech-to-text can run on this server, checked before anything is downloaded.
+    /// </summary>
+    /// <returns>The status.</returns>
+    [HttpGet("BuiltIn")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<BuiltInStatus> BuiltInStatusOf()
+        => new BuiltInStatus(
+            _builtIn.Platform is not null && _builtIn.Problem is null,
+            _builtIn.Platform is null
+                ? "The built-in speech-to-text has no build for this server's system. Use a local speech-to-text service or a cloud service instead."
+                : _builtIn.Problem);
+
+    /// <summary>
     /// Checks that a speech-to-text service answers, by sending it one second of near-silence (for a paid service this
     /// costs a small fraction of a cent).
     /// </summary>
@@ -528,6 +541,13 @@ public sealed record TestRequest
 /// <param name="Ok">Whether the service answered.</param>
 /// <param name="Message">What to show (keys removed).</param>
 public sealed record TestResult(bool Ok, string Message);
+
+/// <summary>
+/// Whether the built-in speech-to-text can run on this server.
+/// </summary>
+/// <param name="Available">Whether it can be downloaded and run.</param>
+/// <param name="Problem">Why not, in plain language.</param>
+public sealed record BuiltInStatus(bool Available, string? Problem);
 
 /// <summary>
 /// This month's spending on paid services.

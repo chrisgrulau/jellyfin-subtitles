@@ -81,6 +81,11 @@ public static class SpeechToTextFactory
                         return (null, "The built-in speech-to-text has no build for this server's system. Choose a local service or a cloud provider.");
                     }
 
+                    if (builtIn.Problem is { } systemProblem)
+                    {
+                        return (null, systemProblem);
+                    }
+
                     return BuiltInSource.ModelName(model) is { } builtInModel
                         ? (builtIn.Create(builtInModel), null)
                         : (null, "Unknown built-in model; choose base or small.");

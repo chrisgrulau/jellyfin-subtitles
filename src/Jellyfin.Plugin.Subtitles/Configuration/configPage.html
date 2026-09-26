@@ -165,6 +165,7 @@
           <div class="subs-service" data-service="builtin">
             <h4>Built-in</h4>
             <div class="fieldDescription">Runs on this server's CPU. Model <strong>base</strong> (the default; about 90 MB with the program) or <strong>small</strong> (more accurate, slower; about 200 MB), set in the Model box above. Downloaded the first time it's needed, or when you press Test.</div>
+            <div id="BuiltInProblem" class="subs-warning" hidden></div>
             <div class="subs-key"></div>
           </div>
           <div class="subs-service" data-service="local">
@@ -509,6 +510,18 @@
             }, function () { Dashboard.alert('That couldn\'t be done.'); });
         });
 
+        // Whether this server can run the built-in program at all (checked before anything is downloaded)
+        function loadBuiltIn() {
+          return ApiClient.getJSON(ApiClient.getUrl('Subtitles/BuiltIn')).then(function (b) {
+            var box = page.querySelector('#BuiltInProblem');
+            box.textContent = b.Problem || '';
+            box.hidden = !b.Problem;
+            var allow = page.querySelector('#AllowBuiltInDownload');
+            allow.disabled = !b.Available;
+            if (!b.Available) { allow.checked = false; }
+          }, function () {});
+        }
+
         function loadKeys() {
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Keys')).then(renderKeys);
         }
@@ -800,6 +813,7 @@
             renderTiers(config);
             refreshWarnings();
             loadSpending();
+            loadBuiltIn();
             return loadKeys();
           }).then(function () { Dashboard.hideLoadingMsg(); });
         });

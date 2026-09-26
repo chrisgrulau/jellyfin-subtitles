@@ -30,6 +30,9 @@ public sealed class BuiltInHost : IDisposable
         _work = Path.Combine(folder, "work");
         Installer = installer ?? new BuiltInInstaller(folder);
         Platform = platform ?? BuiltInSource.CurrentPlatform();
+
+        // A platform given by a test is taken as able to run the program
+        Problem = platform is null && Platform is not null ? BuiltInSystem.ProblemHere() : null;
         ClearWork();
     }
 
@@ -38,6 +41,12 @@ public sealed class BuiltInHost : IDisposable
 
     /// <summary>Gets this server's platform, or <c>null</c> if there is no build for it.</summary>
     public string? Platform { get; }
+
+    /// <summary>
+    /// Gets why this server can't run the built-in program although there is a build for its platform (musl, or a glibc
+    /// older than the build needs), or <c>null</c> if it can. When set, nothing is downloaded.
+    /// </summary>
+    public string? Problem { get; init; }
 
     /// <summary>
     /// Creates the service for a model.

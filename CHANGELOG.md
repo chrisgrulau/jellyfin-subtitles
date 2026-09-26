@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **SUB-22:** the built-in speech-to-text is no longer downloaded on servers that can't run it. On musl systems
+  (Alpine-based images) and with glibc older than 2.35, the settings page, Test and the nightly run say so plainly and
+  suggest a local or cloud service instead; nothing is downloaded.
+
 ## [0.9.0-alpha] - 2026-09-26
 
 ### Fixed
