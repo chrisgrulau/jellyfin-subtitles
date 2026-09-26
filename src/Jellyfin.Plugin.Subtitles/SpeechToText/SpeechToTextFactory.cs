@@ -39,8 +39,10 @@ public static class SpeechToTextFactory
     /// <param name="keys">The keys.</param>
     /// <param name="http">HTTP client.</param>
     /// <param name="builtIn">The built-in speech-to-text, if available.</param>
+    /// <param name="forSubtitles">Whether the transcript becomes subtitles: services are then asked for punctuation
+    /// (Deepgram) or segments with punctuation (OpenAI-compatible services) as well as word times.</param>
     /// <returns>The service, or why it can't be used.</returns>
-    public static (ISpeechToText? Service, string? Problem) Create(string provider, string model, string localAddress, bool paidAllowed, bool builtInAllowed, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn)
+    public static (ISpeechToText? Service, string? Problem) Create(string provider, string model, string localAddress, bool paidAllowed, bool builtInAllowed, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, bool forSubtitles = false)
     {
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(http);
@@ -61,14 +63,14 @@ public static class SpeechToTextFactory
                         return (null, "Enter the local service's address, e.g. http://localhost:8000/v1.");
                     }
 
-                    return (new OpenAiCompatibleSpeechToText(http, Local, address, keys.Get(Local), model), null);
+                    return (new OpenAiCompatibleSpeechToText(http, Local, address, keys.Get(Local), model, forSubtitles), null);
                 case OpenAi:
                     return keys.Get(OpenAi) is { } openAiKey
-                        ? (new OpenAiCompatibleSpeechToText(http, OpenAi, OpenAiCompatibleSpeechToText.OpenAiAddress, openAiKey, model), null)
+                        ? (new OpenAiCompatibleSpeechToText(http, OpenAi, OpenAiCompatibleSpeechToText.OpenAiAddress, openAiKey, model, forSubtitles), null)
                         : (null, "Add an OpenAI API key first.");
                 case Deepgram:
                     return keys.Get(Deepgram) is { } deepgramKey
-                        ? (new DeepgramSpeechToText(http, deepgramKey, model), null)
+                        ? (new DeepgramSpeechToText(http, deepgramKey, model, forSubtitles), null)
                         : (null, "Add a Deepgram API key first.");
                 case BuiltIn:
                     if (!builtInAllowed)

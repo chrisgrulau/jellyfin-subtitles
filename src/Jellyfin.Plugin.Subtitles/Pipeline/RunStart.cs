@@ -100,9 +100,10 @@ internal sealed class RunStart : IDisposable
     /// <param name="tier">The use (for example <see cref="PluginConfiguration.SyncSnippets"/>).</param>
     /// <param name="purpose">What the calls are for (<c>subtitles.sync</c> …).</param>
     /// <param name="problem">Why no service is used, if none.</param>
+    /// <param name="forSubtitles">Whether the transcript becomes subtitles (full transcripts).</param>
     /// <returns>The service, or <c>null</c>.</returns>
-    public ISpeechToText? Speech(PluginConfiguration config, TranscriptionTier? tier, string purpose, out string? problem)
-        => SpeechSelection.SpeechFor(config, tier, _keys, Http, _builtIn, _spending, purpose, out problem);
+    public ISpeechToText? Speech(PluginConfiguration config, TranscriptionTier? tier, string purpose, out string? problem, bool forSubtitles = false)
+        => SpeechSelection.SpeechFor(config, tier, _keys, Http, _builtIn, _spending, purpose, out problem, forSubtitles);
 
     /// <inheritdoc />
     public void Dispose() => Http.Dispose();

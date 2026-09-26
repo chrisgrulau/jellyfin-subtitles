@@ -23,7 +23,23 @@ public sealed record TranscribedWord(string Text, double Start, double End, doub
 /// <param name="Provider">The provider id.</param>
 /// <param name="Model">The model used.</param>
 /// <param name="AudioSeconds">How much audio was sent (what paid providers charge for).</param>
-public sealed record Transcript(IReadOnlyList<TranscribedWord> Words, string? Language, string Provider, string Model, double AudioSeconds);
+public sealed record Transcript(IReadOnlyList<TranscribedWord> Words, string? Language, string Provider, string Model, double AudioSeconds)
+{
+    /// <summary>
+    /// Gets the stretches of text the service heard, with their punctuation, when it was asked for them and gives them
+    /// (OpenAI-compatible services' segments); empty otherwise. Full transcripts use them where the words come without
+    /// punctuation, or without times.
+    /// </summary>
+    public IReadOnlyList<TranscribedSegment> Segments { get; init; } = [];
+}
+
+/// <summary>
+/// A stretch of recognised text.
+/// </summary>
+/// <param name="Text">The text, with punctuation.</param>
+/// <param name="Start">When it starts, in seconds from the start of the audio sent.</param>
+/// <param name="End">When it ends, in seconds.</param>
+public sealed record TranscribedSegment(string Text, double Start, double End);
 
 /// <summary>
 /// A speech-to-text service.

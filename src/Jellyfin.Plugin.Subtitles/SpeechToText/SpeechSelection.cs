@@ -43,8 +43,9 @@ internal static class SpeechSelection
     /// <param name="spending">Prices, ledger and exchange rates.</param>
     /// <param name="purpose">What the calls are for.</param>
     /// <param name="problem">Why no service is used, if none.</param>
+    /// <param name="forSubtitles">Whether the transcript becomes subtitles (see <see cref="SpeechToTextFactory.Create"/>).</param>
     /// <returns>The service, or <c>null</c>.</returns>
-    public static ISpeechToText? SpeechFor(PluginConfiguration config, TranscriptionTier? tier, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, Spending spending, string purpose, out string? problem)
+    public static ISpeechToText? SpeechFor(PluginConfiguration config, TranscriptionTier? tier, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, Spending spending, string purpose, out string? problem, bool forSubtitles = false)
     {
         ArgumentNullException.ThrowIfNull(spending);
         ArgumentNullException.ThrowIfNull(config);
@@ -56,7 +57,7 @@ internal static class SpeechSelection
 
         var limits = Spending.LimitsOf(config);
         var paid = SpeechToTextFactory.IsPaid(tier.Provider);
-        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, SpendingLimit.AllowsPaidUsage(limits.Overall), config.AllowBuiltInDownload, keys, http, builtIn);
+        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, SpendingLimit.AllowsPaidUsage(limits.Overall), config.AllowBuiltInDownload, keys, http, builtIn, forSubtitles);
         problem = why;
         return service is not null && paid ? new MeteredSpeechToText(service, ModelOf(tier.Provider, tier.Model), spending, limits, purpose) : service;
     }
