@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.Subtitles.Audio;
 using Jellyfin.Plugin.Subtitles.Audit;
 using Jellyfin.Plugin.Subtitles.Cleaning;
+using Jellyfin.Plugin.Subtitles.Discrepancy;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Formats;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
@@ -25,7 +26,8 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Language">The subtitle's language (three-letter code), if known.</param>
 /// <param name="Duration">The video's length.</param>
 /// <param name="AudioStream">Which audio stream to listen to (counting audio streams only).</param>
-public sealed record SubtitleJob(Guid ItemId, string Name, string VideoPath, string SubtitlePath, string? Language, TimeSpan Duration, int AudioStream);
+/// <param name="AudioLanguage">That audio stream's language tag, if known.</param>
+public sealed record SubtitleJob(Guid ItemId, string Name, string VideoPath, string SubtitlePath, string? Language, TimeSpan Duration, int AudioStream, string? AudioLanguage = null);
 
 /// <summary>
 /// The settings that decide what is applied and what waits for review.
@@ -59,6 +61,12 @@ public sealed class SubtitleProcessor
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _clock = clock ?? TimeProvider.System;
     }
+
+    /// <summary>
+    /// Gets confidence thresholds learned from subtitles known to be good (optional): a subtitle found in sync by
+    /// speech-to-text with nothing flagged adds its matched words (see <see cref="ConfidenceCalibration"/>).
+    /// </summary>
+    public ConfidenceCalibration? Calibration { get; init; }
 
     /// <summary>
     /// The latest results, newest first.
@@ -291,6 +299,12 @@ public sealed class SubtitleProcessor
             };
         }
 
+        if (Calibration is not null && outcome.Stage == WholeFileChecker.SpeechStage && status is ResultStatus.InSync or ResultStatus.Corrected
+            && result.Findings.Count == 0 && !document.TextSuspect && outcome.Transcripts.Count > 0)
+        {
+            Learn(document, status == ResultStatus.Corrected ? model.Map : t => t, outcome.Transcripts, Languages.ToTwoLetter(job.Language));
+        }
+
         if (!writes)
         {
             return Save(result);
@@ -376,6 +390,7 @@ public sealed class SubtitleProcessor
                 Fingerprint = written,
                 Changed = true,
                 Cleaned = counts,
+                Findings = [.. r.Findings.Where(f => !DiscrepancyReview.IsWholeFile(f) || DiscrepancyReview.StillOpen(edited, f))],
                 Time = _clock.GetUtcNow(),
             });
         }
@@ -472,14 +487,21 @@ public sealed class SubtitleProcessor
             throw new InvalidOperationException("Nothing is waiting for review for this subtitle.");
         }
 
+        if (r.Status != ResultStatus.Proposed && r.CleanupPending.Count == 0 && !r.Findings.Any(f => f.Suggestion is not null))
+        {
+            throw new InvalidOperationException("Only lines with nothing heard are left: remove or decline them one at a time.");
+        }
+
         var bytes = File.ReadAllBytes(r.SubtitlePath);
         var document = SubtitleReader.Read(bytes, r.SubtitlePath) ?? throw new InvalidOperationException("The subtitle can no longer be read.");
 
         // Suggested wording first (the lines are found by their text and time as the file has them now), then timing
         var reworded = 0;
+        var fixedLines = 0;
         if (r.Findings.Count > 0)
         {
-            (document, reworded) = WordingAudit.Apply(document, r.Findings);
+            (document, reworded) = WordingAudit.Apply(document, r.Findings.Where(f => !DiscrepancyReview.IsWholeFile(f)));
+            (document, fixedLines) = DiscrepancyReview.ApplyAll(document, r.Findings);
         }
 
         if (r.Status == ResultStatus.Proposed)
@@ -497,15 +519,26 @@ public sealed class SubtitleProcessor
                 cleanedCounts[kind] = cleanedCounts.GetValueOrDefault(kind) + n;
             }
 
+            if (reworded > 0)
+            {
+                cleanedCounts[RewordedKind] = cleanedCounts.GetValueOrDefault(RewordedKind) + reworded;
+            }
+
+            if (fixedLines > 0)
+            {
+                cleanedCounts[DiscrepancyReview.FixedKind] = cleanedCounts.GetValueOrDefault(DiscrepancyReview.FixedKind) + fixedLines;
+            }
+
+            // Lines with nothing heard are only removed one at a time, so they stay for review
             return Save(r with
             {
                 Status = r.Status == ResultStatus.Proposed ? ResultStatus.Corrected : r.Status,
                 Backup = r.Changed ? r.Backup ?? backup : backup,
                 Fingerprint = written,
                 Changed = true,
-                Cleaned = reworded > 0 ? new Dictionary<string, int>(cleanedCounts, StringComparer.Ordinal) { [RewordedKind] = cleanedCounts.GetValueOrDefault(RewordedKind) + reworded } : cleanedCounts,
+                Cleaned = cleanedCounts,
                 CleanupPending = new Dictionary<string, int>(),
-                Findings = [],
+                Findings = [.. r.Findings.Where(f => DiscrepancyReview.IsWholeFile(f) && f.Kind == DiscrepancyFinder.Extra && DiscrepancyReview.StillOpen(cleaned, f))],
                 Time = _clock.GetUtcNow(),
             });
         }
@@ -513,6 +546,95 @@ public sealed class SubtitleProcessor
         {
             throw new InvalidOperationException(ex.Message, ex);
         }
+    }
+
+    /// <summary>
+    /// Applies one finding (a suggested wording, a missing line added, or a line with nothing heard removed); the others
+    /// keep waiting. The first original is kept, so Undo brings it back.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="index">The finding's position in the result's list.</param>
+    /// <param name="time">The finding's time as the page shows it (to be sure it is the same finding).</param>
+    /// <returns>The updated result.</returns>
+    /// <exception cref="InvalidOperationException">No such finding, or its line changed since.</exception>
+    public SubtitleResult ApplyFinding(string id, int index, double time)
+    {
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var f = FindingAt(r, index, time);
+        var bytes = File.ReadAllBytes(r.SubtitlePath);
+        var document = SubtitleReader.Read(bytes, r.SubtitlePath) ?? throw new InvalidOperationException("The subtitle can no longer be read.");
+        SubtitleDocument changed;
+        string kind;
+        if (DiscrepancyReview.IsWholeFile(f))
+        {
+            var (done, problem) = DiscrepancyReview.ApplyOne(document, f);
+            changed = done ?? throw new InvalidOperationException(problem);
+            kind = DiscrepancyReview.FixedKind;
+        }
+        else
+        {
+            var (done, n) = f.Suggestion is null ? (document, 0) : WordingAudit.Apply(document, [f]);
+            changed = n > 0 ? done : throw new InvalidOperationException(f.Suggestion is null ? "There's no suggested wording for this line; open the editor instead." : "That line has changed since it was checked; open the editor instead.");
+            kind = RewordedKind;
+        }
+
+        try
+        {
+            var (backup, written) = _files.Replace(r.SubtitlePath, r.Fingerprint, SubtitleWriter.ToBytes(changed));
+            var counts = new Dictionary<string, int>(r.Cleaned, StringComparer.Ordinal);
+            counts[kind] = counts.GetValueOrDefault(kind) + 1;
+            return Save(r with
+            {
+                Backup = r.Changed ? r.Backup ?? backup : backup,
+                Fingerprint = written,
+                Changed = true,
+                Cleaned = counts,
+                Findings = [.. r.Findings.Where((_, i) => i != index)],
+                Time = _clock.GetUtcNow(),
+            });
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException(ex.Message, ex);
+        }
+    }
+
+    /// <summary>
+    /// Declines one finding: nothing is changed, and it no longer waits for review.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="index">The finding's position in the result's list.</param>
+    /// <param name="time">The finding's time as the page shows it.</param>
+    /// <returns>The updated result.</returns>
+    /// <exception cref="InvalidOperationException">No such finding.</exception>
+    public SubtitleResult DeclineFinding(string id, int index, double time)
+    {
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        FindingAt(r, index, time);
+        return Save(r with { Findings = [.. r.Findings.Where((_, i) => i != index)], Time = _clock.GetUtcNow() });
+    }
+
+    /// <summary>
+    /// Asks for a subtitle file to be compared whole with a full transcript of its video on the next run of the full
+    /// transcripts task (the request returns at once).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    /// <exception cref="InvalidOperationException">No such result, or not a subtitle file that can be compared.</exception>
+    public SubtitleResult RequestWholeFileCheck(string id)
+    {
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        if (r.Id.StartsWith(SubtitleGenerator.IdPrefix, StringComparison.Ordinal) || SubtitleGenerator.IsGenerated(r.SubtitlePath))
+        {
+            throw new InvalidOperationException("A generated subtitle is the transcript already: there's nothing to compare it with.");
+        }
+
+        if (r.Id.StartsWith("emb-", StringComparison.Ordinal) || r.Status is ResultStatus.NotFound or ResultStatus.TooLarge || !File.Exists(r.SubtitlePath))
+        {
+            throw new InvalidOperationException("Only a subtitle file beside its video can be checked whole.");
+        }
+
+        return r.WholeFileRequested ? r : Save(r with { WholeFileRequested = true });
     }
 
     /// <summary>
@@ -729,6 +851,32 @@ public sealed class SubtitleProcessor
 
     /// <summary>Gets what is wrong with the results file, if anything.</summary>
     public string? ResultsProblem => _results.Problem;
+
+    private static LineFinding FindingAt(SubtitleResult r, int index, double time)
+        => index >= 0 && index < r.Findings.Count && Math.Abs(r.Findings[index].Time - time) < 0.01
+            ? r.Findings[index]
+            : throw new InvalidOperationException("That finding has changed since the page was loaded; reload the results.");
+
+    // A subtitle found in sync by speech-to-text, with nothing flagged, teaches the confidence thresholds: its matched
+    // words, and which of them would have been flagged. Never stops a check.
+    private void Learn(SubtitleDocument document, Func<TimeSpan, TimeSpan> map, IReadOnlyList<(double Start, Transcript Transcript)> transcripts, string? language)
+    {
+        try
+        {
+            var words = transcripts.SelectMany(t => t.Transcript.Words.Select(w => w with { Start = w.Start + t.Start, End = w.End + t.Start })).OrderBy(w => w.Start).ToList();
+            var coverage = transcripts.Select(t => (t.Start, t.Start + TranscriptSynchroniser.SnippetLength.TotalSeconds)).ToList();
+            var report = DiscrepancyFinder.Find(document, words, t => map(TimeSpan.FromSeconds(t)).TotalSeconds, new DiscrepancyOptions { Language = language, Coverage = coverage });
+            if (report.Problem is null)
+            {
+                Calibration!.Add(transcripts[0].Transcript.Provider, transcripts[0].Transcript.Model, report.Samples);
+            }
+        }
+#pragma warning disable CA1031 // Learning is a by-product: it must never fail the check it learns from
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+        }
+    }
 
     private SubtitleResult Save(SubtitleResult result)
     {

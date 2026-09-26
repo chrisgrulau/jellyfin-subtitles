@@ -47,6 +47,7 @@ public sealed class SubtitleGenerator
     private readonly ResultStore _results;
     private readonly SubtitleFiles _files;
     private readonly TimeProvider _clock;
+    private readonly TranscriptCache? _cache;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitleGenerator"/> class.
@@ -54,11 +55,13 @@ public sealed class SubtitleGenerator
     /// <param name="results">Where results are kept (shared with the finder).</param>
     /// <param name="files">Safe file changes (a replaced generated subtitle is copied to the originals folder first).</param>
     /// <param name="clock">Clock.</param>
-    public SubtitleGenerator(ResultStore results, SubtitleFiles files, TimeProvider? clock = null)
+    /// <param name="cache">Full transcripts kept for reuse (shared with the whole-file check), if any.</param>
+    public SubtitleGenerator(ResultStore results, SubtitleFiles files, TimeProvider? clock = null, TranscriptCache? cache = null)
     {
         _results = results ?? throw new ArgumentNullException(nameof(results));
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _clock = clock ?? TimeProvider.System;
+        _cache = cache;
     }
 
     /// <summary>Gets whether results can be recorded now (the results file is readable).</summary>
@@ -245,13 +248,18 @@ public sealed class SubtitleGenerator
         }
 
         var limit = TimeLimit(job.Duration);
-        FullTranscript full;
+        var key = TranscriptCache.KeyForFile(job.VideoPath, job.AudioStream, Languages.ToTwoLetter(job.Language), setup ?? string.Empty);
+        var full = _cache?.Get(key);
         using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
             timeout.CancelAfter(limit);
             try
             {
-                full = await FullTranscriber.TranscribeAsync(audio, job.Duration, speech, Languages.ToTwoLetter(job.Language), timeout.Token).ConfigureAwait(false);
+                if (full is null)
+                {
+                    full = await FullTranscriber.TranscribeAsync(audio, job.Duration, speech, Languages.ToTwoLetter(job.Language), timeout.Token).ConfigureAwait(false);
+                    _cache?.Put(key, full);
+                }
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -335,16 +343,33 @@ public sealed class SubtitleGenerator
     /// <param name="progress">Progress, 0 to 100.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>What the run did.</returns>
-    public async Task<GenerationRun> RunAsync(IReadOnlyList<FindJob> jobs, Func<FindJob, IAudioSource> audioFor, ISpeechToText speech, string setup, TimeSpan? budget, Action<FindJob, SubtitleResult>? recorded, IProgress<double>? progress, CancellationToken cancellationToken)
+    public Task<GenerationRun> RunAsync(IReadOnlyList<FindJob> jobs, Func<FindJob, IAudioSource> audioFor, ISpeechToText speech, string setup, TimeSpan? budget, Action<FindJob, SubtitleResult>? recorded, IProgress<double>? progress, CancellationToken cancellationToken)
+        => RunAsync(jobs, audioFor, speech, setup, budget, null, recorded, progress, cancellationToken);
+
+    /// <summary>
+    /// Generates subtitles for the chosen videos in turn, with a time budget counted from when the night's run began (it
+    /// is shared with the whole-file checks).
+    /// </summary>
+    /// <param name="jobs">The videos (see <see cref="Choose"/>).</param>
+    /// <param name="audioFor">Each video's audio.</param>
+    /// <param name="speech">The "Full transcript" speech-to-text service.</param>
+    /// <param name="setup">The service and model (see <see cref="SetupOf"/>).</param>
+    /// <param name="budget">The night's time budget, or <c>null</c> for none.</param>
+    /// <param name="began">When the night's run began, or <c>null</c> for now.</param>
+    /// <param name="recorded">Told about each result recorded.</param>
+    /// <param name="progress">Progress, 0 to 100.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What the run did.</returns>
+    public async Task<GenerationRun> RunAsync(IReadOnlyList<FindJob> jobs, Func<FindJob, IAudioSource> audioFor, ISpeechToText speech, string setup, TimeSpan? budget, DateTimeOffset? began, Action<FindJob, SubtitleResult>? recorded, IProgress<double>? progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(jobs);
         ArgumentNullException.ThrowIfNull(audioFor);
-        var began = _clock.GetUtcNow();
+        var start = began ?? _clock.GetUtcNow();
         int generated = 0, noSpeech = 0, failed = 0;
         for (var i = 0; i < jobs.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (budget is { } b && _clock.GetUtcNow() - began >= b)
+            if (budget is { } b && _clock.GetUtcNow() - start >= b)
             {
                 return new GenerationRun(generated, noSpeech, failed, jobs.Count - i, b, null);
             }
@@ -479,7 +504,12 @@ public sealed class SubtitleGenerator
     /// </summary>
     public void FlushResults() => _results.Flush();
 
-    private static string ServiceName(string provider) => provider switch
+    /// <summary>
+    /// Names a speech-to-text service for the results list.
+    /// </summary>
+    /// <param name="provider">The provider id.</param>
+    /// <returns>For example "the built-in speech-to-text".</returns>
+    internal static string ServiceName(string provider) => provider switch
     {
         SpeechToTextFactory.BuiltIn => "the built-in speech-to-text",
         SpeechToTextFactory.Local => "the local service",
