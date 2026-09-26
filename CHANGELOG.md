@@ -19,6 +19,17 @@ All notable changes to this project are documented here. The format follows
     setting is read with the shared "setting, or USD" rule.
   - The settings page offers the currencies the server sends with the spending summary (`Currencies`), instead of its
     own copy of the list.
+- **SUB-31:** the code is reorganised without changing what it does, except as noted:
+  - Choosing the speech-to-text service moved out of the sync task into its own class; the change policies are read
+    from the settings; one helper starts every run (ffmpeg, HTTP client, exchange rates, speech-to-text service).
+  - The library is walked by one class for the sync, embedded and find tasks, with one rule for "already has a subtitle
+    in this language". An embedded track is now checked when the only subtitle file beside the video in its language is
+    forced-only, or picture-based while **Count picture-based subtitles** is off; before, any subtitle file there skipped
+    it.
+  - Swapping the Deepgram key for a limited one lives with the other Deepgram account calls.
+  - Result ids are worked out by the results store itself (the same ids as before, so stored results and their undo
+    records carry over).
+  - The entry point other plugins call for transcripts forwards to a registered service.
 
 ### Fixed
 

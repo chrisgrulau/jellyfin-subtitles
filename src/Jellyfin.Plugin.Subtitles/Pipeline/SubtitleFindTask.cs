@@ -1,11 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.Subtitles.Audio;
 using Jellyfin.Plugin.Subtitles.Candidates;
 using Jellyfin.Plugin.Subtitles.Configuration;
@@ -114,16 +112,14 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             return;
         }
 
-        var ffmpeg = Audio.FfmpegLocator.Resolve(_encoder.EncoderPath);
-        if (ffmpeg is null)
+        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken).ConfigureAwait(false);
+        if (run is null)
         {
             LogNoFfmpeg(_logger);
             return;
         }
 
-        using var http = _http.CreateClient();
-        http.Timeout = TimeSpan.FromMinutes(3);
-        await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
+        var ffmpeg = run.Ffmpeg;
         if (!_finder.ResultsReadable)
         {
             LogNoResults(_logger, _finder.ResultsProblem ?? "unknown");
@@ -137,8 +133,8 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             return;
         }
 
-        var speech = SubtitleSyncTask.SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.find", out var problem);
-        var policies = SubtitleSyncTask.RunPolicies(config) with { Auditor = null };
+        var speech = run.Speech(config, config.SyncSnippets, "subtitles.find", out var problem);
+        var policies = RunStart.PoliciesFor(config) with { Auditor = null };
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
@@ -152,7 +148,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         var combined = subdlKey is null ? null : new CombinedSource([jellyfin, new SubDlSource(subdlHttp, subdlKey, IdsOf)]);
         ICandidateSource source = combined ?? (ICandidateSource)jellyfin;
         // Specials (season 0) last: subtitle sites rarely have them, and they'd use up the run
-        var jobs = Missing(SpendingLimit.EffectiveLanguages(config.Languages), config.CountImageSubtitles)
+        var jobs = new LibraryVideos(_library, _media).Missing(LanguageSettings.EffectiveLanguages(config.Languages), config.CountImageSubtitles)
             .Where(_finder.NeedsSearch)
             .OrderBy(j => j.Video.Season == 0)
             .Take(Math.Max(1, config.MaxFindsPerRun))
@@ -226,40 +222,6 @@ public sealed partial class SubtitleFindTask : IScheduledTask
                 return new VideoIds(movie.GetProviderId(MetadataProvider.Imdb), movie.GetProviderId(MetadataProvider.Tmdb), null, null);
             default:
                 return null;
-        }
-    }
-
-    private IEnumerable<FindJob> Missing(IReadOnlyList<string> languages, bool countImages)
-    {
-        var items = _library.GetItemList(new InternalItemsQuery
-        {
-            IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
-            IsVirtualItem = false,
-            Recursive = true,
-        });
-        foreach (var item in items)
-        {
-            if (item is not Video video || string.IsNullOrEmpty(video.Path) || video.RunTimeTicks is not > 0 || !File.Exists(video.Path))
-            {
-                continue;
-            }
-
-            var streams = _media.GetMediaStreams(item.Id);
-            var audio = streams.Where(s => s.Type == MediaStreamType.Audio).OrderBy(s => s.Index).Select(s => ((string?)s.Language, s.IsDefault)).ToList();
-            if (audio.Count == 0)
-            {
-                continue;
-            }
-
-            var have = streams.Where(s => s.Type == MediaStreamType.Subtitle && FindRules.Counts(s.IsForced, s.IsTextSubtitleStream, countImages))
-                .Select(s => Languages.ToTwoLetter(s.Language)).OfType<string>().ToHashSet(StringComparer.Ordinal);
-            foreach (var language in languages)
-            {
-                if (Languages.ToTwoLetter(language) is { } two && !have.Contains(two))
-                {
-                    yield return new FindJob(item.Id, item.Name, video.Path, VideoFactsReader.Read(video), language, TimeSpan.FromTicks(video.RunTimeTicks!.Value), AudioChoice.For(audio, language));
-                }
-            }
         }
     }
 

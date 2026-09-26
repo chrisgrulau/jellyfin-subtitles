@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Authentication;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Subtitles.Audio;
@@ -264,4 +265,26 @@ public sealed class FinderTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => new SubtitleProcessor(store, new SubtitleFiles(Path.Combine(_dir, "originals"))).Undo(result.Id));
         Assert.True(File.Exists(result.SubtitlePath));
     }
+
+    // SUB-12: the provider's own allowance, or a failed sign-in, stops the run for today (classified: see SubDlTests)
+    [Fact]
+    public void Provider_limits_and_sign_in_failures_stop_the_run()
+    {
+        Assert.True(FindRules.StopsTheRun(ProviderFailures.Classify(new RateLimitExceededException("OpenSubtitles download limit reached"))!));
+        Assert.True(FindRules.StopsTheRun(ProviderFailures.Classify(new AuthenticationException("login failed"))!));
+        Assert.False(FindRules.StopsTheRun(new IOException("disk")));
+    }
+
+    // SUB-13: forced-only tracks never count; picture-based ones by setting
+    [Theory]
+    [InlineData(false, true, true, true)]
+    [InlineData(true, true, true, false)]
+    [InlineData(false, false, true, true)]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, false, true, false)]
+    public void Which_existing_tracks_count_as_having_subtitles(bool forced, bool text, bool countImages, bool counts)
+        => Assert.Equal(counts, FindRules.Counts(forced, text, countImages));
+
+    // Named like the OpenSubtitles plugin's exception, which is classified by name where it enters the plugin
+    private sealed class RateLimitExceededException(string message) : Exception(message);
 }

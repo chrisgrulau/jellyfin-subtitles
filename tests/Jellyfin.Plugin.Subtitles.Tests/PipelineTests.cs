@@ -590,4 +590,51 @@ public sealed class PipelineTests : IDisposable
         Assert.Equal(6, recent.Count);
         Assert.Contains(recent, r => r.Id == "old");
     }
+
+    // SUB-04: a huge local file is recorded once and not read again until it changes
+    [Fact]
+    public async Task A_huge_local_file_is_marked_too_large_without_being_read()
+    {
+        var path = Path.Combine(_dir, "Film.en.srt");
+        await using (var f = File.Create(path))
+        {
+            f.SetLength(SubtitleReader.MaxBytes + 1);
+        }
+
+        var processor = new SubtitleProcessor(new ResultStore(Path.Combine(_dir, "results.json")), new SubtitleFiles(Path.Combine(_dir, "originals")));
+        var job = new SubtitleJob(Guid.NewGuid(), "Invented Film", Path.Combine(_dir, "Film.mkv"), path, "eng", TimeSpan.FromMinutes(90), 0);
+
+        var result = await processor.ProcessAsync(job, null!, null, new Policies(ChangePolicy.Automatic, ChangePolicy.Review, new CleanupSettings()), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ResultStatus.TooLarge, result.Status);
+        var fingerprint = await SubtitleFiles.FingerprintFileAsync(path, TestContext.Current.CancellationToken);
+        Assert.StartsWith("large-", fingerprint, StringComparison.Ordinal);
+        Assert.False(processor.NeedsCheck(path, fingerprint));
+
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(5));
+        Assert.True(processor.NeedsCheck(path, await SubtitleFiles.FingerprintFileAsync(path, TestContext.Current.CancellationToken)));
+    }
+
+    // SUB-31: result ids are hashed by the store itself, and must stay the ids already stored (else every result, with its
+    // undo record, is orphaned): the same as the old algorithm (the first 16 characters of the path's backup name)
+    [Theory]
+    [InlineData("/media/Films/Invented Film (2024)/Invented Film.en.srt", "fa2c07e20dbcc5e7")]
+    [InlineData("C:\\Media\\Séries\\Épisode 01.fr.srt", "1ec7702771544bbb")]
+    [InlineData("/x/a.srt|eng", "c7c28f162c23d7c7")]
+    public void Result_ids_are_unchanged(string path, string id)
+    {
+        Assert.Equal(id, ResultStore.IdFor(path));
+        Assert.Equal(SubtitleFiles.BackupName(path)[..16], ResultStore.IdFor(path));
+    }
+
+    [Fact]
+    public void Result_ids_match_the_old_algorithm_for_many_paths()
+    {
+        var random = new Random(31);
+        for (var i = 0; i < 500; i++)
+        {
+            var path = "/library/" + new string([.. Enumerable.Range(0, random.Next(1, 60)).Select(_ => (char)random.Next(0x20, 0x2FF))]) + (i % 3 == 0 ? ".srt" : i % 3 == 1 ? string.Empty : ".en.ass");
+            Assert.Equal(SubtitleFiles.BackupName(path)[..16], ResultStore.IdFor(path));
+        }
+    }
 }

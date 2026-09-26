@@ -140,7 +140,7 @@ public class SubtitlesController : ControllerBase
     {
         try
         {
-            return _processor.Apply(id, SubtitleSyncTask.PoliciesOf(SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()));
+            return _processor.Apply(id, (SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()).Policies());
         }
         catch (InvalidOperationException ex)
         {
@@ -352,7 +352,7 @@ public class SubtitlesController : ControllerBase
     public async Task<ActionResult<LimitKeyResult>> LimitDeepgramKey([FromBody, Required] LimitKeyRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_keys.Get(SpeechToTextFactory.Deepgram) is not { } admin)
+        if (_keys.Get(SpeechToTextFactory.Deepgram) is null)
         {
             return BadRequest("Add the Deepgram key first.");
         }
@@ -363,34 +363,16 @@ public class SubtitlesController : ControllerBase
         http.Timeout = TimeSpan.FromSeconds(30);
         try
         {
-            if (!await DeepgramAccount.CanReadBillingAsync(http, admin, cancellationToken).ConfigureAwait(false))
-            {
-                return new LimitKeyResult(false, "The Deepgram key is already a limited key; nothing to change.", before);
-            }
-
-            var limited = await DeepgramAccount.CreateTranscriptionKeyAsync(http, admin, "Shoal Subtitles (transcription only, created by the plugin)", cancellationToken).ConfigureAwait(false);
-            _keys.Set(SpeechToTextFactory.Deepgram, limited);
-            if (request.KeepForBalance)
-            {
-                _keys.Set(DeepgramAccount.BillingKey, admin);
-            }
+            var (swapped, message, after) = await DeepgramAccount.LimitTranscriptionKeyAsync(http, _keys, request.KeepForBalance, before, cancellationToken).ConfigureAwait(false);
 
             // The page applies the resulting setting too, so its next Save doesn't write the old one back
-            var after = DeepgramAccount.BalanceAfterLimiting(before, request.KeepForBalance);
-            if (config is not null && after != before)
+            if (swapped && config is not null && after != before)
             {
                 config.DeepgramBalance = after;
                 SubtitlesPlugin.Instance!.SaveConfiguration();
             }
 
-            DeepgramAccount.ClearCache();
-            const string Stays = " The new key is in your Deepgram project and stays there if this plugin is removed; delete it in Deepgram's console when no longer needed.";
-            return new LimitKeyResult(
-                true,
-                (request.KeepForBalance
-                    ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
-                    : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.") + Stays,
-                after);
+            return new LimitKeyResult(swapped, message, after);
         }
         catch (SpeechToTextException ex)
         {
@@ -480,7 +462,7 @@ public class SubtitlesController : ControllerBase
         if (SpeechToTextFactory.IsPaid(service.Id))
         {
             await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
-            service = new MeteredSpeechToText(service, Pipeline.SubtitleSyncTask.ModelOf(service.Id, request.Model), _spending, Pricing.Spending.LimitsOf(config), "subtitles.test");
+            service = SpeechSelection.Metered(service, request.Model, config, _spending, "subtitles.test");
         }
 
         // One second of a very quiet tone: enough for the service to accept and answer

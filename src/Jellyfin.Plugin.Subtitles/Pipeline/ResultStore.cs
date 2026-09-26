@@ -267,11 +267,17 @@ public sealed class ResultStore : IDisposable
     }
 
     /// <summary>
-    /// The stable id for a subtitle path.
+    /// The stable id for a subtitle path: the first 16 hex digits (lower case) of the SHA-256 of its UTF-8 bytes. Hashed
+    /// here rather than borrowed from backup naming, so a change there can't orphan every stored result; it must keep
+    /// producing the ids already stored.
     /// </summary>
     /// <param name="subtitlePath">The path.</param>
     /// <returns>A short hex id.</returns>
-    public static string IdFor(string subtitlePath) => SubtitleFiles.BackupName(subtitlePath)[..16];
+    public static string IdFor(string subtitlePath)
+    {
+        ArgumentNullException.ThrowIfNull(subtitlePath);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(subtitlePath)))[..16];
+    }
 
     /// <summary>
     /// All results, newest first.

@@ -46,7 +46,7 @@ public class SubtitlesPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
             c.MaxSubtitlesPerRun = Math.Clamp(c.MaxSubtitlesPerRun, 1, 5000);
             c.MaxFindsPerRun = Math.Clamp(c.MaxFindsPerRun, 1, 1000);
             c.MaxDownloadsPerDay = Math.Clamp(c.MaxDownloadsPerDay, 0, 10000);
-            var languages = SpendingLimit.EffectiveLanguages(c.Languages);
+            var languages = LanguageSettings.EffectiveLanguages(c.Languages);
             c.Languages.Clear();
             foreach (var l in languages)
             {

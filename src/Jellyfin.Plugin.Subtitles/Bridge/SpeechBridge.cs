@@ -47,75 +47,22 @@ public static partial class SpeechBridge
     public const int MaxRequest = 8 * 1024;
 
     private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-    private static readonly SemaphoreSlim Gate = new(1, 1);
-    private static Services? _services;
+    private static SpeechBridgeService? _service;
 
     /// <summary>
-    /// Transcribes a stretch of a video for another plugin.
+    /// Transcribes a stretch of a video for another plugin (the work is done by <see cref="SpeechBridgeService"/>).
     /// </summary>
     /// <param name="requestJson">The request.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The reply, as JSON. Never throws for a bad request or a failed transcription.</returns>
-    public static async Task<string> TranscribeAsync(string requestJson, CancellationToken cancellationToken)
-    {
-        if (_services is not { } s || SubtitlesPlugin.Instance?.Configuration is not { } config)
-        {
-            return Reply(false, "The Subtitles plugin isn't ready yet.", "transient");
-        }
-
-        if (Parse(requestJson, new Settings(config.Enabled, config.AllowIngest, config.AiContext is { Enabled: true }), out var request) is { } problem)
-        {
-            return Reply(false, problem.Message, problem.Failure);
-        }
-
-        var ffmpeg = Audio.FfmpegLocator.Resolve(s.Encoder.EncoderPath);
-        if (ffmpeg is null)
-        {
-            return Reply(false, "Jellyfin's ffmpeg wasn't found.", "not-set-up");
-        }
-
-        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            using var http = s.Http.CreateClient();
-            http.Timeout = TimeSpan.FromMinutes(3);
-            await s.Spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
-            var speech = SubtitleSyncTask.SpeechFor(config, config.AiContext, s.Keys, http, s.BuiltIn, s.Spending, request!.Purpose, out var why);
-            if (speech is null)
-            {
-                return Reply(false, why ?? "No speech-to-text service can be used for AI decisions.", "not-set-up");
-            }
-
-            var samples = await new FfmpegAudioSource(ffmpeg, request.Path).ReadAsync(request.Start, request.Length, cancellationToken).ConfigureAwait(false);
-            if (samples.Length < AudioFormat.SampleRate)
-            {
-                return JsonSerializer.Serialize(new { version = Version, ok = true, text = string.Empty, language = request.Language, provider = speech.Id }, Options);
-            }
-
-            var transcript = await speech.TranscribeAsync(samples, request.Language, cancellationToken).ConfigureAwait(false);
-            return JsonSerializer.Serialize(new { version = Version, ok = true, text = Text(transcript), language = transcript.Language ?? request.Language, provider = speech.Id }, Options);
-        }
-        catch (SpeechToTextException ex)
-        {
-            return Reply(false, ex.Message, Name(ex.Failure));
-        }
-#pragma warning disable CA1031 // Reading the audio can fail many ways (unreadable file, no audio track, ffmpeg error); the caller gets a reason.
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-#pragma warning restore CA1031
-        {
-            return Reply(false, "The audio couldn't be read (" + ex.GetType().Name + ").", "transient");
-        }
-        finally
-        {
-            Gate.Release();
-        }
-    }
+    public static Task<string> TranscribeAsync(string requestJson, CancellationToken cancellationToken)
+        => _service?.TranscribeAsync(requestJson, cancellationToken) ?? Task.FromResult(Reply(false, "The Subtitles plugin isn't ready yet.", "transient"));
 
     /// <summary>
-    /// Connects the entry point to the plugin's services (at start-up).
+    /// Connects the entry point to the plugin's service (at start-up).
     /// </summary>
-    /// <param name="services">The services.</param>
-    internal static void Attach(Services services) => _services = services;
+    /// <param name="service">The service.</param>
+    internal static void Attach(SpeechBridgeService service) => _service = service;
 
     /// <summary>
     /// Checks and reads a request.
@@ -227,7 +174,12 @@ public static partial class SpeechBridge
         return Spaces().Replace(string.Join(' ', transcript.Words.Select(w => w.Text.Trim())), " ").Trim();
     }
 
-    private static string Name(FailureClass failure) => failure switch
+    /// <summary>
+    /// The reply's name for a failure class.
+    /// </summary>
+    /// <param name="failure">The class.</param>
+    /// <returns>The name.</returns>
+    internal static string Name(FailureClass failure) => failure switch
     {
         FailureClass.Authentication => "authentication",
         FailureClass.ProviderLimit => "provider-limit",
@@ -236,8 +188,25 @@ public static partial class SpeechBridge
         _ => "transient",
     };
 
-    private static string Reply(bool ok, string error, string failure)
+    /// <summary>
+    /// A reply that says why nothing was transcribed.
+    /// </summary>
+    /// <param name="ok">Always <c>false</c>.</param>
+    /// <param name="error">Why, in words safe to show.</param>
+    /// <param name="failure">The failure name.</param>
+    /// <returns>The reply, as JSON.</returns>
+    internal static string Reply(bool ok, string error, string failure)
         => JsonSerializer.Serialize(new { version = Version, ok, error, failure }, Options);
+
+    /// <summary>
+    /// A reply with what was heard.
+    /// </summary>
+    /// <param name="text">The words heard.</param>
+    /// <param name="language">The language.</param>
+    /// <param name="provider">The service that heard them.</param>
+    /// <returns>The reply, as JSON.</returns>
+    internal static string Heard(string text, string? language, string provider)
+        => JsonSerializer.Serialize(new { version = Version, ok = true, text, language, provider }, Options);
 
     [GeneratedRegex("^[a-z]{2,3}$")]
     private static partial Regex LanguageCode();
@@ -270,37 +239,120 @@ public static partial class SpeechBridge
     /// <param name="Length">How long.</param>
     /// <param name="Language">The expected language, if known.</param>
     internal sealed record SpeechRequest(string Caller, string Purpose, string Path, TimeSpan Start, TimeSpan Length, string? Language);
-
-    /// <summary>
-    /// The plugin's services the entry point uses.
-    /// </summary>
-    /// <param name="Keys">Speech-to-text keys.</param>
-    /// <param name="BuiltIn">The built-in speech-to-text.</param>
-    /// <param name="Spending">Prices, ledger and rates.</param>
-    /// <param name="Encoder">Jellyfin's media encoder (for ffmpeg).</param>
-    /// <param name="Http">HTTP clients.</param>
-    internal sealed record Services(SpeechToTextKeys Keys, BuiltInHost BuiltIn, Spending Spending, IMediaEncoder Encoder, IHttpClientFactory Http);
 }
 
 /// <summary>
-/// Connects <see cref="SpeechBridge"/> to the plugin's services when the server starts.
+/// The work behind <see cref="SpeechBridge.TranscribeAsync"/>, as a service the plugin registers: it checks the request,
+/// starts a run (see <see cref="RunStart"/>) and transcribes with the service set for "Context for AI decisions". One
+/// transcription runs at a time.
+/// </summary>
+internal sealed class SpeechBridgeService : IDisposable
+{
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SpeechToTextKeys _keys;
+    private readonly BuiltInHost _builtIn;
+    private readonly Spending _spending;
+    private readonly IMediaEncoder _encoder;
+    private readonly IHttpClientFactory _http;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SpeechBridgeService"/> class.
+    /// </summary>
+    /// <param name="keys">Speech-to-text keys.</param>
+    /// <param name="builtIn">The built-in speech-to-text.</param>
+    /// <param name="spending">Prices, ledger and rates.</param>
+    /// <param name="encoder">Jellyfin's media encoder (for ffmpeg).</param>
+    /// <param name="http">HTTP clients.</param>
+    public SpeechBridgeService(SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, IMediaEncoder encoder, IHttpClientFactory http)
+    {
+        _keys = keys ?? throw new ArgumentNullException(nameof(keys));
+        _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
+        _spending = spending ?? throw new ArgumentNullException(nameof(spending));
+        _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
+        _http = http ?? throw new ArgumentNullException(nameof(http));
+    }
+
+    /// <summary>
+    /// Transcribes a stretch of a video for another plugin.
+    /// </summary>
+    /// <param name="requestJson">The request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The reply, as JSON. Never throws for a bad request or a failed transcription.</returns>
+    public async Task<string> TranscribeAsync(string requestJson, CancellationToken cancellationToken)
+    {
+        if (SubtitlesPlugin.Instance?.Configuration is not { } config)
+        {
+            return SpeechBridge.Reply(false, "The Subtitles plugin isn't ready yet.", "transient");
+        }
+
+        if (SpeechBridge.Parse(requestJson, new SpeechBridge.Settings(config.Enabled, config.AllowIngest, config.AiContext is { Enabled: true }), out var request) is { } problem)
+        {
+            return SpeechBridge.Reply(false, problem.Message, problem.Failure);
+        }
+
+        if (Audio.FfmpegLocator.Resolve(_encoder.EncoderPath) is null)
+        {
+            return SpeechBridge.Reply(false, "Jellyfin's ffmpeg wasn't found.", "not-set-up");
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken).ConfigureAwait(false);
+            if (run is null)
+            {
+                return SpeechBridge.Reply(false, "Jellyfin's ffmpeg wasn't found.", "not-set-up");
+            }
+
+            var speech = run.Speech(config, config.AiContext, request!.Purpose, out var why);
+            if (speech is null)
+            {
+                return SpeechBridge.Reply(false, why ?? "No speech-to-text service can be used for AI decisions.", "not-set-up");
+            }
+
+            var samples = await new FfmpegAudioSource(run.Ffmpeg, request.Path).ReadAsync(request.Start, request.Length, cancellationToken).ConfigureAwait(false);
+            if (samples.Length < AudioFormat.SampleRate)
+            {
+                return SpeechBridge.Heard(string.Empty, request.Language, speech.Id);
+            }
+
+            var transcript = await speech.TranscribeAsync(samples, request.Language, cancellationToken).ConfigureAwait(false);
+            return SpeechBridge.Heard(SpeechBridge.Text(transcript), transcript.Language ?? request.Language, speech.Id);
+        }
+        catch (SpeechToTextException ex)
+        {
+            return SpeechBridge.Reply(false, ex.Message, SpeechBridge.Name(ex.Failure));
+        }
+#pragma warning disable CA1031 // Reading the audio can fail many ways (unreadable file, no audio track, ffmpeg error); the caller gets a reason.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+#pragma warning restore CA1031
+        {
+            return SpeechBridge.Reply(false, "The audio couldn't be read (" + ex.GetType().Name + ").", "transient");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _gate.Dispose();
+}
+
+/// <summary>
+/// Connects <see cref="SpeechBridge"/> to the plugin's service when the server starts.
 /// </summary>
 internal sealed class SpeechBridgeHost : Microsoft.Extensions.Hosting.IHostedService
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="SpeechBridgeHost"/> class.
     /// </summary>
-    /// <param name="keys">Speech-to-text keys.</param>
-    /// <param name="builtIn">The built-in speech-to-text.</param>
-    /// <param name="spending">Prices, ledger and rates.</param>
-    /// <param name="encoder">Jellyfin's media encoder.</param>
-    /// <param name="http">HTTP clients.</param>
-    public SpeechBridgeHost(SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, IMediaEncoder encoder, IHttpClientFactory http)
-        => SpeechBridge.Attach(new SpeechBridge.Services(keys, builtIn, spending, encoder, http));
+    /// <param name="service">The entry point's service.</param>
+    public SpeechBridgeHost(SpeechBridgeService service) => SpeechBridge.Attach(service);
 
     /// <inheritdoc />
-    public System.Threading.Tasks.Task StartAsync(CancellationToken cancellationToken) => System.Threading.Tasks.Task.CompletedTask;
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public System.Threading.Tasks.Task StopAsync(CancellationToken cancellationToken) => System.Threading.Tasks.Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

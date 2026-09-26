@@ -1,7 +1,9 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.Subtitles.Formats;
 using Xunit;
 
@@ -233,5 +235,49 @@ public class FormatTests
 
         Assert.Contains("Left --&gt; right", written, StringComparison.Ordinal);
         Assert.Single(SubtitleReader.Parse(written, SubtitleFormat.WebVtt).Cues);
+    }
+
+    // SUB-04: downloads are capped while reading
+    [Fact]
+    public async Task An_endless_download_stops_just_past_the_limit()
+    {
+        var endless = new Endless();
+
+        Assert.Null(await SubtitleReader.ReadLimitedAsync(endless, TestContext.Current.CancellationToken));
+        Assert.InRange(endless.Served, SubtitleReader.MaxBytes, SubtitleReader.MaxBytes + (2 * 81920));
+
+        using var small = new MemoryStream(new byte[1234]);
+        Assert.Equal(1234, (await SubtitleReader.ReadLimitedAsync(small, TestContext.Current.CancellationToken))!.Length);
+    }
+
+    private sealed class Endless : Stream
+    {
+        public long Served { get; private set; }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => Served; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Served += count;
+            return count;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

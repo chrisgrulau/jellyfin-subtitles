@@ -153,6 +153,49 @@ public static partial class DeepgramAccount
             : current;
 
     /// <summary>
+    /// Swaps an Admin transcription key for a new key that can only transcribe, created with the Admin key: the new key
+    /// becomes the transcription key, and the Admin key is either kept only for reading the balance or forgotten. Says
+    /// which key reads the balance afterwards (the caller saves that setting, and the page applies it).
+    /// </summary>
+    /// <param name="http">HTTP client.</param>
+    /// <param name="keys">The key store.</param>
+    /// <param name="keepForBalance">Whether to keep the Admin key, only for reading the balance.</param>
+    /// <param name="balanceBefore">Which key read the balance before.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Whether the key was swapped, what to show, and which key reads the balance now.</returns>
+    /// <exception cref="SpeechToTextException">Deepgram couldn't be asked, or the key couldn't be created.</exception>
+    internal static async Task<(bool Swapped, string Message, Configuration.BalanceSource BalanceSource)> LimitTranscriptionKeyAsync(HttpClient http, SpeechToTextKeys keys, bool keepForBalance, Configuration.BalanceSource balanceBefore, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(keys);
+        if (keys.Get(SpeechToTextFactory.Deepgram) is not { } admin)
+        {
+            return (false, "Add the Deepgram key first.", balanceBefore);
+        }
+
+        if (!await CanReadBillingAsync(http, admin, cancellationToken).ConfigureAwait(false))
+        {
+            return (false, "The Deepgram key is already a limited key; nothing to change.", balanceBefore);
+        }
+
+        var limited = await CreateTranscriptionKeyAsync(http, admin, "Shoal Subtitles (transcription only, created by the plugin)", cancellationToken).ConfigureAwait(false);
+        keys.Set(SpeechToTextFactory.Deepgram, limited);
+        if (keepForBalance)
+        {
+            keys.Set(BillingKey, admin);
+        }
+
+        ClearCache();
+        const string Stays = " The new key is in your Deepgram project and stays there if this plugin is removed; delete it in Deepgram's console when no longer needed.";
+        return (
+            true,
+            (keepForBalance
+                ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
+                : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.") + Stays,
+            BalanceAfterLimiting(balanceBefore, keepForBalance));
+    }
+
+    /// <summary>
     /// Forgets the cached balance (after a key changes).
     /// </summary>
     public static void ClearCache()

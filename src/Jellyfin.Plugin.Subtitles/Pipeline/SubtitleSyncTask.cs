@@ -5,16 +5,13 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.Subtitles.Audio;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Pricing;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
-using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
-using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
@@ -27,8 +24,6 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// </summary>
 public sealed partial class SubtitleSyncTask : IScheduledTask
 {
-    private static readonly string[] TextExtensions = [".srt", ".vtt", ".ass", ".ssa"];
-
     private readonly ILibraryManager _library;
     private readonly IMediaSourceManager _media;
     private readonly IMediaEncoder _encoder;
@@ -108,24 +103,22 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             return;
         }
 
-        var ffmpeg = Audio.FfmpegLocator.Resolve(_encoder.EncoderPath);
-        if (ffmpeg is null)
+        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken).ConfigureAwait(false);
+        if (run is null)
         {
             LogNoFfmpeg(_logger);
             return;
         }
 
-        using var http = _http.CreateClient();
-        http.Timeout = TimeSpan.FromMinutes(3);
-        await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
-        var speech = SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.sync", out var problem);
-        var policies = RunPolicies(config);
+        var ffmpeg = run.Ffmpeg;
+        var speech = run.Speech(config, config.SyncSnippets, "subtitles.sync", out var problem);
+        var policies = RunStart.PoliciesFor(config);
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
         }
-        var wanted = SpendingLimit.EffectiveLanguages(config.Languages).Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal);
-        foreach (var unknown in SpendingLimit.UnknownLanguages(config.Languages))
+        var wanted = LanguageSettings.EffectiveLanguages(config.Languages).Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal);
+        foreach (var unknown in LanguageSettings.UnknownLanguages(config.Languages))
         {
             LogUnknownLanguage(_logger, unknown);
         }
@@ -151,7 +144,8 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             LogPruned(_logger, pruned);
         }
 
-        var jobs = Jobs(wanted).ToList();
+        var videos = new LibraryVideos(_library, _media);
+        var jobs = videos.SubtitleFiles(wanted).ToList();
         var todo = new List<SubtitleJob>();
         foreach (var job in jobs)
         {
@@ -203,7 +197,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
         if (config.CheckEmbeddedSubtitles)
         {
-            await CheckEmbeddedAsync(config, wanted, ffmpeg, speech, policies, cancellationToken).ConfigureAwait(false);
+            await CheckEmbeddedAsync(config, videos, wanted, ffmpeg, speech, policies, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -237,9 +231,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     }
 
     // Text subtitle tracks inside videos, a few per run (each is copied out by reading the whole video)
-    private async Task CheckEmbeddedAsync(PluginConfiguration config, HashSet<string> wanted, string ffmpeg, ISpeechToText? speech, Policies policies, CancellationToken cancellationToken)
+    private async Task CheckEmbeddedAsync(PluginConfiguration config, LibraryVideos videos, HashSet<string> wanted, string ffmpeg, ISpeechToText? speech, Policies policies, CancellationToken cancellationToken)
     {
-        var todo = EmbeddedJobs(wanted).Where(_embedded.NeedsCheck).Take(Math.Clamp(config.MaxEmbeddedPerRun, 1, 200)).ToList();
+        var todo = videos.EmbeddedTracks(wanted, config.CountImageSubtitles).Where(_embedded.NeedsCheck).Take(Math.Clamp(config.MaxEmbeddedPerRun, 1, 200)).ToList();
         LogEmbeddedStarting(_logger, todo.Count);
         foreach (var job in todo)
         {
@@ -263,169 +257,6 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             {
                 LogFailed(_logger, job.Name, ex.Message);
                 _embedded.RecordFailure(job, ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException ? ex.Message : ex.GetType().Name + ": " + ex.Message);
-            }
-        }
-    }
-
-    /// <summary>
-    /// The policies a configuration sets.
-    /// </summary>
-    /// <param name="config">Plugin settings.</param>
-    /// <returns>The policies.</returns>
-    public static Policies PoliciesOf(PluginConfiguration config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return new Policies(config.TimingFixes, config.TextChanges, config.Cleanup ?? new CleanupSettings());
-    }
-
-    /// <summary>
-    /// The settings for one run, with the AI plugin's help where the settings allow it: matching lines by meaning and
-    /// auditing the wording, sharing that run's allowance of AI checks.
-    /// </summary>
-    /// <param name="config">Plugin settings.</param>
-    /// <returns>The policies.</returns>
-    public static Policies RunPolicies(PluginConfiguration config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        var policies = PoliciesOf(config);
-        if (!config.UseAi || config.MaxAiChecksPerRun <= 0)
-        {
-            return policies;
-        }
-
-        var checks = new Ai.AiChecks(config.MaxAiChecksPerRun);
-        return policies with { Matcher = new Ai.AiLineMatcher(checks), Auditor = config.AuditWording ? new Ai.AiTextAuditor(checks) : null };
-    }
-
-    /// <summary>
-    /// The speech-to-text service automatic runs use: the snippet tier's service. A paid service is used only within the
-    /// spending limits: every call is priced, reserved against the month's limit and settled (see
-    /// <see cref="MeteredSpeechToText"/>).
-    /// </summary>
-    /// <param name="config">Plugin settings.</param>
-    /// <param name="keys">Speech-to-text keys.</param>
-    /// <param name="http">HTTP client.</param>
-    /// <param name="builtIn">The built-in speech-to-text.</param>
-    /// <param name="spending">Prices, ledger and exchange rates.</param>
-    /// <param name="purpose">What the calls are for (<c>subtitles.sync</c> …).</param>
-    /// <param name="problem">Why no service is used, if none.</param>
-    /// <returns>The service, or <c>null</c>.</returns>
-    public static ISpeechToText? SpeechFor(PluginConfiguration config, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, Spending spending, string purpose, out string? problem)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return SpeechFor(config, config.SyncSnippets, keys, http, builtIn, spending, purpose, out problem);
-    }
-
-    /// <summary>
-    /// The speech-to-text service a tier uses, metered like <see cref="SpeechFor(PluginConfiguration, SpeechToTextKeys, HttpClient, BuiltInHost?, Spending, string, out string?)"/>.
-    /// </summary>
-    /// <param name="config">Plugin settings.</param>
-    /// <param name="tier">The tier (for example <see cref="PluginConfiguration.AiContext"/>).</param>
-    /// <param name="keys">Speech-to-text keys.</param>
-    /// <param name="http">HTTP client.</param>
-    /// <param name="builtIn">The built-in speech-to-text.</param>
-    /// <param name="spending">Prices, ledger and exchange rates.</param>
-    /// <param name="purpose">What the calls are for.</param>
-    /// <param name="problem">Why no service is used, if none.</param>
-    /// <returns>The service, or <c>null</c>.</returns>
-    public static ISpeechToText? SpeechFor(PluginConfiguration config, TranscriptionTier? tier, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, Spending spending, string purpose, out string? problem)
-    {
-        ArgumentNullException.ThrowIfNull(spending);
-        ArgumentNullException.ThrowIfNull(config);
-        problem = null;
-        if (tier is null || !tier.Enabled)
-        {
-            return null;
-        }
-
-        var limits = Spending.LimitsOf(config);
-        var paid = SpeechToTextFactory.IsPaid(tier.Provider);
-        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, SpendingLimit.AllowsPaidUsage(limits.Overall), config.AllowBuiltInDownload, keys, http, builtIn);
-        problem = why;
-        return service is not null && paid ? new MeteredSpeechToText(service, ModelOf(tier.Provider, tier.Model), spending, limits, purpose) : service;
-    }
-
-    /// <summary>
-    /// The model a paid provider uses for a setting (its default when the setting is empty), for pricing.
-    /// </summary>
-    /// <param name="provider">Provider id.</param>
-    /// <param name="model">The model setting.</param>
-    /// <returns>The model name.</returns>
-    public static string ModelOf(string provider, string? model)
-        => !string.IsNullOrWhiteSpace(model) ? model.Trim()
-            : provider == SpeechToTextFactory.Deepgram ? DeepgramSpeechToText.DefaultModel
-            : provider == SpeechToTextFactory.OpenAi ? OpenAiCompatibleSpeechToText.OpenAiDefaultModel
-            : string.Empty;
-
-    private IEnumerable<SubtitleJob> Jobs(HashSet<string> languages)
-    {
-        var items = _library.GetItemList(new InternalItemsQuery
-        {
-            IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
-            IsVirtualItem = false,
-            Recursive = true,
-        });
-        foreach (var item in items)
-        {
-            if (item is not Video video || string.IsNullOrEmpty(video.Path) || video.RunTimeTicks is not > 0 || !File.Exists(video.Path))
-            {
-                continue;
-            }
-
-            var streams = _media.GetMediaStreams(item.Id);
-            var audio = streams.Where(s => s.Type == MediaStreamType.Audio).OrderBy(s => s.Index).Select(s => ((string?)s.Language, s.IsDefault)).ToList();
-            if (audio.Count == 0)
-            {
-                continue;
-            }
-
-            foreach (var sub in streams.Where(s => s.Type == MediaStreamType.Subtitle && s.IsExternal && !string.IsNullOrEmpty(s.Path)))
-            {
-                var ext = Path.GetExtension(sub.Path).ToUpperInvariant();
-                if (!TextExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)) || Languages.ToTwoLetter(sub.Language) is not { } lang || !languages.Contains(lang))
-                {
-                    continue;
-                }
-
-                yield return new SubtitleJob(item.Id, item.Name, video.Path, sub.Path, sub.Language, TimeSpan.FromTicks(video.RunTimeTicks!.Value), AudioChoice.For(audio, sub.Language));
-            }
-        }
-    }
-
-    // Embedded text tracks in the chosen languages, for videos with no subtitle file of that language beside them
-    private IEnumerable<EmbeddedJob> EmbeddedJobs(HashSet<string> languages)
-    {
-        var items = _library.GetItemList(new InternalItemsQuery
-        {
-            IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
-            IsVirtualItem = false,
-            Recursive = true,
-        });
-        foreach (var item in items)
-        {
-            if (item is not Video video || string.IsNullOrEmpty(video.Path) || video.RunTimeTicks is not > 0 || !File.Exists(video.Path))
-            {
-                continue;
-            }
-
-            var streams = _media.GetMediaStreams(item.Id);
-            var audio = streams.Where(s => s.Type == MediaStreamType.Audio).OrderBy(s => s.Index).Select(s => ((string?)s.Language, s.IsDefault)).ToList();
-            if (audio.Count == 0)
-            {
-                continue;
-            }
-
-            var beside = streams.Where(s => s.Type == MediaStreamType.Subtitle && s.IsExternal).Select(s => Languages.ToTwoLetter(s.Language)).OfType<string>().ToHashSet(StringComparer.Ordinal);
-            foreach (var sub in streams.Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal && !s.IsForced && s.IsTextSubtitleStream))
-            {
-                if (Languages.ToTwoLetter(sub.Language) is not { } lang || !languages.Contains(lang) || beside.Contains(lang)
-                    || !FfmpegSubtitleExtractor.TextCodecs.Contains(sub.Codec ?? string.Empty, StringComparer.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                beside.Add(lang);
-                yield return new EmbeddedJob(item.Id, item.Name, video.Path, sub.Index, sub.Codec, sub.Language!, TimeSpan.FromTicks(video.RunTimeTicks!.Value), AudioChoice.For(audio, sub.Language), EmbeddedChecker.FingerprintOf(video.Path, sub.Index));
             }
         }
     }

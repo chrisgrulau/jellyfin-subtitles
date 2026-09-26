@@ -99,17 +99,17 @@ public class ConfigurationTests
     [Fact]
     public void Languages_are_deduplicated_and_default_to_english()
     {
-        Assert.Equal(["eng"], SpendingLimit.EffectiveLanguages(null));
-        Assert.Equal(["eng"], SpendingLimit.EffectiveLanguages(["eng", "ENG", " eng "]));
-        Assert.Equal(["fre", "eng"], SpendingLimit.EffectiveLanguages(["fre", "eng", "bogus", "fre"]));
+        Assert.Equal(["eng"], LanguageSettings.EffectiveLanguages(null));
+        Assert.Equal(["eng"], LanguageSettings.EffectiveLanguages(["eng", "ENG", " eng "]));
+        Assert.Equal(["fre", "eng"], LanguageSettings.EffectiveLanguages(["fre", "eng", "bogus", "fre"]));
     }
 
     // FAM-01: codes in any form and names are accepted without the server's culture data; unknown entries are reported
     [Fact]
     public void Languages_may_be_written_as_codes_or_names()
     {
-        Assert.Equal(["fre", "deu", "swe"], SpendingLimit.EffectiveLanguages(["fre", "German", "sv", "fre"]));
-        Assert.Equal(["eng"], SpendingLimit.EffectiveLanguages(["Elvish"]));
-        Assert.Equal(["Elvish"], SpendingLimit.UnknownLanguages(["eng", "Elvish", " "]));
+        Assert.Equal(["fre", "deu", "swe"], LanguageSettings.EffectiveLanguages(["fre", "German", "sv", "fre"]));
+        Assert.Equal(["eng"], LanguageSettings.EffectiveLanguages(["Elvish"]));
+        Assert.Equal(["Elvish"], LanguageSettings.UnknownLanguages(["eng", "Elvish", " "]));
     }
 }

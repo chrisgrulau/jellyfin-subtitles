@@ -19,7 +19,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// Gets or sets the subtitle languages to find and check, as ISO 639-2 codes (e.g. <c>eng</c>); empty means English
-    /// (see <see cref="SpendingLimit.EffectiveLanguages"/>). The list starts empty on purpose: Jellyfin's XML loader adds
+    /// (see <see cref="LanguageSettings.EffectiveLanguages"/>). The list starts empty on purpose: Jellyfin's XML loader adds
     /// saved items to whatever the list starts with, so a default item would be duplicated on every restart.
     /// </summary>
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "Jellyfin deserializes plugin configuration from JSON, which cannot populate a get-only collection.")]
@@ -196,4 +196,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the most AI checks in one run of a task (matching lines and audits together).
     /// </summary>
     public int MaxAiChecksPerRun { get; set; } = 20;
+
+    /// <summary>
+    /// The policies these settings set for what happens to changes (the AI plugin's help is added per run, see
+    /// <see cref="Pipeline.RunStart.PoliciesFor"/>).
+    /// </summary>
+    /// <returns>The policies.</returns>
+    public Pipeline.Policies Policies() => new(TimingFixes, TextChanges, Cleanup ?? new CleanupSettings());
 }
