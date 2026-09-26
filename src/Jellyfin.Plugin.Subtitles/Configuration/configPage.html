@@ -64,6 +64,14 @@
             <div class="fieldDescription checkboxFieldDescription">Searches your subtitle providers (such as the OpenSubtitles plugin), checks the best candidates against the audio, and adds one only if it fits. Existing subtitle files are never replaced.</div>
           </div>
 
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="CountImageSubtitles" type="checkbox" is="emby-checkbox" />
+              <span>Picture-based subtitles count as having subtitles</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">PGS and VobSub tracks (common on Blu-ray and DVD rips) work, but most clients have to burn them into the video. Untick to also look for a text subtitle for those videos. Forced-only tracks (signs and foreign-language parts) never count.</div>
+          </div>
+
           <div class="selectContainer">
             <label class="selectLabel" for="TimingFixes">Timing corrections</label>
             <select is="emby-select" id="TimingFixes">
@@ -174,7 +182,7 @@
             <div class="inputContainer">
               <label class="inputLabel inputLabelUnfocused" for="MaxDownloadsPerDay">Subtitle downloads per day</label>
               <input id="MaxDownloadsPerDay" type="number" min="0" max="10000" step="1" is="emby-input" />
-              <div class="fieldDescription">Default 100. Providers such as OpenSubtitles count every download against your account's daily allowance; keep this well below it if other apps use the same account. Up to three candidates are downloaded per video, fewer when the first fits.</div>
+              <div class="fieldDescription">Default 10. Providers such as OpenSubtitles count every download against your account's daily allowance (about 20 on a free OpenSubtitles account), and downloads you make yourself in Jellyfin use the same allowance, so keep this well below it. When the provider says the allowance is used up, the search stops for the day. Up to three candidates are downloaded per video, fewer when the first fits.</div>
             </div>
 
             <h3 class="sectionTitle">Clean-up</h3>
@@ -324,7 +332,7 @@
           }
         });
 
-        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found' };
+        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large' };
 
         var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened' };
 
@@ -373,9 +381,13 @@
           var verb = b.classList.contains('res-apply') ? 'Apply' : 'Undo';
           ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + b.getAttribute('data-id') + '/' + verb) })
             .then(loadResults, function (err) {
-              var msg = err && err.responseText ? err.responseText : 'That couldn\'t be done.';
-              Dashboard.alert(msg.replace(/^"|"$/g, ''));
-              loadResults();
+              // ApiClient rejects with the fetch Response: its text is the server's explanation
+              var text = err && err.text ? err.text() : Promise.resolve('');
+              return text.then(function (t) { return t; }, function () { return ''; }).then(function (t) {
+                var msg = t && t.length < 400 ? t.replace(/^"|"$/g, '') : 'That couldn\'t be done.';
+                Dashboard.alert(msg);
+                return loadResults();
+              });
             });
         });
 
@@ -439,7 +451,8 @@
             page.querySelector('#MaxSubtitlesPerRun').value = config.MaxSubtitlesPerRun || 50;
             page.querySelector('#FindMissing').checked = config.FindMissing !== false;
             page.querySelector('#MaxFindsPerRun').value = config.MaxFindsPerRun || 20;
-            page.querySelector('#MaxDownloadsPerDay').value = config.MaxDownloadsPerDay == null ? 100 : config.MaxDownloadsPerDay;
+            page.querySelector('#MaxDownloadsPerDay').value = config.MaxDownloadsPerDay == null ? 10 : config.MaxDownloadsPerDay;
+            page.querySelector('#CountImageSubtitles').checked = config.CountImageSubtitles !== false;
             loadResults();
             renderTiers(config);
             refreshWarnings();
@@ -460,7 +473,8 @@
             config.FindMissing = page.querySelector('#FindMissing').checked;
             config.MaxFindsPerRun = Math.min(1000, Math.max(1, parseInt(page.querySelector('#MaxFindsPerRun').value, 10) || 20));
             var downloads = parseInt(page.querySelector('#MaxDownloadsPerDay').value, 10);
-            config.MaxDownloadsPerDay = Math.min(10000, Math.max(0, isNaN(downloads) ? 100 : downloads));
+            config.MaxDownloadsPerDay = Math.min(10000, Math.max(0, isNaN(downloads) ? 10 : downloads));
+            config.CountImageSubtitles = page.querySelector('#CountImageSubtitles').checked;
             config.TextChanges = page.querySelector('#TextChanges').value;
             config.Currency = page.querySelector('#Currency').value;
             config.MonthlyBudget = Math.max(0, parseFloat(page.querySelector('#MonthlyBudget').value) || 0);

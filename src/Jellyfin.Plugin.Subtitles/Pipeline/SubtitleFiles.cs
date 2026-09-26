@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Jellyfin.Plugin.Subtitles.Pipeline;
 
@@ -29,6 +31,33 @@ public sealed class SubtitleFiles
     /// <param name="bytes">The content.</param>
     /// <returns>The fingerprint.</returns>
     public static string Fingerprint(ReadOnlySpan<byte> bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+
+    /// <summary>
+    /// A subtitle file's fingerprint, read from disk. A file larger than <see cref="Formats.SubtitleReader.MaxBytes"/> is
+    /// not read: its fingerprint comes from its size and time instead, so it is recorded as too large once and not read
+    /// again until it changes.
+    /// </summary>
+    /// <param name="path">The file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The fingerprint.</returns>
+    public static async Task<string> FingerprintFileAsync(string path, CancellationToken cancellationToken)
+    {
+        var info = new FileInfo(path);
+        return info.Length > Formats.SubtitleReader.MaxBytes
+            ? TooLargeFingerprint(info)
+            : Fingerprint(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// The fingerprint used for a file too large to read.
+    /// </summary>
+    /// <param name="info">The file.</param>
+    /// <returns>The fingerprint.</returns>
+    public static string TooLargeFingerprint(FileInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"large-{info.Length}-{info.LastWriteTimeUtc.Ticks}");
+    }
 
     /// <summary>
     /// The backup file name for a subtitle path.
