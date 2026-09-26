@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0-alpha] - 2026-09-27
+
 ### Added
 
 - **Stage 4: generated subtitles.** When the search finds nothing that fits a video in one of your languages, the
