@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Xunit;
@@ -62,6 +63,39 @@ public class ConfigurationTests
         var offered = System.Text.RegularExpressions.Regex.Matches(list, "'([A-Z]{3})'").Select(m => m.Groups[1].Value);
 
         Assert.Equal(Common.Costs.CurrencyCode.Supported, offered);
+    }
+
+    private static string Page()
+    {
+        using var stream = typeof(SpendingLimit).Assembly.GetManifestResourceStream("Jellyfin.Plugin.Subtitles.Configuration.configPage.html")!;
+        using var reader = new System.IO.StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    // FAM-07: environment and accessibility
+    [Fact]
+    public void The_settings_page_works_without_a_clipboard_and_announces_status()
+    {
+        var page = Page();
+        Assert.Contains("role=\"status\" aria-live=\"polite\"", page, StringComparison.Ordinal);
+        Assert.Contains("split(/[\\\\/]/)", page, StringComparison.Ordinal);
+        Assert.Contains("navigator.clipboard.writeText(text).then(done, manual); } else { manual(); }", page, StringComparison.Ordinal);
+        Assert.Contains("<div class=\"subs-scroll\"><table id=\"Results\"", page, StringComparison.Ordinal);
+
+        // Key-save failures show the server's own message, not a guess
+        Assert.DoesNotContain("Dashboard.alert(\"That doesn't look like an API key.\")", page, StringComparison.Ordinal);
+    }
+
+    // FAM-08: settings that do nothing yet are shown disabled and never saved from the page
+    [Fact]
+    public void Settings_that_do_nothing_yet_are_disabled_and_not_saved()
+    {
+        var page = Page();
+        Assert.Contains("id=\"SelfCalibration\" type=\"checkbox\" is=\"emby-checkbox\" disabled", page, StringComparison.Ordinal);
+        Assert.Contains("id=\"AgreementDecides\" type=\"checkbox\" is=\"emby-checkbox\" disabled", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("config.SelfCalibration =", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("config.AgreementDecides =", page, StringComparison.Ordinal);
+        Assert.Contains("['FullTranscript', 'Full transcript (coming later)'", page, StringComparison.Ordinal);
     }
 
     [Fact]

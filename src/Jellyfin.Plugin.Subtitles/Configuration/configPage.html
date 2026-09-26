@@ -38,11 +38,15 @@
       #SubtitlesConfigPage .subs-found li { display: flex; gap: .75em; align-items: center; flex-wrap: wrap; padding: .3em 0; }
       #SubtitlesConfigPage .subs-found code, #SubtitlesConfigPage .subs-setup code { word-break: break-all; }
       #SubtitlesConfigPage .subs-setup pre { white-space: pre-wrap; word-break: break-all; background: rgba(128,128,128,.12); padding: .6em .8em; border-radius: 4px; margin: .4em 0; }
+      #SubtitlesConfigPage .subs-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+      #SubtitlesConfigPage .subs-copytext { display: block; width: 100%; box-sizing: border-box; margin: .5em 0; font-family: monospace; background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 3px; }
+      #SubtitlesConfigPage .subs-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
       @media (max-width: 720px) { #SubtitlesConfigPage .subs-tier { grid-template-columns: 1fr; } }
     </style>
     <div data-role="content">
       <div class="content-primary">
         <h2 class="sectionTitle">Shoal Subtitles</h2>
+        <div id="SubsStatus" class="subs-sr" role="status" aria-live="polite"></div>
         <p>Finds subtitles for videos that are missing them, checks candidates against the actual audio, and fixes their timing. Every change can be undone.</p>
 
         <div id="ResultsBox" style="margin:1em 0 2em">
@@ -68,10 +72,10 @@
               <button is="emby-button" type="button" id="EdClose" class="raised button-alt"><span>Close</span></button>
             </div>
             <p class="subs-muted">Times are h:mm:ss.mmm. ▶ plays that line's audio. Saving keeps the original: <strong>Undo</strong> in the results brings it back.</p>
-            <div style="overflow-x:auto"><table id="EdLines" class="subs-lines"></table></div>
+            <div class="subs-scroll"><table id="EdLines" class="subs-lines"></table></div>
             <button is="emby-button" type="button" id="EdMore" class="raised button-alt" hidden><span>Show more</span></button>
           </div>
-          <div style="overflow-x:auto"><table id="Results" class="subs-results"></table></div>
+          <div class="subs-scroll"><table id="Results" class="subs-results"></table></div>
         </div>
 
         <form id="SubtitlesConfigForm">
@@ -165,7 +169,7 @@
           <div class="subs-service" data-service="builtin">
             <h4>Built-in</h4>
             <div class="fieldDescription">Runs on this server's CPU. Model <strong>base</strong> (the default; about 90 MB with the program) or <strong>small</strong> (more accurate, slower; about 200 MB), set in the Model box above. Downloaded the first time it's needed, or when you press Test.</div>
-            <div id="BuiltInProblem" class="subs-warning" hidden></div>
+            <div id="BuiltInProblem" class="subs-warning" role="status" hidden></div>
             <div class="subs-key"></div>
           </div>
           <div class="subs-service" data-service="local">
@@ -175,7 +179,7 @@
               <div class="fieldDescription">A speech-to-text service with an OpenAI-compatible API on this server or your network (for example a faster-whisper server, speaches, or the whisper.cpp server). Free, and fast with a GPU.</div>
             </div>
             <button is="emby-button" type="button" class="raised button-alt" id="FindLocal"><span>Find a local service</span></button>
-            <div id="LocalFound" class="subs-muted"></div>
+            <div id="LocalFound" class="subs-muted" aria-live="polite"></div>
             <div class="subs-key"></div>
           </div>
           <div class="subs-service" data-service="deepgram"><h4>Deepgram</h4><div class="subs-key"></div>
@@ -200,7 +204,7 @@
               <button is="emby-button" type="button" class="raised button-alt" id="DgBillingClear"><span>Clear</span></button>
             </div>
             <div id="DgSameWarning" class="subs-warning" hidden>Transcribing with an Admin key works, but if the key ever leaked it could be used to manage your Deepgram project. A separate billing key keeps the transcription key limited.</div>
-            <div id="DgBalanceNow" class="subs-muted"></div>
+            <div id="DgBalanceNow" class="subs-muted" aria-live="polite"></div>
           </div>
           <div class="subs-service" data-service="openai"><h4>OpenAI</h4><div class="subs-key"></div></div>
 
@@ -408,7 +412,7 @@
             var optional = id === 'local';
             var noTest = id === 'subdl';
             if (id === 'builtin') {
-              box.querySelector('.subs-key').innerHTML = '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button><div class="subs-result subs-muted"></div>';
+              box.querySelector('.subs-key').innerHTML = '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button><div class="subs-result subs-muted" aria-live="polite"></div>';
               return;
             }
             box.querySelector('.subs-key').innerHTML =
@@ -417,7 +421,7 @@
               '<button is="emby-button" type="button" class="raised svc-savekey"><span>Save key</span></button>' +
               (set ? '<button is="emby-button" type="button" class="raised button-alt svc-clearkey"><span>Clear</span></button>' : '') +
               (noTest ? '' : '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button>') +
-              '<div class="subs-result subs-muted"></div>';
+              '<div class="subs-result subs-muted" aria-live="polite"></div>';
           });
         }
 
@@ -462,8 +466,24 @@
             });
             box.querySelector('.local-copy').addEventListener('click', function () {
               var text = sg.Commands.join('\n');
-              var done = function () { Dashboard.alert('Commands copied.'); };
-              if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, function () {}); }
+              var done = function () { announce('Commands copied.'); Dashboard.alert('Commands copied.'); };
+              // The clipboard isn't available over plain HTTP: show the commands selected, ready to copy by hand
+              var manual = function () {
+                var area = box.querySelector('.local-copytext');
+                if (!area) {
+                  area = document.createElement('textarea');
+                  area.className = 'local-copytext subs-copytext';
+                  area.readOnly = true;
+                  area.rows = sg.Commands.length + 1;
+                  area.setAttribute('aria-label', 'Commands to copy');
+                  box.querySelector('.local-copy').insertAdjacentElement('afterend', area);
+                }
+                area.value = text;
+                area.focus();
+                area.select();
+                announce('The commands are selected: copy them with Ctrl+C or Cmd+C.');
+              };
+              if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, manual); } else { manual(); }
             });
           }, function () { box.textContent = 'The search couldn\'t be run.'; });
         });
@@ -494,7 +514,7 @@
           if (!key) { Dashboard.alert('Paste the billing key first.'); return; }
           ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Keys/deepgram-billing'), data: JSON.stringify({ Key: key }), contentType: 'application/json' })
             .then(function () { page.querySelector('#DgBillingInput').value = ''; Dashboard.alert('Billing key saved. Save the settings to start showing the balance.'); return loadDeepgram(false); },
-              function () { Dashboard.alert("That doesn't look like an API key."); });
+              function (err) { problemText(err).then(Dashboard.alert); });
         });
         page.querySelector('#DgBillingClear').addEventListener('click', function () {
           ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/deepgram-billing') }).then(function () { return loadDeepgram(false); });
@@ -511,7 +531,7 @@
                 if (source) { page.querySelector('#DeepgramBalance').value = source; dgModeChanged(); }
               }
               return loadDeepgram(false);
-            }, function () { Dashboard.alert('That couldn\'t be done.'); });
+            }, function (err) { problemText(err).then(Dashboard.alert); });
         });
 
         // Whether this server can run the built-in program at all (checked before anything is downloaded)
@@ -544,7 +564,7 @@
             var key = box.querySelector('.svc-key').value.trim();
             if (!key) { Dashboard.alert('Paste the key first.'); return; }
             ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Keys/' + id), data: JSON.stringify({ Key: key }), contentType: 'application/json' })
-              .then(function () { return loadKeys().then(function () { if (id === 'deepgram') { return loadDeepgram(true); } }); }, function () { Dashboard.alert("That doesn't look like an API key."); });
+              .then(function () { return loadKeys().then(function () { if (id === 'deepgram') { return loadDeepgram(true); } }); }, function (err) { problemText(err).then(Dashboard.alert); });
           } else if (e.target.closest('.svc-clearkey')) {
             ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/' + id) }).then(loadKeys);
           } else if (e.target.closest('.svc-test')) {
@@ -639,11 +659,21 @@
           return parts.reduce(function (total, p) { return total * 60 + parseFloat(p); }, 0);
         }
 
+        // The server's own explanation of a failed call (ApiClient rejects with the fetch Response), or its status
         function problemText(err) {
           var text = err && err.text ? err.text() : Promise.resolve('');
           return text.then(function (t) { return t; }, function () { return ''; }).then(function (t) {
-            return t && t.length < 400 ? t.replace(/^"|"$/g, '') : 'That couldn\'t be done.';
+            var msg = t && t.length < 400 && !/^\s*</.test(t) ? t.replace(/^"|"$/g, '') : 'That couldn\'t be done' + (err && err.status ? ' (the server answered HTTP ' + err.status + ')' : '') + '.';
+            announce(msg);
+            return msg;
           });
+        }
+
+        // Status messages for screen readers (the visible ones are also marked as live regions)
+        function announce(msg) {
+          var live = page.querySelector('#SubsStatus');
+          live.textContent = '';
+          setTimeout(function () { live.textContent = msg; }, 50);
         }
 
         function visibleCues() {
@@ -730,13 +760,7 @@
           var verb = b.classList.contains('res-apply') ? 'Apply' : b.classList.contains('res-decline') ? 'Decline' : b.classList.contains('res-check') ? 'CheckAgain' : 'Undo';
           ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + b.getAttribute('data-id') + '/' + verb) })
             .then(loadResults, function (err) {
-              // ApiClient rejects with the fetch Response: its text is the server's explanation
-              var text = err && err.text ? err.text() : Promise.resolve('');
-              return text.then(function (t) { return t; }, function () { return ''; }).then(function (t) {
-                var msg = t && t.length < 400 ? t.replace(/^"|"$/g, '') : 'That couldn\'t be done.';
-                Dashboard.alert(msg);
-                return loadResults();
-              });
+              return problemText(err).then(function (msg) { Dashboard.alert(msg); return loadResults(); });
             });
         });
 
@@ -750,20 +774,23 @@
             return ApiClient.startScheduledTask(task.Id).then(function () {
               var summary = page.querySelector('#ResultsSummary');
               summary.textContent = label + '… results appear here as they come in.';
+              announce(label + ' started. Results appear as they come in.');
               if (polling) { clearInterval(polling); }
-              var started = Date.now();
-              polling = setInterval(function () {
-                if (!document.body.contains(page) || Date.now() - started > 3600000) { clearInterval(polling); polling = null; return; }
+              var started = Date.now(), timer;
+              var stop = function () { clearInterval(timer); if (polling === timer) { polling = null; } };
+              timer = polling = setInterval(function () {
+                if (!document.body.contains(page) || Date.now() - started > 3600000) { stop(); return; }
                 ApiClient.getScheduledTask(task.Id).then(function (t) {
                   var running = t.State === 'Running' || t.State === 'Cancelling';
                   return loadResults().then(function () {
                     if (running) {
                       summary.textContent = label + (t.CurrentProgressPercentage != null ? ' (' + Math.round(t.CurrentProgressPercentage) + '%)' : '') + '… ' + summary.textContent;
                     } else if (Date.now() - started > 15000) {
-                      clearInterval(polling); polling = null;
+                      stop();
+                      announce(label + ' finished. ' + summary.textContent);
                     }
                   });
-                }, function () { clearInterval(polling); polling = null; return loadResults(); });
+                }, function () { stop(); return loadResults(); });
               }, 10000);
             });
           });

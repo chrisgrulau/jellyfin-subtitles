@@ -46,6 +46,13 @@ All notable changes to this project are documented here. The format follows
   answered: none installed in Jellyfin, or every provider failing (for example SubDL down). It's searched again on the
   next run; with no provider installed at all, the run stops early and says so in the log. (Failures inside Jellyfin's
   own providers are handled by Jellyfin and still look like an empty answer.)
+- **FAM-07 (settings page):**
+  - **Copy commands** works over plain HTTP, where the browser has no clipboard: the commands are shown selected in a
+    text box, ready to copy by hand. Before, the button did nothing.
+  - Saving a key shows the server's actual reason when it fails (for example that the data folder can't be written),
+    not always "That doesn't look like an API key."
+  - Status messages (test results, key and task messages, the local-service search) are announced to screen readers.
+  - The results and editor tables scroll inside their own box on narrow screens, so the page doesn't scroll sideways.
 
 ## [0.9.0-alpha] - 2026-09-26
 
