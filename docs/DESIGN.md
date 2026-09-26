@@ -14,7 +14,8 @@ ISubtitleSource → ICandidateScorer → (download top N) → IAudioCheck → IS
    the OpenSubtitles plugin and its daily download quota. No credentials of our own.
 2. **Embedded tracks**: text tracks extracted directly; image tracks (PGS/VobSub) read with OCR.
 3. **Extra providers** (optional, pluggable): e.g. Podnapisi, SubDL.
-4. **Generated from a full transcript** (off by default; always labelled as machine-generated).
+4. **Generated from a full transcript** (off by default; always labelled as generated; see
+   [Generated subtitles](#generated-subtitles)).
 
 ### 2. Scoring (free)
 
@@ -57,7 +58,7 @@ machine-/AI-translated flags; hearing-impaired and forced preferences; language 
 |---|---|---|
 | A: sync snippets | Check and synchronise | A few minutes per video at most |
 | B: AI context | Excerpt handed to the AI plugin | Extends tier A's snippets to a target length rather than transcribing afresh |
-| C: full transcript | Last-resort subtitles, discrepancy finder, precise timing | Planned, not built: the setting is shown disabled ("coming later") |
+| C: full transcript | Last-resort subtitles; later a discrepancy finder and precise timing | The whole video in 10-minute chunks; used by [Generated subtitles](#generated-subtitles) |
 
 Each tier has its own on/off switch, provider, model and budget. Transcripts are cached by file fingerprint, provider,
 model and time range, so no audio is paid for twice and re-runs are free.
@@ -104,6 +105,71 @@ lines them up with the local-service word times the synchroniser was calibrated 
 - **No shell.** The process is started with `ProcessStartInfo.ArgumentList`; media paths are always absolute, so a file
   name starting with `-` can't be read as an option.
 - **Bounded.** A timeout per job, the whole process tree killed on cancel, a capped thread count and low priority.
+
+## Generated subtitles
+
+Stage 4, part 1: the last resort when no subtitle can be found.
+
+- **Switch:** `GenerateMissing` (off by default, and nothing runs on a new install until the settings page is saved once,
+  as for every task). It needs the Full transcript tier switched on; the page switches the tier on with it.
+- **Where it runs:** its own scheduled task, **Generate missing subtitles** (`ShoalSubtitlesGenerate`, daily at 05:00, an
+  hour after the search), rather than a step of the search: transcribing whole videos can take hours on a CPU, and the
+  search and its **Find missing now** button shouldn't wait for it. It respects cancellation between and within videos.
+- **Which videos** (`SubtitleGenerator.NeedsGeneration`): the library walk's "missing" list (`LibraryVideos.Missing`,
+  where a generated file doesn't count), restricted to videos whose search result is `NotFound`, in a wanted language
+  that is the audio's language (`AudioMatches`: the chosen audio stream's tag, or the first wanted language when the
+  stream has no tag or `und`). Not when a `*.generated.*` file is already there, or the video has a generation result:
+  `Generated` (even if its file was deleted by hand), `Undone` and `Replaced` never come back on their own; `NoSpeech`
+  comes back only when the service/model (`SetupOf`, e.g. `builtin/base`) changes; `Failed` after 3 days; `CantWrite`
+  after 30. Ordered by the time of the search result (oldest first), then path; at most `MaxGeneratedPerNight` (20,
+  0–200) a night, counting every video transcribed.
+- **Service:** the Full transcript tier (`FullTranscript`: provider and model), separate from the snippet and AI-context
+  tiers; built-in by default, which needs its usual download permission. Built with `forSubtitles`: Deepgram is asked
+  to punctuate (`punctuated_word`), OpenAI-compatible services for segments as well as words (OpenAI's words have no
+  punctuation, so each segment's punctuated tokens are laid onto its words; a service that gives segments without word
+  times has words spread over each segment by length). Checks keep their plain requests.
+- **Metering:** a paid service reserves the cost of the whole video's audio (all chunks, overlaps included) before the
+  first chunk (`MeteredSpeechToText.RunWholeAsync`), so a video isn't left half-paid at the limit, and settles at the
+  audio actually sent, even when a chunk fails or the run is cancelled part-way. A refusal (limit, unknown price, stale
+  rates) or a provider limit/sign-in failure stops the night's run without recording a result.
+- **Audio and chunks:** read with Jellyfin's ffmpeg as for snippets (the language's audio stream, 16 kHz mono,
+  single-threaded, 2-minute limit per read), 10 minutes at a time with a 5-second overlap (`TranscriptChunks`). 10
+  minutes of 16-bit WAV is about 19 MB, under the 25 MB upload cap OpenAI-compatible services commonly have. The
+  built-in whisper.cpp and Deepgram could take a whole film, but the plugin holds audio as float samples, so a two-hour
+  film in one piece would be about 460 MB of samples plus a 230 MB WAV; every service gets the same chunks instead.
+  Chunk times are moved to the video's clock; a word is kept from the chunk on whose side of the middle of the overlap
+  its midpoint falls, and the same word heard by both chunks at the seam (starting within a second) is kept once.
+- **Time limit:** 10 minutes plus 5× the video's length per video, at most a day (each built-in run also has its own
+  limit); a video that runs over is recorded as failed.
+- **Cues** (`TranscriptCues`, a pure function): word timings (every provider gives them; segments only fill in as above).
+  Sound descriptions (`[Music]`, `(laughs)`, bracketed runs), music notes and words without letters or digits are
+  dropped. Words are grouped greedily: a new cue at a pause over 0.6 s, after a sentence end once the cue has 12
+  characters, or when the next word would make it longer than 7 s or more than two lines of 42 characters (then split
+  after a comma, semicolon, colon or dash in its second half, if there is one). Lines are balanced, preferring a break
+  after punctuation. A cue runs from its first word's start to its last word's end, lengthened into the following
+  silence towards 1 s and towards 20 characters a second, never beyond 7 s, and ends at least 80 ms before the next cue
+  (words packed closer than that push the next cue on). Chinese, Japanese and Korean words are joined without spaces.
+- **Quality guard:** fewer than 20 words an hour (at least 3) after dropping sound descriptions records `NoSpeech`
+  ("No speech to transcribe") and writes nothing.
+- **File and naming:** `<video name>.<two-letter language>.generated.srt` beside the video (`SubtitleGenerator.PathFor`),
+  UTF-8 SubRip with a byte-order mark, created without overwriting. Jellyfin's external-file parser
+  (`Emby.Naming.ExternalFiles.ExternalPathParser`, checked against the 12.1 package) splits the suffix at dots: `en`
+  becomes the language, `generated` matches none of its flags (`default`; `forced`, `foreign`; `sdh`, `cc`, `hi`) and
+  becomes the stream's title, so `MediaStream.DisplayTitle` reads "generated - English - SRT - External". Nothing is
+  added to the subtitle text.
+- **"Has a subtitle":** `FindRules.Counts(…, isGenerated)` says a generated file (`SubtitleGenerator.IsGenerated`: the
+  name ends in `.generated` before the extension) never counts, so the search goes on; the library walk leaves
+  generated files out of the timing check (they are speech-to-text already). Regeneration is stopped by the file and by
+  the result, not by the walk.
+- **Replacement:** when the search adds a subtitle for a video and language with a `Generated` result, the generated
+  file is copied to `originals/` and deleted if it is still as generated (one edited by hand is left in place), and the
+  result becomes `Replaced`. The generator also checks, just before writing, that the search hasn't found one
+  meanwhile.
+- **Results:** id `gen-` + hash of video path and language, separate from the search's `find-` result (so the search's
+  30-day rhythm is untouched). `Generated` is `Changed`, so **Undo** removes the file if unchanged (`Undone`); the editor
+  doesn't open generated subtitles (Undo would no longer apply). Results record the video's path and are dropped only
+  with the video, so a generated file someone deleted isn't made again. `Generated` goes to the Activity log like
+  `Added`.
 
 ## Decisions and confidence
 
