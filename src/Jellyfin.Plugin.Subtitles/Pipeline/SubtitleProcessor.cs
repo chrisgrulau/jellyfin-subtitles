@@ -241,6 +241,85 @@ public sealed class SubtitleProcessor
     }
 
     /// <summary>
+    /// A result by id.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The result, or <c>null</c>.</returns>
+    public SubtitleResult? Get(string id) => _results.Get(id);
+
+    /// <summary>
+    /// Opens a subtitle this plugin has a result for, for editing by hand.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The lines, or <c>null</c> if there is no such result or the file can't be read.</returns>
+    public EditorView? LoadForEditing(string id)
+    {
+        if (_results.Get(id) is not { } r || !File.Exists(r.SubtitlePath))
+        {
+            return null;
+        }
+
+        var bytes = File.ReadAllBytes(r.SubtitlePath);
+        if (bytes.Length > SubtitleReader.MaxBytes || SubtitleReader.Read(bytes, r.SubtitlePath) is not { } document)
+        {
+            return null;
+        }
+
+        return new EditorView(r.Id, r.Name, Path.GetFileName(r.SubtitlePath), SubtitleFiles.Fingerprint(bytes), document.Format.ToString(), SubtitleEditing.ToEditor(document));
+    }
+
+    /// <summary>
+    /// Saves lines edited by hand. The file must still be as it was when opened; the first original is kept, so Undo
+    /// brings it back.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="fingerprint">The fingerprint the editor loaded.</param>
+    /// <param name="cues">The lines.</param>
+    /// <returns>The updated result.</returns>
+    /// <exception cref="InvalidOperationException">No such result, the file changed since, or the edit isn't valid.</exception>
+    public SubtitleResult SaveEdited(string id, string fingerprint, IReadOnlyList<EditorCue> cues)
+    {
+        var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        var bytes = File.ReadAllBytes(r.SubtitlePath);
+        var current = SubtitleFiles.Fingerprint(bytes);
+        if (!string.Equals(current, fingerprint, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The subtitle file changed since it was opened; open it again.");
+        }
+
+        var document = SubtitleReader.Read(bytes, r.SubtitlePath) ?? throw new InvalidOperationException("The subtitle can no longer be read.");
+        var (edited, changed, problem) = SubtitleEditing.Apply(document, cues);
+        if (edited is null)
+        {
+            throw new InvalidOperationException(problem);
+        }
+
+        if (changed == 0)
+        {
+            return r;
+        }
+
+        try
+        {
+            var (backup, written) = _files.Replace(r.SubtitlePath, current, SubtitleWriter.ToBytes(edited));
+            var counts = new Dictionary<string, int>(r.Cleaned, StringComparer.Ordinal);
+            counts[SubtitleEditing.EditedKind] = counts.GetValueOrDefault(SubtitleEditing.EditedKind) + changed;
+            return Save(r with
+            {
+                Backup = r.Changed ? r.Backup ?? backup : backup,
+                Fingerprint = written,
+                Changed = true,
+                Cleaned = counts,
+                Time = _clock.GetUtcNow(),
+            });
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException(ex.Message, ex);
+        }
+    }
+
+    /// <summary>
     /// When a subtitle's result was last recorded (for ordering the nightly audit).
     /// </summary>
     /// <param name="subtitlePath">The subtitle file.</param>

@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Subtitle editor.** **Edit** on a result opens that subtitle's lines on the plugin page.
+  - **Editing:** change a line's text, start or end time; delete a line or add one; shift every line at once; find
+    lines by text.
+  - **Listening:** ▶ plays that line's audio (from a moment before to a moment after), using the audio track that
+    suits the subtitle's language.
+  - **Saving:** Save writes the file only if it hasn't changed since it was opened. The first original is kept, so
+    **Undo** brings it back.
+  - **Formats:** styles and identifiers are kept for lines that were already there. Added ASS lines take the first
+    line's style.
+
+### Added
+
 - **Wording audit of earlier subtitles.** After each run's checks, a few subtitles checked before the audit existed
   are audited, oldest first: **Earlier subtitles audited per run**, 5 by default, 0 turns it off.
   - Only subtitles that are in sync or were corrected are audited, and only if the file is unchanged since, nothing

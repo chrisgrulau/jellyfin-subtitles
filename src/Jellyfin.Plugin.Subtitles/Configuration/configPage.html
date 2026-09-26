@@ -18,6 +18,15 @@
       #SubtitlesConfigPage .subs-status { white-space: nowrap; font-weight: 600; }
       #SubtitlesConfigPage .st-Corrected, #SubtitlesConfigPage .st-Added { color: #4caf50; } #SubtitlesConfigPage .st-Proposed { color: #03a9f4; }
       #SubtitlesConfigPage .st-WrongLanguage, #SubtitlesConfigPage .st-Failed { color: #ff7043; } #SubtitlesConfigPage .st-Unreliable { color: #ffb300; }
+      #SubtitlesConfigPage .subs-editor { margin: 1em 0; padding: 1em; border: 1px solid rgba(128,128,128,.35); border-radius: 4px; }
+      #SubtitlesConfigPage .subs-editor-bar { display: flex; flex-wrap: wrap; gap: .5em 1em; align-items: end; margin-bottom: .75em; }
+      #SubtitlesConfigPage .subs-editor-bar .inputContainer { margin: 0; flex: 0 1 12em; }
+      #SubtitlesConfigPage .subs-lines { width: 100%; border-collapse: collapse; font-size: .92em; }
+      #SubtitlesConfigPage .subs-lines td { padding: .25em .35em; border-bottom: 1px solid rgba(128,128,128,.2); vertical-align: top; }
+      #SubtitlesConfigPage .subs-lines input.ed-time { width: 8.5em; font-family: monospace; }
+      #SubtitlesConfigPage .subs-lines textarea { width: 100%; min-width: 16em; box-sizing: border-box; font: inherit; resize: vertical; }
+      #SubtitlesConfigPage .subs-lines input, #SubtitlesConfigPage .subs-lines textarea { background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 3px; padding: .25em .35em; }
+      #SubtitlesConfigPage .subs-lines .ed-bad { border-color: #ff7043; }
       #SubtitlesConfigPage .subs-service { padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
       #SubtitlesConfigPage .subs-service h4 { margin: .5em 0; }
       #SubtitlesConfigPage .subs-key { display: flex; gap: .5em; align-items: end; flex-wrap: wrap; }
@@ -43,6 +52,20 @@
             <span id="ResultsSummary" class="subs-muted"></span>
           </div>
           <p class="subs-muted">Subtitle files beside your films and episodes are checked daily, and subtitles are found for videos that have none in your languages (Scheduled Tasks → Shoal). Corrections follow the timing setting below; every change keeps the original, and every added subtitle can be removed with Undo.</p>
+          <div id="Editor" class="subs-editor" hidden>
+            <div class="subs-editor-bar">
+              <div style="flex:1 1 100%"><strong id="EdTitle"></strong> <span id="EdFile" class="subs-muted"></span></div>
+              <div class="inputContainer"><label class="inputLabel inputLabelUnfocused" for="EdFilter">Find text</label><input id="EdFilter" type="text" is="emby-input" /></div>
+              <div class="inputContainer"><label class="inputLabel inputLabelUnfocused" for="EdShift">Shift every line (s)</label><input id="EdShift" type="number" step="0.1" is="emby-input" /></div>
+              <button is="emby-button" type="button" id="EdShiftApply" class="raised button-alt"><span>Shift</span></button>
+              <button is="emby-button" type="button" id="EdAdd" class="raised button-alt"><span>Add line</span></button>
+              <button is="emby-button" type="button" id="EdSave" class="raised button-submit"><span>Save</span></button>
+              <button is="emby-button" type="button" id="EdClose" class="raised button-alt"><span>Close</span></button>
+            </div>
+            <p class="subs-muted">Times are h:mm:ss.mmm. ▶ plays that line's audio. Saving keeps the original: <strong>Undo</strong> in the results brings it back.</p>
+            <div style="overflow-x:auto"><table id="EdLines" class="subs-lines"></table></div>
+            <button is="emby-button" type="button" id="EdMore" class="raised button-alt" hidden><span>Show more</span></button>
+          </div>
           <div style="overflow-x:auto"><table id="Results" class="subs-results"></table></div>
         </div>
 
@@ -504,7 +527,7 @@
 
         var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large' };
 
-        var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened', RewordedFromAudit: 'line reworded' };
+        var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened', RewordedFromAudit: 'line reworded', EditedByHand: 'line edited' };
 
         function counts(map) {
           return Object.keys(map || {}).map(function (k) { var n = map[k]; return n + ' ' + (kindNames[k] || k) + (n === 1 || /d$/.test(kindNames[k] || '') ? '' : 's'); }).join(', ');
@@ -536,7 +559,9 @@
             ? Object.keys(tally).map(function (k) { return (statusNames[k] || k) + ': ' + tally[k]; }).join(' · ') + (pending ? ' · waiting for review: ' + pending : '')
             : 'Nothing checked yet.';
           page.querySelector('#Results').innerHTML = results.length ? '<tr><th>When</th><th>Video</th><th>Timing</th><th>Changes</th><th>Details</th><th></th></tr>' + results.slice(0, 100).map(function (r) {
-            var actions = (r.PendingReview ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '"><span>Apply</span></button>' : '') +
+            var editable = ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'Added'].indexOf(r.Status) >= 0;
+            var actions = (editable ? '<button is="emby-button" type="button" class="raised button-alt res-edit" data-id="' + esc(r.Id) + '"><span>Edit</span></button>' : '') +
+              (r.PendingReview ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '"><span>Apply</span></button>' : '') +
               (r.Changed ? '<button is="emby-button" type="button" class="raised button-alt res-undo" data-id="' + esc(r.Id) + '"><span>Undo</span></button>' : '');
             var origin = r.Origin ? '<div>From ' + esc(r.Origin) + '</div>' : '';
             var examples = (r.Examples || []).length ? '<details><summary>What changed</summary><ul>' + r.Examples.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>' : '';
@@ -550,7 +575,106 @@
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Results', { limit: 500 })).then(renderResults);
         }
 
+        // Subtitle editor: lines of one subtitle, edited in the page and saved together (the original is kept for Undo)
+        var editor = { id: null, fingerprint: null, cues: [], shown: 150 };
+
+        function fmtTime(s) {
+          var ms = Math.round(s * 1000), h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, sec = Math.floor(ms / 1000) % 60;
+          return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0') + '.' + String(ms % 1000).padStart(3, '0');
+        }
+
+        function parseTime(text) {
+          var parts = String(text).trim().split(':');
+          if (parts.length > 3 || parts.some(function (p) { return !/^\d+(\.\d+)?$/.test(p); })) { return NaN; }
+          return parts.reduce(function (total, p) { return total * 60 + parseFloat(p); }, 0);
+        }
+
+        function problemText(err) {
+          var text = err && err.text ? err.text() : Promise.resolve('');
+          return text.then(function (t) { return t; }, function () { return ''; }).then(function (t) {
+            return t && t.length < 400 ? t.replace(/^"|"$/g, '') : 'That couldn\'t be done.';
+          });
+        }
+
+        function visibleCues() {
+          var filter = page.querySelector('#EdFilter').value.trim().toLowerCase();
+          return editor.cues.map(function (c, i) { return { c: c, i: i }; }).filter(function (x) { return !filter || x.c.Text.toLowerCase().indexOf(filter) >= 0; });
+        }
+
+        function renderEditor() {
+          var rows = visibleCues();
+          page.querySelector('#EdLines').innerHTML = rows.slice(0, editor.shown).map(function (x) {
+            return '<tr data-i="' + x.i + '"><td><button is="emby-button" type="button" class="raised button-alt ed-play" title="Play this line"><span>▶</span></button></td>' +
+              '<td><input class="ed-time ed-start" value="' + esc(fmtTime(x.c.Start)) + '" aria-label="Start" /><br><input class="ed-time ed-end" value="' + esc(fmtTime(x.c.End)) + '" aria-label="End" /></td>' +
+              '<td style="width:100%"><textarea class="ed-text" rows="2" aria-label="Text">' + esc(x.c.Text) + '</textarea></td>' +
+              '<td><button is="emby-button" type="button" class="raised button-alt ed-delete" title="Delete this line"><span>✕</span></button></td></tr>';
+          }).join('');
+          page.querySelector('#EdMore').hidden = rows.length <= editor.shown;
+        }
+
+        function openEditor(id) {
+          ApiClient.getJSON(ApiClient.getUrl('Subtitles/Editor/' + id)).then(function (v) {
+            editor = { id: v.Id, fingerprint: v.Fingerprint, cues: v.Cues, shown: 150 };
+            page.querySelector('#EdTitle').textContent = v.Name;
+            page.querySelector('#EdFile').textContent = v.File + ' · ' + v.Cues.length + ' lines';
+            page.querySelector('#EdFilter').value = '';
+            page.querySelector('#EdShift').value = '';
+            page.querySelector('#Editor').hidden = false;
+            renderEditor();
+            page.querySelector('#Editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, function (err) { problemText(err).then(Dashboard.alert); });
+        }
+
+        page.querySelector('#EdLines').addEventListener('input', function (e) {
+          var row = e.target.closest('tr[data-i]');
+          if (!row) { return; }
+          var c = editor.cues[parseInt(row.getAttribute('data-i'), 10)];
+          if (e.target.classList.contains('ed-text')) { c.Text = e.target.value; return; }
+          var t = parseTime(e.target.value);
+          e.target.classList.toggle('ed-bad', isNaN(t));
+          if (!isNaN(t)) { if (e.target.classList.contains('ed-start')) { c.Start = t; } else { c.End = t; } }
+        });
+
+        page.querySelector('#EdLines').addEventListener('click', function (e) {
+          var row = e.target.closest('tr[data-i]');
+          if (!row) { return; }
+          var i = parseInt(row.getAttribute('data-i'), 10);
+          if (e.target.closest('.ed-delete')) { editor.cues.splice(i, 1); renderEditor(); return; }
+          if (e.target.closest('.ed-play')) {
+            var c = editor.cues[i], start = Math.max(0, c.Start - 0.3), length = Math.min(30, Math.max(0.5, c.End - c.Start + 0.6));
+            ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Subtitles/Editor/' + editor.id + '/Clip', { start: start.toFixed(3), length: length.toFixed(3) }) })
+              .then(function (r) { return r.blob(); })
+              .then(function (b) { var url = URL.createObjectURL(b), a = new Audio(url); a.onended = function () { URL.revokeObjectURL(url); }; return a.play(); })
+              .catch(function (err) { problemText(err).then(Dashboard.alert); });
+          }
+        });
+
+        page.querySelector('#EdFilter').addEventListener('input', function () { editor.shown = 150; renderEditor(); });
+        page.querySelector('#EdMore').addEventListener('click', function () { editor.shown += 150; renderEditor(); });
+        page.querySelector('#EdShiftApply').addEventListener('click', function () {
+          var by = parseFloat(page.querySelector('#EdShift').value);
+          if (isNaN(by) || by === 0) { return; }
+          editor.cues.forEach(function (c) { c.Start = Math.max(0, c.Start + by); c.End = Math.max(c.Start + 0.1, c.End + by); });
+          renderEditor();
+        });
+        page.querySelector('#EdAdd').addEventListener('click', function () {
+          var last = editor.cues.length ? editor.cues[editor.cues.length - 1].End : 0;
+          editor.cues.push({ Source: -1, Start: last + 0.5, End: last + 2.5, Text: 'New line' });
+          page.querySelector('#EdFilter').value = '';
+          editor.shown = editor.cues.length;
+          renderEditor();
+        });
+        page.querySelector('#EdClose').addEventListener('click', function () { page.querySelector('#Editor').hidden = true; editor = { id: null, fingerprint: null, cues: [], shown: 150 }; });
+        page.querySelector('#EdSave').addEventListener('click', function () {
+          if (page.querySelector('#EdLines .ed-bad')) { Dashboard.alert('Fix the times marked in red first (h:mm:ss.mmm).'); return; }
+          ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Editor/' + editor.id), data: JSON.stringify({ Fingerprint: editor.fingerprint, Cues: editor.cues }), contentType: 'application/json', dataType: 'json' })
+            .then(function () { page.querySelector('#Editor').hidden = true; Dashboard.alert('Saved. Undo in the results brings the original back.'); return loadResults(); },
+              function (err) { problemText(err).then(Dashboard.alert); });
+        });
+
         page.querySelector('#Results').addEventListener('click', function (e) {
+          var edit = e.target.closest('.res-edit');
+          if (edit) { openEditor(edit.getAttribute('data-id')); return; }
           var b = e.target.closest('.res-apply, .res-undo');
           if (!b) { return; }
           var verb = b.classList.contains('res-apply') ? 'Apply' : 'Undo';

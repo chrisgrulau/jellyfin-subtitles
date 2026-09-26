@@ -141,6 +141,25 @@ lines them up with the local-service word times the synchroniser was calibrated 
   ≥ 0.90 over a line; Whisper average log-probability ≥ −0.3 with compression-ratio and no-speech guards) and
   self-calibrated by default against subtitles already known to be good.
 
+## Editor
+
+The editor opens a subtitle through its result id, so only files this plugin already knows can be opened.
+
+- **Endpoints:**
+  - `GET Subtitles/Editor/{id}` returns the lines with their file position and the file's fingerprint.
+  - `PUT Subtitles/Editor/{id}` takes the fingerprint and the lines.
+  - `GET Subtitles/Editor/{id}/Clip?start=&length=` returns at most 30 s of WAV (16 kHz mono) from the audio track
+    `AudioChoice` picks for the subtitle's language. The page fetches it with the session's authorisation and plays
+    it from a blob, so no token appears in a URL.
+- **Checks on save:**
+  - The file must still have the fingerprint it was loaded with.
+  - Times must be finite, start at 0 or later, end after they start, and be at most a day.
+  - Text must be non-empty and at most 1,000 characters, and there can be at most 20,000 lines.
+- **What is kept:** lines keep their identifiers, settings and ASS fields through their file position, and new lines
+  take the first line's style. Lines are sorted by start time.
+- **Saving:** the file is written through `SubtitleFiles.Replace`, so the first original is kept for Undo. The number
+  of lines changed is added to `Cleaned` as `EditedByHand`.
+
 ## Reversibility and provenance
 
 The original subtitle is always kept. A small JSON record next to each result stores source, scores, sync model and

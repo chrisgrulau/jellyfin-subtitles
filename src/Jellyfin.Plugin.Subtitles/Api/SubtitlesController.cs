@@ -14,6 +14,8 @@ using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Configuration;
+using MediaBrowser.Controller.MediaEncoding;
+using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -30,12 +32,18 @@ namespace Jellyfin.Plugin.Subtitles.Api;
 [Produces(MediaTypeNames.Application.Json)]
 public class SubtitlesController : ControllerBase
 {
+    /// <summary>The longest audio clip the editor may ask for, in seconds.</summary>
+    public const int MaxClipSeconds = 30;
+
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
     private readonly IServerConfigurationManager _serverConfig;
     private readonly Pricing.Spending _spending;
     private readonly IHttpClientFactory _http;
     private readonly SubtitleProcessor _processor;
+    private readonly ILibraryManager _library;
+    private readonly IMediaSourceManager _media;
+    private readonly IMediaEncoder _encoder;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitlesController"/> class.
@@ -46,8 +54,14 @@ public class SubtitlesController : ControllerBase
     /// <param name="builtIn">The built-in speech-to-text.</param>
     /// <param name="spending">Prices, spend ledger and exchange rates.</param>
     /// <param name="serverConfig">Jellyfin's configuration (for its hardware acceleration setting).</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig)
+    /// <param name="library">Jellyfin's library (for the editor's audio clips).</param>
+    /// <param name="media">Jellyfin's media sources (to choose the audio track).</param>
+    /// <param name="encoder">Jellyfin's media encoder (for ffmpeg).</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder)
     {
+        _library = library ?? throw new ArgumentNullException(nameof(library));
+        _media = media ?? throw new ArgumentNullException(nameof(media));
+        _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
         _serverConfig = serverConfig ?? throw new ArgumentNullException(nameof(serverConfig));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
@@ -152,6 +166,79 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Opens a subtitle for editing by hand.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The lines.</returns>
+    [HttpGet("Editor/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<EditorView> OpenEditor([FromRoute] string id)
+        => _processor.LoadForEditing(id) is { } view ? view : NotFound("This subtitle can't be opened (it may have been moved or deleted, or isn't a text subtitle).");
+
+    /// <summary>
+    /// Saves lines edited by hand (Undo brings the original back).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="request">The fingerprint loaded and the lines.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPut("Editor/{id}")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> SaveEditor([FromRoute] string id, [FromBody, Required] EditorSave request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            return _processor.SaveEdited(id, request.Fingerprint ?? string.Empty, request.Cues ?? []);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// A short clip of the video's audio (the track the subtitle's language would use), to check a line by ear.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="start">Where to start, in seconds.</param>
+    /// <param name="length">How long, in seconds (at most 30).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The clip, as WAV (16 kHz mono).</returns>
+    [HttpGet("Editor/{id}/Clip")]
+    [Produces("audio/wav")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> Clip([FromRoute] string id, [FromQuery] double start, [FromQuery] double length, CancellationToken cancellationToken)
+    {
+        if (!double.IsFinite(start) || !double.IsFinite(length) || start < 0 || start > SubtitleEditing.MaxTime || length <= 0 || length > MaxClipSeconds)
+        {
+            return BadRequest("A clip starts at 0 or later and lasts at most " + MaxClipSeconds + " seconds.");
+        }
+
+        var result = _processor.Get(id);
+        if (result is null || _library.GetItemById(result.ItemId) is not MediaBrowser.Controller.Entities.Video video || string.IsNullOrEmpty(video.Path) || !System.IO.File.Exists(video.Path))
+        {
+            return NotFound("The video for this subtitle wasn't found.");
+        }
+
+        var ffmpeg = _encoder.EncoderPath;
+        if (string.IsNullOrEmpty(ffmpeg) || !System.IO.File.Exists(ffmpeg))
+        {
+            return NotFound("Jellyfin's ffmpeg wasn't found.");
+        }
+
+        var streams = _media.GetMediaStreams(video.Id);
+        var audio = streams.Where(s => s.Type == MediaBrowser.Model.Entities.MediaStreamType.Audio).OrderBy(s => s.Index).Select(s => ((string?)s.Language, s.IsDefault)).ToList();
+        var language = streams.FirstOrDefault(s => s.IsExternal && string.Equals(s.Path, result.SubtitlePath, StringComparison.Ordinal))?.Language;
+        var samples = await new Audio.FfmpegAudioSource(ffmpeg, video.Path, AudioChoice.For(audio, language)).ReadAsync(TimeSpan.FromSeconds(start), TimeSpan.FromSeconds(length), cancellationToken).ConfigureAwait(false);
+        return File(WavEncoder.Encode(samples), "audio/wav");
     }
 
     /// <summary>
@@ -355,6 +442,18 @@ public class SubtitlesController : ControllerBase
             return new TestResult(false, ex.Message);
         }
     }
+}
+
+/// <summary>
+/// Body of <see cref="SubtitlesController.SaveEditor"/>.
+/// </summary>
+public sealed record EditorSave
+{
+    /// <summary>Gets the fingerprint the editor loaded.</summary>
+    public string? Fingerprint { get; init; }
+
+    /// <summary>Gets the lines.</summary>
+    public IReadOnlyList<EditorCue>? Cues { get; init; }
 }
 
 /// <summary>
