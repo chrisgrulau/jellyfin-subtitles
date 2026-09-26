@@ -342,6 +342,17 @@ The editor opens a subtitle through its result id, so only files this plugin alr
 The original subtitle is always kept. A small JSON record next to each result stores source, scores, sync model and
 parameters, providers used and cost, so any change can be undone and re-runs are idempotent.
 
+**Restore all originals** (`SubtitleProcessor.RestoreAll`, for before uninstalling) applies Undo's own rules to every
+result that holds a change: results with the original kept (`Changed` and a `Backup`) get it back, then subtitles the
+plugin added or generated (`Added`/`Generated` and `Changed`) are removed. Originals go first so a subtitle that was
+added and later corrected is back as added, and so still removable. A file whose content isn't what the plugin last
+wrote (changed since, including an added file someone edited) is left alone, as is one whose original is no longer kept,
+and a changed file that has since been deleted isn't recreated; each is reported with the reason. An added file that is
+already gone is simply recorded as undone. Restored results are `Undone`, which later runs leave alone. The endpoint
+works in batches of 200 in a fixed order (originals, then removals, each by result id) and returns a cursor, so the
+page shows progress without a background job, and a batch never runs alongside a scheduled task or new-video run
+(`RunGate`). Jellyfin is told about each file restored or removed.
+
 ## Budgets, limits and failures
 
 Shared with the other plugins through

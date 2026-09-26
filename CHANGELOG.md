@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Restore all originals** (FEAT-06), for use before uninstalling: under the results, **Restore all originals…** first
+  says how many files would get their original back and how many added or generated subtitles would be removed, then
+  asks to confirm. Each file is handled as **Undo** would: a file changed since (by you or another program) is left
+  alone, as is one whose original is no longer kept or a changed file that has since been deleted; they are listed with
+  the reason at the end. It runs in batches of 200 with a running count, originals first (so a subtitle the plugin
+  added and then corrected can still be removed), is refused while a scheduled task or new-video run is going, and
+  restored files aren't changed again on their own.
 - **New videos are handled soon after they're added** (FEAT-03): **Handle new videos soon after they're added** (on by
   default) and **Wait after the last video is added** (10 minutes by default, 1 to 1440). Films and episodes Jellyfin
   adds are queued (each once, however often Jellyfin reports them); once nothing has been added for the wait, so a

@@ -238,8 +238,11 @@ has no effect yet.
 
 ## Upgrading and uninstalling
 
-Upgrades keep settings, results and originals. Before uninstalling, use **Undo** on any change you want reversed: once
-the plugin is gone, its originals are no longer linked to their files. Left behind: the plugin's data folder (keys,
+Upgrades keep settings, results and originals. Before uninstalling, use **Restore all originals…** (under the results on
+the plugin page) to reverse everything the plugin did, or **Undo** on single changes: once the plugin is gone, its
+originals are no longer linked to their files. Restore all puts back the original of every file it changed and removes
+every subtitle it added or generated; files changed since by you or another program are left alone and listed. Then
+untick **Enabled**, save, and uninstall. Left behind: the plugin's data folder (keys,
 results, originals) and `<jellyfin data>/shoal-subtitles/` (the built-in speech-to-text). Jellyfin's own "Download
 missing subtitles" task uses the same OpenSubtitles allowance, so you may want only one of them searching.
 

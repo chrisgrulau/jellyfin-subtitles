@@ -33,6 +33,8 @@
       #SubtitlesConfigPage .subs-filter { padding: .3em .45em; background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 3px; font: inherit; }
       #SubtitlesConfigPage fieldset.subs-libraries { border: 1px solid rgba(128,128,128,.25); border-radius: 4px; margin: 0 0 1.5em; padding: .5em 1em 1em; }
       #SubtitlesConfigPage fieldset.subs-libraries .checkboxContainer { margin: .25em 0; }
+      #SubtitlesConfigPage details.subs-restore { margin-top: 1.5em; }
+      #SubtitlesConfigPage details.subs-restore > summary { cursor: pointer; }
       #SubtitlesConfigPage .subs-service { padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
       #SubtitlesConfigPage .subs-service h4 { margin: .5em 0; }
       #SubtitlesConfigPage .subs-key { display: flex; gap: .5em; align-items: end; flex-wrap: wrap; }
@@ -84,6 +86,17 @@
             <button is="emby-button" type="button" id="EdMore" class="raised button-alt" hidden><span>Show more</span></button>
           </div>
           <div class="subs-scroll"><table id="Results" class="subs-results"></table></div>
+          <details class="subs-restore">
+            <summary>Restore all originals (before uninstalling)</summary>
+            <p class="subs-muted">Puts back the original of every subtitle file this plugin changed, and removes every subtitle it added or generated, as <strong>Undo</strong> would for each. A file changed since outside this page (by you or another program) is left alone and listed, as is one whose original is no longer kept. Restored files aren't changed again unless you choose <strong>Check again</strong>; if you're about to uninstall, also untick <strong>Enabled</strong> and save. Not while a scheduled task is running.</p>
+            <button is="emby-button" type="button" id="RestoreStart" class="raised button-alt"><span>Restore all originals…</span></button>
+            <div id="RestoreConfirm" class="subs-warning" hidden>
+              <p id="RestorePlan"></p>
+              <button is="emby-button" type="button" id="RestoreGo" class="raised"><span>Yes, restore them</span></button>
+              <button is="emby-button" type="button" id="RestoreCancel" class="raised button-alt"><span>Cancel</span></button>
+            </div>
+            <div id="RestoreProgress" role="status" aria-live="polite"></div>
+          </details>
         </div>
 
         <form id="SubtitlesConfigForm">
@@ -1034,6 +1047,42 @@
             });
           });
         }
+
+        // Restore all originals: a count first, then a confirmation, then batches until done (each batch is capped)
+        page.querySelector('#RestoreStart').addEventListener('click', function () {
+          var out = page.querySelector('#RestoreProgress');
+          out.textContent = '';
+          ApiClient.getJSON(ApiClient.getUrl('Subtitles/RestoreAll')).then(function (p) {
+            if (!p.ToRestore && !p.ToRemove) { out.textContent = 'Nothing to restore: no file holds this plugin\'s changes.'; return; }
+            page.querySelector('#RestorePlan').textContent = 'This puts back the original of ' + p.ToRestore + ' changed subtitle file' + (p.ToRestore === 1 ? '' : 's') +
+              ' and removes ' + p.ToRemove + ' subtitle' + (p.ToRemove === 1 ? '' : 's') + ' this plugin added or generated. Files changed since are left alone and listed. Go ahead?';
+            page.querySelector('#RestoreConfirm').hidden = false;
+          }, function (err) { problemText(err).then(Dashboard.alert); });
+        });
+        page.querySelector('#RestoreCancel').addEventListener('click', function () { page.querySelector('#RestoreConfirm').hidden = true; });
+        page.querySelector('#RestoreGo').addEventListener('click', function () {
+          page.querySelector('#RestoreConfirm').hidden = true;
+          var out = page.querySelector('#RestoreProgress');
+          var total = { Restored: 0, Removed: 0, AlreadyGone: 0, Skipped: [] };
+          var show = function (left, done) {
+            out.innerHTML = '<p>' + (done ? 'Done. ' : 'Restoring… ') + 'Originals put back: ' + total.Restored + ' · subtitles removed: ' + total.Removed +
+              (total.AlreadyGone ? ' · already gone: ' + total.AlreadyGone : '') + ' · left alone: ' + total.Skipped.length + (done ? '' : ' · still to do: ' + left) + '</p>' +
+              (total.Skipped.length ? '<details' + (done ? ' open' : '') + '><summary>Left alone (' + total.Skipped.length + ')</summary><ul>' + total.Skipped.map(function (s) {
+                return '<li><strong>' + esc(s.Name) + '</strong> <span class="subs-muted">' + esc(s.File) + '</span>: ' + esc(s.Reason) + '</li>';
+              }).join('') + '</ul></details>' : '');
+          };
+          var step = function (after) {
+            return ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/RestoreAll', after ? { after: after } : {}), dataType: 'json' }).then(function (b) {
+              total.Restored += b.Restored; total.Removed += b.Removed; total.AlreadyGone += b.AlreadyGone; total.Skipped = total.Skipped.concat(b.Skipped || []);
+              show(b.Left, !b.Next);
+              if (b.Next) { return step(b.Next); }
+              announce('Restore all originals finished.');
+              return loadResults();
+            });
+          };
+          show('…', false);
+          step(null).catch(function (err) { problemText(err).then(function (msg) { out.textContent = msg || 'The restore stopped; what was done so far is kept. Try again to carry on.'; }); });
+        });
 
         page.querySelector('#RunNow').addEventListener('click', function () { runTask('ShoalSubtitlesSync', 'Checking subtitles'); });
         page.querySelector('#FindNow').addEventListener('click', function () { runTask('ShoalSubtitlesFind', 'Finding missing subtitles'); });

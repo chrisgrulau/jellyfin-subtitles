@@ -44,6 +44,8 @@ public class SubtitlesController : ControllerBase
     private readonly ILibraryManager _library;
     private readonly IMediaSourceManager _media;
     private readonly IMediaEncoder _encoder;
+    private readonly RunGate _gate;
+    private readonly ILibraryMonitor _monitor;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitlesController"/> class.
@@ -57,8 +59,12 @@ public class SubtitlesController : ControllerBase
     /// <param name="library">Jellyfin's library (for the editor's audio clips).</param>
     /// <param name="media">Jellyfin's media sources (to choose the audio track).</param>
     /// <param name="encoder">Jellyfin's media encoder (for ffmpeg).</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder)
+    /// <param name="gate">Keeps restoring all originals apart from the scheduled tasks.</param>
+    /// <param name="monitor">Jellyfin's library monitor (told about restored and removed subtitles).</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, RunGate gate, ILibraryMonitor monitor)
     {
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
+        _monitor = monitor ?? throw new ArgumentNullException(nameof(monitor));
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
         _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
@@ -314,6 +320,49 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// What "Restore all originals" would do (the first step of its two-step confirmation).
+    /// </summary>
+    /// <returns>The counts.</returns>
+    [HttpGet("RestoreAll")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<RestorePreview> RestoreAllPreview() => _processor.PreviewRestoreAll();
+
+    /// <summary>
+    /// Restores all originals, a batch at a time (for use before uninstalling): every file this plugin changed gets its
+    /// original back and every subtitle it added or generated is removed, except files changed since, which are left
+    /// alone and listed. The page calls this again with the returned cursor until it is done. Refused while a scheduled
+    /// task or the handling of new videos is running.
+    /// </summary>
+    /// <param name="after">The cursor from the previous batch, if any.</param>
+    /// <returns>What this batch did.</returns>
+    [HttpPost("RestoreAll")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<RestoreAllBatch> RestoreAll([FromQuery] string? after)
+    {
+        if (after?.Length > 100)
+        {
+            return BadRequest("That isn't a cursor this endpoint gave.");
+        }
+
+        using var hold = _gate.TryEnterAlone("restoring all originals");
+        if (hold is null)
+        {
+            return Conflict("Nothing was changed: " + (_gate.Busy ?? "something else is running") + ". Try again when it has finished.");
+        }
+
+        var batch = _processor.RestoreAll(string.IsNullOrEmpty(after) ? null : after);
+        foreach (var path in batch.Touched)
+        {
+            // Jellyfin picks up restored and removed subtitles as it would from real-time monitoring
+            _monitor.ReportFileSystemChanged(path);
+        }
+
+        return batch;
     }
 
     /// <summary>
