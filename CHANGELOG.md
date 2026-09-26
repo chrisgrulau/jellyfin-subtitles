@@ -24,6 +24,12 @@ All notable changes to this project are documented here. The format follows
   balance, as the server set it. Before, the page kept its old choice and the next Save wrote it back, so reading the
   balance failed with the limited key. The page and the result now also say the new key is created in your Deepgram
   project and stays there if the plugin is removed.
+- **SUB-29:**
+  - The message asking for permission to download the built-in speech-to-text named the box "above"; it's below the
+    services, and the message now names it.
+  - **Test** uses the permission box as currently ticked, before Save.
+  - After **Check now** or **Find missing now**, results refresh every 10 seconds while the task runs, with its
+    progress, instead of once after 15 seconds.
 
 ## [0.9.0-alpha] - 2026-09-26
 

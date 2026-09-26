@@ -547,7 +547,7 @@
             ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/' + id) }).then(loadKeys);
           } else if (e.target.closest('.svc-test')) {
             result.textContent = 'Testing ' + serviceNames[id] + '…';
-            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify({ Provider: id, Model: modelFor(id), LocalServiceUrl: page.querySelector('#LocalServiceUrl').value.trim() }), contentType: 'application/json', dataType: 'json' })
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify({ Provider: id, Model: modelFor(id), LocalServiceUrl: page.querySelector('#LocalServiceUrl').value.trim(), AllowBuiltInDownload: page.querySelector('#AllowBuiltInDownload').checked }), contentType: 'application/json', dataType: 'json' })
               .then(function (r) { result.textContent = (r.Ok ? '✓ ' : '✗ ') + r.Message; loadSpending(); }, function () { result.textContent = '✗ The test couldn\'t be run.'; });
           }
         });
@@ -738,13 +738,31 @@
             });
         });
 
+        // Results are refreshed every 10 s while the task runs (for at most an hour), then once more when it ends
+        var polling = null;
+
         function runTask(key, label) {
           ApiClient.getScheduledTasks().then(function (tasks) {
             var task = tasks.filter(function (t) { return t.Key === key; })[0];
             if (!task) { Dashboard.alert('The ' + label + ' task was not found.'); return; }
             return ApiClient.startScheduledTask(task.Id).then(function () {
-              page.querySelector('#ResultsSummary').textContent = label + '… results appear here as they come in.';
-              setTimeout(loadResults, 15000);
+              var summary = page.querySelector('#ResultsSummary');
+              summary.textContent = label + '… results appear here as they come in.';
+              if (polling) { clearInterval(polling); }
+              var started = Date.now();
+              polling = setInterval(function () {
+                if (!document.body.contains(page) || Date.now() - started > 3600000) { clearInterval(polling); polling = null; return; }
+                ApiClient.getScheduledTask(task.Id).then(function (t) {
+                  var running = t.State === 'Running' || t.State === 'Cancelling';
+                  return loadResults().then(function () {
+                    if (running) {
+                      summary.textContent = label + (t.CurrentProgressPercentage != null ? ' (' + Math.round(t.CurrentProgressPercentage) + '%)' : '') + '… ' + summary.textContent;
+                    } else if (Date.now() - started > 15000) {
+                      clearInterval(polling); polling = null;
+                    }
+                  });
+                }, function () { clearInterval(polling); polling = null; return loadResults(); });
+              }, 10000);
             });
           });
         }

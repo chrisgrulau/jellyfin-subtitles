@@ -469,7 +469,7 @@ public class SubtitlesController : ControllerBase
         var paidAllowed = SpendingLimit.AllowsPaidUsage(SpendingLimit.Monthly(config.MonthlyBudget, config.NoSpendingLimit));
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(60);
-        var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, config.AllowBuiltInDownload, _keys, http, _builtIn);
+        var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, request.AllowBuiltInDownload ?? config.AllowBuiltInDownload, _keys, http, _builtIn);
         if (service is null)
         {
             return new TestResult(false, problem ?? "Can't be used.");
@@ -537,6 +537,12 @@ public sealed record TestRequest
     /// <summary>Gets the local service address as currently entered (not yet saved).</summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "As typed on the settings page; checked by the factory.")]
     public string? LocalServiceUrl { get; init; }
+
+    /// <summary>
+    /// Gets whether the built-in download is allowed, as currently ticked on the page (not yet saved); <c>null</c> for
+    /// the saved setting.
+    /// </summary>
+    public bool? AllowBuiltInDownload { get; init; }
 }
 
 /// <summary>

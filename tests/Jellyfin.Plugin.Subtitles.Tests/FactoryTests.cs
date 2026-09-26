@@ -74,7 +74,12 @@ public sealed class FactoryTests : IDisposable
     [Fact]
     public void Built_in_asks_for_permission_first()
     {
-        Assert.Contains("permission", SpeechToTextFactory.Create("builtin", string.Empty, string.Empty, true, false, Keys(), _http, null).Problem, StringComparison.Ordinal);
+        var ask = SpeechToTextFactory.Create("builtin", string.Empty, string.Empty, true, false, Keys(), _http, null).Problem;
+        Assert.Contains("permission", ask, StringComparison.Ordinal);
+
+        // SUB-29: the consent box is below the services, so the message names it rather than pointing "above"
+        Assert.DoesNotContain("above", ask, StringComparison.Ordinal);
+        Assert.Contains("Allow the built-in speech-to-text to download and run", ask, StringComparison.Ordinal);
         Assert.Contains("no build", SpeechToTextFactory.Create("builtin", string.Empty, string.Empty, true, true, Keys(), _http, null).Problem, StringComparison.Ordinal);
     }
 
