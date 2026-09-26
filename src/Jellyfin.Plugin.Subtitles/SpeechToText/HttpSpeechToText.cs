@@ -56,36 +56,24 @@ public abstract class HttpSpeechToText : ISpeechToText
     protected async Task<JsonDocument> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        HttpResponseMessage response;
+        string body;
         try
         {
-            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            // The shared provider HTTP helper classifies failures, reads the provider's wait and caps every body
+            body = await ProviderHttp.SendAsync(_http, request, MaxReplyBytes, [_key], cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        catch (ProviderException ex)
         {
-            throw new SpeechToTextException(Id + ": " + Redaction.Redact(ex.Message, [_key]), ex) { Failure = HttpFailure.Classify(ex, cancellationToken) };
+            throw new SpeechToTextException(Id + ": " + ex.Message, ex) { Failure = ex.Failure, StatusCode = ex.StatusCode };
         }
 
-        using (response)
+        try
         {
-            var body = await ReadLimitedAsync(response, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                var status = (int)response.StatusCode;
-                throw new SpeechToTextException(string.Create(CultureInfo.InvariantCulture, $"{Id}: HTTP {status}: {Redaction.Redact(body, [_key])}"))
-                {
-                    Failure = HttpFailure.Classify(response.StatusCode, body),
-                };
-            }
-
-            try
-            {
-                return JsonDocument.Parse(body);
-            }
-            catch (JsonException ex)
-            {
-                throw new SpeechToTextException(Id + ": the reply wasn't valid JSON.", ex) { Failure = FailureClass.Transient };
-            }
+            return JsonDocument.Parse(body);
+        }
+        catch (JsonException ex)
+        {
+            throw new SpeechToTextException(Id + ": the reply wasn't valid JSON.", ex) { Failure = FailureClass.Transient };
         }
     }
 
@@ -128,24 +116,5 @@ public abstract class HttpSpeechToText : ISpeechToText
 
         result.Sort((a, b) => a.Start.CompareTo(b.Start));
         return result;
-    }
-
-    private static async Task<string> ReadLimitedAsync(HttpResponseMessage response, CancellationToken ct)
-    {
-        using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        using var buffer = new MemoryStream();
-        var chunk = new byte[16384];
-        int n;
-        while ((n = await stream.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
-        {
-            if (buffer.Length + n > MaxReplyBytes)
-            {
-                throw new SpeechToTextException("The speech-to-text reply was too large.") { Failure = FailureClass.BadRequest };
-            }
-
-            await buffer.WriteAsync(chunk.AsMemory(0, n), ct).ConfigureAwait(false);
-        }
-
-        return System.Text.Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 }

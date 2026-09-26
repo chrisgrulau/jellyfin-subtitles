@@ -1,4 +1,6 @@
 using System;
+using System.Net;
+using Jellyfin.Plugin.Common.Resilience;
 
 namespace Jellyfin.Plugin.Subtitles.Pipeline;
 
@@ -8,15 +10,28 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 public static class FindRules
 {
     /// <summary>
-    /// Whether a provider exception means no further search can work today: the provider's download allowance is used up
-    /// (the OpenSubtitles plugin's <c>RateLimitExceededException</c>, matched by name to avoid depending on that plugin) or
-    /// it can't sign in.
+    /// Whether a provider failure means no further search can work today: it was classified as the provider's limit (its
+    /// download allowance or quota is used up, or it answered "too many requests") or as an authentication failure (it
+    /// can't sign in). Decided by the failure class, never by exception type names; sources translate foreign exceptions at
+    /// their boundary (see <see cref="Candidates.JellyfinSubtitleSource"/>).
     /// </summary>
     /// <param name="ex">The exception.</param>
     /// <returns><c>true</c> to stop the run.</returns>
-    public static bool StopsTheRun(Exception ex)
-        => ex is System.Security.Authentication.AuthenticationException
-            || (ex?.GetType().Name is { } name && name.Contains("RateLimit", StringComparison.Ordinal));
+    public static bool StopsTheRun(Exception ex) => ClassOf(ex) is FailureClass.ProviderLimit or FailureClass.Authentication;
+
+    /// <summary>
+    /// The failure class a search or download failure counts as within a run, if it was classified: a provider's own
+    /// class, except that "too many requests" counts as a limit, since asking again for each remaining video would be
+    /// refused too.
+    /// </summary>
+    /// <param name="ex">The exception.</param>
+    /// <returns>The class, or <c>null</c> for an unclassified failure (only that video fails).</returns>
+    internal static FailureClass? ClassOf(Exception? ex) => ex switch
+    {
+        ProviderException { StatusCode: HttpStatusCode.TooManyRequests } => FailureClass.ProviderLimit,
+        ProviderException p => p.Failure,
+        _ => null,
+    };
 
     /// <summary>
     /// Whether an existing subtitle track means the video already has subtitles in its language: forced-only tracks never
@@ -27,5 +42,4 @@ public static class FindRules
     /// <param name="countImages">Whether picture-based tracks count.</param>
     /// <returns><c>true</c> if it counts.</returns>
     public static bool Counts(bool isForced, bool isText, bool countImages) => !isForced && (isText || countImages);
-
 }

@@ -10,7 +10,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.Common.Secrets;
+using Jellyfin.Plugin.Common.Resilience;
 using Jellyfin.Plugin.Subtitles.Formats;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 
@@ -249,60 +249,36 @@ public sealed partial class SubDlSource : ICandidateSource
     private async Task<JsonDocument> GetJsonAsync(Uri address, CancellationToken cancellationToken)
     {
         var bytes = await GetBytesAsync(address, cancellationToken).ConfigureAwait(false)
-            ?? throw new HttpRequestException("SubDL's reply was too large or empty.");
+            ?? throw new ProviderException("SubDL's reply was too large.") { Failure = FailureClass.BadRequest };
         try
         {
             return JsonDocument.Parse(bytes);
         }
         catch (JsonException ex)
         {
-            throw new HttpRequestException("SubDL's reply wasn't valid JSON.", ex);
+            throw new ProviderException("SubDL's reply wasn't valid JSON.", ex) { Failure = FailureClass.Transient };
         }
     }
 
-    // Only SubDL's two hosts, over HTTPS, with a size cap; errors never carry the key (it is in the address)
+    // Only SubDL's two hosts, over HTTPS, through the shared provider HTTP helper: failures are classified (a 429 or an
+    // exhausted allowance stops SubDL for the run, see FindRules), the body is capped, and messages never carry the key
+    // (it is in the address). A reply over the cap gives null.
     private async Task<byte[]?> GetBytesAsync(Uri address, CancellationToken cancellationToken)
     {
         if (address.Scheme != Uri.UriSchemeHttps || (address.Host != SearchApi.Host && address.Host != DownloadHost.Host))
         {
-            throw new HttpRequestException("Refused: SubDL requests only go to SubDL.");
+            throw new ProviderException("Refused: SubDL requests only go to SubDL.") { Failure = FailureClass.BadRequest };
         }
 
+        using var request = new HttpRequestMessage(HttpMethod.Get, address);
         try
         {
-            using var response = await _http.GetAsync(address, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new HttpRequestException("SubDL answered " + (int)response.StatusCode + ".", null, response.StatusCode);
-            }
-
-            if (response.Content.Headers.ContentLength > MaxZipBytes)
-            {
-                return null;
-            }
-
-            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            await using (stream.ConfigureAwait(false))
-            {
-                using var buffer = new MemoryStream();
-                var chunk = new byte[81920];
-                int read;
-                while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
-                {
-                    if (buffer.Length + read > MaxZipBytes)
-                    {
-                        return null;
-                    }
-
-                    await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                }
-
-                return buffer.ToArray();
-            }
+            return await ProviderHttp.SendForBytesAsync(_http, request, MaxZipBytes, [_key], cancellationToken).ConfigureAwait(false);
         }
-        catch (HttpRequestException ex) when (ex.Message.Contains(_key, StringComparison.Ordinal))
+        catch (ProviderException ex) when (ex.Failure == FailureClass.BadRequest && ex.StatusCode is { } status && (int)status is >= 200 and < 300)
         {
-            throw new HttpRequestException(Redaction.Redact(ex.Message, [_key]), null, ex.StatusCode);
+            // Answered, but larger than any subtitle download should be
+            return null;
         }
     }
 

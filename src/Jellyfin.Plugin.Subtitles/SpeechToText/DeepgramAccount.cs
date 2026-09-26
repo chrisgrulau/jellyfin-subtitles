@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.Common.Secrets;
+using Jellyfin.Plugin.Common.Resilience;
 
 namespace Jellyfin.Plugin.Subtitles.SpeechToText;
 
@@ -172,53 +172,53 @@ public static partial class DeepgramAccount
         return id is not null && ProjectId().IsMatch(id) ? id : throw new SpeechToTextException("Deepgram didn't return a project for this key.");
     }
 
+    // Through the shared provider HTTP helper: failures are classified (a rejected key is an authentication failure, not a
+    // transient one), the body is capped before it is read, and the key is removed from every message
     private static async Task<JsonDocument> SendAsync(HttpClient http, string key, HttpMethod method, Uri address, HttpContent? body, CancellationToken cancellationToken)
     {
         if (address.Host != Api.Host || address.Scheme != Uri.UriSchemeHttps)
         {
-            throw new SpeechToTextException("Refused: Deepgram keys are only sent to Deepgram.");
+            throw new SpeechToTextException("Refused: Deepgram keys are only sent to Deepgram.") { Failure = FailureClass.BadRequest };
         }
 
         using var request = new HttpRequestMessage(method, address) { Content = body };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Token", key);
-        HttpResponseMessage response;
+        string text;
         try
         {
-            response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            text = await ProviderHttp.SendAsync(http, request, HttpSpeechToText.MaxReplyBytes, [key], cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        catch (ProviderException ex)
         {
-            throw new SpeechToTextException("Deepgram couldn't be reached: " + Redaction.Redact(ex.Message, [key]), ex);
+            throw ToSpeechToText(ex);
         }
 
-        using (response)
+        try
         {
-            var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (text.Length > HttpSpeechToText.MaxReplyBytes)
-            {
-                throw new SpeechToTextException("Deepgram's reply was too large.");
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var why = response.StatusCode switch
-                {
-                    HttpStatusCode.Unauthorized => "Deepgram didn't accept this key.",
-                    HttpStatusCode.Forbidden => "This key isn't allowed to do that (it needs an Admin or Owner key).",
-                    _ => "Deepgram answered " + (int)response.StatusCode + ": " + Redaction.Redact(text, [key]),
-                };
-                throw new SpeechToTextException(why) { StatusCode = response.StatusCode };
-            }
-
-            try
-            {
-                return JsonDocument.Parse(text);
-            }
-            catch (JsonException ex)
-            {
-                throw new SpeechToTextException("Deepgram's reply wasn't valid JSON.", ex);
-            }
+            return JsonDocument.Parse(text);
         }
+        catch (JsonException ex)
+        {
+            throw new SpeechToTextException("Deepgram's reply wasn't valid JSON.", ex) { Failure = FailureClass.Transient };
+        }
+    }
+
+    /// <summary>
+    /// A failed account call as this plugin's speech-to-text failure, keeping its class and status, with plain words for a
+    /// rejected key or a key without the needed permission.
+    /// </summary>
+    /// <param name="ex">The classified failure.</param>
+    /// <returns>The failure to throw.</returns>
+    internal static SpeechToTextException ToSpeechToText(ProviderException ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+        var why = ex.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized => "Deepgram didn't accept this key.",
+            HttpStatusCode.Forbidden when ex.Failure == FailureClass.Authentication => "This key isn't allowed to do that (it needs an Admin or Owner key).",
+            _ => ex.Message,
+        };
+        return new SpeechToTextException(why, ex) { Failure = ex.Failure, StatusCode = ex.StatusCode };
     }
 
     [GeneratedRegex("^[0-9a-fA-F-]{8,64}$")]

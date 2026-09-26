@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **FAM-06:** uses the shared building blocks from the common library (updated to its FAM-06 release).
+
+### Fixed
+
+- **SUB-26:** SubDL searches and downloads, Deepgram account calls (balance, key check, creating a limited key) and the
+  cloud speech-to-text calls go through the shared provider HTTP helper: every failure is classified, the provider's
+  requested wait is read, keys are removed from messages, and no reply or error body is read beyond its size limit
+  (before, a large Deepgram error was read whole). A SubDL "too many requests" or used-up allowance now leaves SubDL out
+  for the rest of the run instead of asking it again for every remaining video; a rejected Deepgram key is reported as
+  an authentication failure rather than a passing one. The missing-subtitle search stops on a classified provider limit
+  or sign-in failure; the OpenSubtitles plugin's own limit is recognised where Jellyfin's providers are called.
+
 ## [0.10.0-alpha] - 2026-09-26
 
 ### Changed

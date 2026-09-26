@@ -55,12 +55,12 @@ public sealed class ReviewPass2Tests : IDisposable
         Assert.True(processor.NeedsCheck(path, await SubtitleFiles.FingerprintFileAsync(path, TestContext.Current.CancellationToken)));
     }
 
-    // SUB-12: the provider's own allowance, or a failed sign-in, stops the run for today
+    // SUB-12: the provider's own allowance, or a failed sign-in, stops the run for today (classified: see SubDlTests)
     [Fact]
     public void Provider_limits_and_sign_in_failures_stop_the_run()
     {
-        Assert.True(FindRules.StopsTheRun(new RateLimitExceededException("OpenSubtitles download limit reached")));
-        Assert.True(FindRules.StopsTheRun(new AuthenticationException("login failed")));
+        Assert.True(FindRules.StopsTheRun(Candidates.ProviderFailures.Classify(new RateLimitExceededException("OpenSubtitles download limit reached"))!));
+        Assert.True(FindRules.StopsTheRun(Candidates.ProviderFailures.Classify(new AuthenticationException("login failed"))!));
         Assert.False(FindRules.StopsTheRun(new IOException("disk")));
     }
 
@@ -74,7 +74,7 @@ public sealed class ReviewPass2Tests : IDisposable
     public void Which_existing_tracks_count_as_having_subtitles(bool forced, bool text, bool countImages, bool counts)
         => Assert.Equal(counts, FindRules.Counts(forced, text, countImages));
 
-    // Named like the OpenSubtitles plugin's exception, which is matched by name
+    // Named like the OpenSubtitles plugin's exception, which is classified by name where it enters the plugin
     private sealed class RateLimitExceededException(string message) : Exception(message);
 
     private sealed class Endless : Stream

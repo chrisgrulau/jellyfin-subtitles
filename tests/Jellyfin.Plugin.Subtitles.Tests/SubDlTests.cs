@@ -8,7 +8,9 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Common.Resilience;
 using Jellyfin.Plugin.Subtitles.Candidates;
+using Jellyfin.Plugin.Subtitles.Pipeline;
 using Xunit;
 
 namespace Jellyfin.Plugin.Subtitles.Tests;
@@ -91,9 +93,68 @@ public class SubDlTests
         using var http = new HttpClient(new FakeSubDl { Fail = true });
         var source = new SubDlSource(http, Key, _ => new VideoIds("tt0000001", null, null, null));
 
-        var ex = await Assert.ThrowsAsync<HttpRequestException>(() => source.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<ProviderException>(() => source.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
 
         Assert.DoesNotContain(Key, ex.Message, StringComparison.Ordinal);
+    }
+
+    // SUB-26: SubDL goes through the shared provider HTTP helper, so its failures are classified
+    [Fact]
+    public async Task A_subdl_rate_limit_is_classified_and_stops_subdl_for_the_run()
+    {
+        var api = new FakeSubDl { Status = HttpStatusCode.TooManyRequests };
+        using var http = new HttpClient(api);
+        var subdl = new SubDlSource(http, Key, _ => new VideoIds("tt0000001", null, null, null));
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() => subdl.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
+        Assert.Equal(HttpStatusCode.TooManyRequests, ex.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(120), ex.RetryAfter);
+        Assert.True(FindRules.StopsTheRun(ex));
+        Assert.DoesNotContain(Key, ex.Message, StringComparison.Ordinal);
+
+        // With another source answering, SubDL is asked once and then left out for the rest of the run
+        var combined = new CombinedSource([new Listed("Good"), subdl]);
+        await combined.SearchAsync(Item, "eng", TestContext.Current.CancellationToken);
+        await combined.SearchAsync(Item, "eng", TestContext.Current.CancellationToken);
+        Assert.Equal(2, api.Requests.Count);
+    }
+
+    [Fact]
+    public async Task A_subdl_server_error_fails_only_that_search_and_an_oversized_download_gives_nothing()
+    {
+        var failing = new FakeSubDl { Status = HttpStatusCode.BadGateway };
+        using var http = new HttpClient(failing);
+        var subdl = new SubDlSource(http, Key, _ => new VideoIds("tt0000001", null, null, null));
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() => subdl.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
+        Assert.Equal(FailureClass.Transient, ex.Failure);
+        Assert.False(FindRules.StopsTheRun(ex));
+
+        var huge = new FakeSubDl { ZipBytes = SubDlSource.MaxZipBytes + 1 };
+        using var hugeHttp = new HttpClient(huge);
+        var source = new SubDlSource(hugeHttp, Key, _ => new VideoIds("tt0000001", "42", 1, 2));
+        var found = await source.SearchAsync(Item, "eng", TestContext.Current.CancellationToken);
+        Assert.Null(await source.FetchAsync(found[0], TestContext.Current.CancellationToken));
+    }
+
+    // SUB-26: the run stops on a classified limit, never on a type name; foreign exceptions are classified where they enter
+    [Fact]
+    public void The_run_stops_on_a_classified_limit_or_sign_in_failure()
+    {
+        Assert.True(FindRules.StopsTheRun(new ProviderException("used up") { Failure = FailureClass.ProviderLimit }));
+        Assert.True(FindRules.StopsTheRun(new ProviderException("bad key") { Failure = FailureClass.Authentication }));
+        Assert.True(FindRules.StopsTheRun(new ProviderException("slow down") { Failure = FailureClass.Transient, StatusCode = HttpStatusCode.TooManyRequests }));
+        Assert.False(FindRules.StopsTheRun(new ProviderException("down") { Failure = FailureClass.Transient }));
+        Assert.False(FindRules.StopsTheRun(new ProviderException("odd file") { Failure = FailureClass.BadRequest }));
+        Assert.False(FindRules.StopsTheRun(new RateLimitExceededException("not classified yet")));
+        Assert.False(FindRules.StopsTheRun(new IOException("disk")));
+
+        Assert.Equal(FailureClass.ProviderLimit, ProviderFailures.Classify(new RateLimitExceededException("OpenSubtitles download limit reached"))!.Failure);
+        Assert.Equal(FailureClass.Authentication, ProviderFailures.Classify(new System.Security.Authentication.AuthenticationException("login failed"))!.Failure);
+        Assert.Equal(FailureClass.Authentication, ProviderFailures.Classify(new HttpRequestException("no", null, HttpStatusCode.Unauthorized))!.Failure);
+        Assert.Equal("OpenSubtitles download limit reached", ProviderFailures.Classify(new RateLimitExceededException("OpenSubtitles download limit reached"))!.Message);
+        Assert.Null(ProviderFailures.Classify(new IOException("disk")));
+        Assert.Null(ProviderFailures.Classify(new OperationCanceledException()));
     }
 
     [Fact]
@@ -101,7 +162,7 @@ public class SubDlTests
     {
         var good = new Listed("Good");
         var broken = new Listed("Broken") { Throw = new HttpRequestException("down") };
-        var limited = new Listed("Limited") { Throw = new RateLimitExceededException("download limit reached") };
+        var limited = new Listed("Limited") { Throw = Limit("download limit reached") };
         var combined = new CombinedSource([broken, limited, good]);
 
         var found = await combined.SearchAsync(Item, "eng", TestContext.Current.CancellationToken);
@@ -111,8 +172,8 @@ public class SubDlTests
         Assert.Equal(1, limited.Searches);
         Assert.Equal(2, broken.Searches);
 
-        var onlyLimited = new CombinedSource([new Listed("Limited") { Throw = new RateLimitExceededException("limit") }]);
-        await Assert.ThrowsAsync<RateLimitExceededException>(() => onlyLimited.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
+        var onlyLimited = new CombinedSource([new Listed("Limited") { Throw = Limit("limit") }]);
+        await Assert.ThrowsAsync<ProviderException>(() => onlyLimited.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
     }
 
     // SUB-19: when no source answered, that isn't "nothing offered"
@@ -131,7 +192,9 @@ public class SubDlTests
         Assert.Single(await partly.SearchAsync(Item, "eng", TestContext.Current.CancellationToken));
     }
 
-    // Named like the OpenSubtitles plugin's exception, which is matched by name
+    private static ProviderException Limit(string message) => new(message) { Failure = FailureClass.ProviderLimit };
+
+    // Named like the OpenSubtitles plugin's exception, which is classified by name where it enters the plugin
     private sealed class RateLimitExceededException(string message) : Exception(message);
 
     private sealed class Listed(string name) : ICandidateSource
@@ -156,6 +219,10 @@ public class SubDlTests
     {
         public bool Fail { get; init; }
 
+        public HttpStatusCode Status { get; init; } = HttpStatusCode.OK;
+
+        public int ZipBytes { get; init; }
+
         public List<Uri> Requests { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -164,6 +231,18 @@ public class SubDlTests
             if (Fail)
             {
                 throw new HttpRequestException("Connection refused (" + request.RequestUri + ")");
+            }
+
+            if (Status != HttpStatusCode.OK)
+            {
+                var error = new HttpResponseMessage(Status) { Content = new StringContent("{\"error\":\"no (" + request.RequestUri + ")\"}") };
+                error.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(120));
+                return Task.FromResult(error);
+            }
+
+            if (ZipBytes > 0 && request.RequestUri!.Host == "dl.subdl.com")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[ZipBytes]) });
             }
 
             if (request.RequestUri!.Host == "api.subdl.com")

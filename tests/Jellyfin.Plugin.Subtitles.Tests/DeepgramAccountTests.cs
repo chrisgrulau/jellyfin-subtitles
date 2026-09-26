@@ -54,6 +54,32 @@ public class DeepgramAccountTests
         Assert.Contains("\"scopes\":[\"usage:write\"]", api.CreatedWith, StringComparison.Ordinal);
     }
 
+    // SUB-26: account calls go through the shared provider HTTP helper
+    [Fact]
+    public async Task A_rejected_key_is_an_authentication_failure_not_a_transient_one()
+    {
+        DeepgramAccount.ClearCache();
+        using var http = new HttpClient(new FakeDeepgram());
+
+        var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => DeepgramAccount.BalanceAsync(http, "wrong-key-0123456789abcdef", TimeProvider.System, TestContext.Current.CancellationToken));
+
+        Assert.Equal(Jellyfin.Plugin.Common.Resilience.FailureClass.Authentication, ex.Failure);
+        Assert.Equal(HttpStatusCode.Unauthorized, ex.StatusCode);
+        Assert.Equal("Deepgram didn't accept this key.", ex.Message);
+    }
+
+    [Fact]
+    public async Task A_huge_error_body_is_not_read_in_full()
+    {
+        var endless = new Endless();
+        using var http = new HttpClient(new Huge(endless));
+
+        var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => DeepgramAccount.CanReadBillingAsync(http, AdminKey, TestContext.Current.CancellationToken));
+
+        Assert.Equal(Jellyfin.Plugin.Common.Resilience.FailureClass.Transient, ex.Failure);
+        Assert.InRange(endless.Served, 1, HttpSpeechToText.MaxReplyBytes + (64 * 1024));
+    }
+
     // SUB-27: the page is told which key reads the balance after the swap
     [Theory]
     [InlineData(Configuration.BalanceSource.TranscriptionKey, false, Configuration.BalanceSource.Off)]
@@ -63,6 +89,44 @@ public class DeepgramAccountTests
     [InlineData(Configuration.BalanceSource.SeparateKey, false, Configuration.BalanceSource.SeparateKey)]
     public void The_balance_setting_follows_a_key_swap(Configuration.BalanceSource before, bool kept, Configuration.BalanceSource after)
         => Assert.Equal(after, DeepgramAccount.BalanceAfterLimiting(before, kept));
+
+    private sealed class Huge(Endless body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StreamContent(body) });
+    }
+
+    private sealed class Endless : System.IO.Stream
+    {
+        public long Served { get; private set; }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => Served; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Array.Fill(buffer, (byte)'x', offset, count);
+            Served += count;
+            return count;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, System.IO.SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 
     private sealed class FakeDeepgram : HttpMessageHandler
     {
