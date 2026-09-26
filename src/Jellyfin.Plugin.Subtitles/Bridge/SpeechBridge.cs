@@ -68,8 +68,8 @@ public static partial class SpeechBridge
             return Reply(false, problem.Message, problem.Failure);
         }
 
-        var ffmpeg = s.Encoder.EncoderPath;
-        if (string.IsNullOrEmpty(ffmpeg) || !File.Exists(ffmpeg))
+        var ffmpeg = Audio.FfmpegLocator.Resolve(s.Encoder.EncoderPath);
+        if (ffmpeg is null)
         {
             return Reply(false, "Jellyfin's ffmpeg wasn't found.", "not-set-up");
         }

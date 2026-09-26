@@ -17,7 +17,7 @@
       #SubtitlesConfigPage .subs-results td, #SubtitlesConfigPage .subs-results th { text-align: left; padding: .35em .5em; border-bottom: 1px solid rgba(128,128,128,.2); vertical-align: top; }
       #SubtitlesConfigPage .subs-status { white-space: nowrap; font-weight: 600; }
       #SubtitlesConfigPage .st-Corrected, #SubtitlesConfigPage .st-Added { color: #4caf50; } #SubtitlesConfigPage .st-Proposed { color: #03a9f4; }
-      #SubtitlesConfigPage .st-WrongLanguage, #SubtitlesConfigPage .st-Failed { color: #ff7043; } #SubtitlesConfigPage .st-Unreliable { color: #ffb300; }
+      #SubtitlesConfigPage .st-WrongLanguage, #SubtitlesConfigPage .st-Failed, #SubtitlesConfigPage .st-CantWrite { color: #ff7043; } #SubtitlesConfigPage .st-Unreliable { color: #ffb300; }
       #SubtitlesConfigPage .subs-service { padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
       #SubtitlesConfigPage .subs-service h4 { margin: .5em 0; }
       #SubtitlesConfigPage .subs-key { display: flex; gap: .5em; align-items: end; flex-wrap: wrap; }
@@ -502,7 +502,7 @@
           }
         });
 
-        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large' };
+        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large', CantWrite: "Can't write here" };
 
         var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened', RewordedFromAudit: 'line reworded' };
 

@@ -95,8 +95,8 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             return;
         }
 
-        var ffmpeg = _encoder.EncoderPath;
-        if (string.IsNullOrEmpty(ffmpeg) || !File.Exists(ffmpeg))
+        var ffmpeg = Audio.FfmpegLocator.Resolve(_encoder.EncoderPath);
+        if (ffmpeg is null)
         {
             LogNoFfmpeg(_logger);
             return;
@@ -112,6 +112,13 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             LogNoSpeech(_logger, problem);
         }
         var wanted = SpendingLimit.EffectiveLanguages(config.Languages).Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal);
+
+        // The results file holds the undo records: if it can't be read, nothing runs (and nothing overwrites it)
+        if (!_processor.ResultsReadable)
+        {
+            LogNoResults(_logger, _processor.ResultsProblem ?? "unknown");
+            return;
+        }
 
         // Results for subtitle files that were deleted are no longer needed
         var pruned = _processor.PruneGone();
@@ -154,10 +161,12 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
                 var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, policies, cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
+#pragma warning disable CA1031 // One odd file (a subtitle from the internet can hold anything) mustn't stop the nightly run: it is recorded as failed
+            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
             {
                 LogFailed(_logger, job.Name, ex.Message);
-                _processor.RecordFailure(job, ex.Message);
+                _processor.RecordFailure(job, ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException ? ex.Message : ex.GetType().Name + ": " + ex.Message);
             }
 
             progress.Report(100.0 * (i + 1) / todo.Count);
@@ -194,7 +203,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
                 LogFailed(_logger, job.Name, ex.Message);
                 break;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
+#pragma warning disable CA1031 // One odd file (a subtitle from the internet can hold anything) mustn't stop the nightly run: it is recorded as failed
+            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
             {
                 LogFailed(_logger, job.Name, ex.Message);
             }
@@ -209,16 +220,25 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         foreach (var job in todo)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // A corrected copy goes beside the video: don't read the whole video if it can't be written there
+            if (Path.GetDirectoryName(job.VideoPath) is { } folder && !SubtitleFiles.CanWrite(folder))
+            {
+                _embedded.RecordFailure(job, "Jellyfin's account can't write in this video's folder (a read-only mount, or folder permissions?).");
+                continue;
+            }
+
             try
             {
                 var bytes = await FfmpegSubtitleExtractor.ExtractAsync(ffmpeg, job.VideoPath, job.StreamIndex, job.Codec, cancellationToken).ConfigureAwait(false);
                 var result = await _embedded.CheckAsync(job, bytes, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, policies, cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
+#pragma warning disable CA1031 // One odd file (a subtitle from the internet can hold anything) mustn't stop the nightly run: it is recorded as failed
+            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
             {
                 LogFailed(_logger, job.Name, ex.Message);
-                _embedded.RecordFailure(job, ex.Message);
+                _embedded.RecordFailure(job, ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException ? ex.Message : ex.GetType().Name + ": " + ex.Message);
             }
         }
     }
@@ -409,4 +429,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: speech-to-text not used: {Problem}")]
     private static partial void LogNoSpeech(ILogger logger, string problem);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Subtitle check skipped: {Problem}")]
+    private static partial void LogNoResults(ILogger logger, string problem);
 }

@@ -154,15 +154,15 @@ public sealed partial record ReleaseTags
     [GeneratedRegex(@"\b(?:director'?s[\s._-]?cut|extended(?:[\s._-]?(?:cut|edition))?|unrated|theatrical(?:[\s._-]?cut)?|uncut|remastered|imax|special[\s._-]?edition|ultimate(?:[\s._-]?(?:cut|edition))?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex EditionPattern();
 
-    [GeneratedRegex(@"\b(?:repack\d?|proper|rerip)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:repack[0-9]?|proper|rerip)\b", RegexOptions.IgnoreCase)]
     private static partial Regex RepackPattern();
 
-    [GeneratedRegex(@"\bS(?<s>\d{1,2})[\s._-]?E(?<e>\d{1,3})(?:[\s._]?(?:-E?|E)(?<e2>\d{1,3}))?\b|\b(?<s>\d{1,2})x(?<e>\d{2,3})\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\bS(?<s>[0-9]{1,2})[\s._-]?E(?<e>[0-9]{1,3})(?:[\s._]?(?:-E?|E)(?<e2>[0-9]{1,3}))?\b|\b(?<s>[0-9]{1,2})x(?<e>[0-9]{2,3})\b", RegexOptions.IgnoreCase)]
     private static partial Regex EpisodeCodePattern();
 
     [GeneratedRegex(@"-([A-Za-z0-9]{2,20})(?:\[[^\]]*\])?\s*$")]
     private static partial Regex GroupPattern();
 
-    [GeneratedRegex(@"^(?:x26[45]|h\.?26[45]|hevc|avc|xvid|divx|aac\d?|ac3|dts|ddp?\d?|truehd|atmos|dl|rip|hdr\d*|dv|sdr|10bit|8bit)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:x26[45]|h\.?26[45]|hevc|avc|xvid|divx|aac[0-9]?|ac3|dts|ddp?[0-9]?|truehd|atmos|dl|rip|hdr[0-9]*|dv|sdr|10bit|8bit)$", RegexOptions.IgnoreCase)]
     private static partial Regex TechnicalPattern();
 }

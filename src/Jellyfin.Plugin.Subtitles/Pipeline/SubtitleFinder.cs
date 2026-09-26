@@ -112,6 +112,12 @@ public sealed class SubtitleFinder
         return stem + "." + (Languages.ToTwoLetter(language) ?? language) + (hearingImpaired ? ".sdh" : string.Empty) + ext;
     }
 
+    /// <summary>Gets whether results can be recorded now (the results file is readable).</summary>
+    public bool ResultsReadable => _results.Readable;
+
+    /// <summary>Gets what is wrong with the results file, if anything.</summary>
+    public string? ResultsProblem => _results.Problem;
+
     /// <summary>
     /// Whether to search for a video: never searched, or nothing fitted long enough ago. An added subtitle, or one someone
     /// removed with undo, is never searched for again on its own.
@@ -122,7 +128,7 @@ public sealed class SubtitleFinder
     {
         ArgumentNullException.ThrowIfNull(job);
         return _results.Get(IdFor(job.VideoPath, job.Language)) is not { } r
-            || (r.Status is ResultStatus.NotFound or ResultStatus.Failed && _clock.GetUtcNow() - r.Time >= SearchAgainAfter);
+            || (r.Status is ResultStatus.NotFound or ResultStatus.Failed or ResultStatus.CantWrite && _clock.GetUtcNow() - r.Time >= SearchAgainAfter);
     }
 
     /// <summary>
@@ -162,6 +168,16 @@ public sealed class SubtitleFinder
             {
                 Status = ResultStatus.NotFound,
                 Explanation = candidates.Count == 0 ? "No subtitles offered for this video." : string.Create(CultureInfo.InvariantCulture, $"{candidates.Count} offered, none suitable (wrong episode, forced-only or an unsupported format)."),
+            });
+        }
+
+        // A subtitle can only be added if Jellyfin's account can write beside the video: check before any download
+        if (Path.GetDirectoryName(job.VideoPath) is { } folder && !SubtitleFiles.CanWrite(folder))
+        {
+            return Save(result with
+            {
+                Status = ResultStatus.CantWrite,
+                Explanation = "Jellyfin's account can't write in this video's folder (a read-only mount, or folder permissions?), so nothing was downloaded. Searched again in 30 days.",
             });
         }
 
@@ -249,6 +265,7 @@ public sealed class SubtitleFinder
             Confidence = model.Confidence,
             Origin = string.Create(CultureInfo.InvariantCulture, $"{b.Candidate.Candidate.Source}: {b.Candidate.Candidate.ReleaseName} (score {b.Candidate.Score:0.00})"),
             Cleaned = applied.GroupBy(c => c.Kind.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal),
+            Examples = b.Outcome.Pairs,
             Explanation = "Added: " + timing + ". " + model.Explanation + (notes.Count > 0 ? " Skipped first: " + string.Join("; ", notes) + "." : string.Empty),
         });
     }

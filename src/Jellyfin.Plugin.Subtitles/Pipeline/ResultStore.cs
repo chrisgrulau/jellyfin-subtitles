@@ -43,6 +43,9 @@ public enum ResultStatus
 
     /// <summary>The file is too large to be a subtitle; it isn't read again until it changes.</summary>
     TooLarge,
+
+    /// <summary>Jellyfin's account can't write there (a read-only mount, permissions); tried again after a while.</summary>
+    CantWrite,
 }
 
 /// <summary>
@@ -146,6 +149,26 @@ public sealed class ResultStore
     private readonly string _path;
     private readonly Lock _lock = new();
     private List<SubtitleResult>? _results;
+
+    /// <summary>
+    /// Gets what is wrong with the results file, if anything (it couldn't be read, or it was damaged and set aside).
+    /// </summary>
+    public string? Problem { get; private set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the results file can be read now (so runs may go ahead and record results).
+    /// </summary>
+    public bool Readable
+    {
+        get
+        {
+            lock (_lock)
+            {
+                Load();
+                return _results is not null;
+            }
+        }
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ResultStore"/> class.
@@ -280,18 +303,48 @@ public sealed class ResultStore
         {
             _results = File.Exists(_path) ? JsonSerializer.Deserialize<List<SubtitleResult>>(File.ReadAllText(_path), JsonOptions) : null;
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Only history: a damaged file means subtitles are checked again, nothing worse
+            // Unreadable for now (locked, permissions, a share hiccup): this file holds the undo records, so it is never
+            // replaced. Nothing is cached, so nothing can be saved over it, and the next access reads it again.
+            Problem = "The results file can't be read right now (" + ex.GetType().Name + "); nothing is checked or recorded until it can be.";
+            return [];
+        }
+        catch (JsonException)
+        {
+            // Damaged: set it aside (with the undo records it held, for recovery by hand) and start afresh
+            var aside = _path + ".damaged-" + DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            try
+            {
+                File.Move(_path, aside, overwrite: true);
+                Problem = "The results file was damaged and was set aside as " + Path.GetFileName(aside) + "; results start afresh (the originals of changed files are still in the originals folder).";
+            }
+            catch (Exception moveEx) when (moveEx is IOException or UnauthorizedAccessException)
+            {
+                Problem = "The results file is damaged and couldn't be set aside; nothing is recorded until it is moved or deleted.";
+                return [];
+            }
+
             _results = null;
         }
 
         _results = [.. (_results ?? []).Where(r => r is not null && r.Id is not null && r.SubtitlePath is not null)];
+        if (Problem is not null && Problem.StartsWith("The results file can't", StringComparison.Ordinal))
+        {
+            Problem = null;
+        }
+
         return _results;
     }
 
     private void Save(List<SubtitleResult> list)
     {
+        // Never write over a results file that couldn't be read (its list was never loaded)
+        if (!ReferenceEquals(list, _results))
+        {
+            throw new InvalidOperationException(Problem ?? "The results file can't be read, so nothing is recorded.");
+        }
+
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);

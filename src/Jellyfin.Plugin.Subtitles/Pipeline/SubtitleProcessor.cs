@@ -85,6 +85,12 @@ public sealed class SubtitleProcessor
     /// <summary>How many change examples a result keeps.</summary>
     public const int MaxExamples = 12;
 
+    /// <summary>How long a failed check waits before it is tried again (unless the file changes).</summary>
+    public static readonly TimeSpan RetryFailedAfter = TimeSpan.FromDays(3);
+
+    /// <summary>How long a subtitle in a folder that couldn't be written waits before it is tried again.</summary>
+    public static readonly TimeSpan RetryCantWriteAfter = TimeSpan.FromDays(30);
+
     /// <summary>The <see cref="SubtitleResult.Cleaned"/> key counting lines reworded from an audit.</summary>
     public const string RewordedKind = "RewordedFromAudit";
 
@@ -109,7 +115,12 @@ public sealed class SubtitleProcessor
             return true;
         }
 
-        return r.Status != ResultStatus.Undone && (r.Status == ResultStatus.Failed || r.Version < CurrentVersion);
+        // Failures and folders that can't be written are tried again only after a while (not every night)
+        var age = _clock.GetUtcNow() - r.Time;
+        return r.Status != ResultStatus.Undone
+            && ((r.Status == ResultStatus.Failed && age >= RetryFailedAfter)
+                || (r.Status == ResultStatus.CantWrite && age >= RetryCantWriteAfter)
+                || (r.Status is not (ResultStatus.Failed or ResultStatus.CantWrite) && r.Version < CurrentVersion));
     }
 
     /// <summary>
@@ -146,6 +157,23 @@ public sealed class SubtitleProcessor
         var bytes = await File.ReadAllBytesAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false);
         var fingerprint = SubtitleFiles.Fingerprint(bytes);
         var previous = _results.Get(ResultStore.IdFor(job.SubtitlePath));
+
+        // Checking only makes sense if a correction could be written: don't spend audio work (or quota) on it otherwise
+        if (Path.GetDirectoryName(job.SubtitlePath) is { } folder && !SubtitleFiles.CanWrite(folder, job.SubtitlePath))
+        {
+            return Save(new SubtitleResult
+            {
+                Id = ResultStore.IdFor(job.SubtitlePath),
+                ItemId = job.ItemId,
+                Name = job.Name,
+                SubtitlePath = job.SubtitlePath,
+                Time = _clock.GetUtcNow(),
+                Fingerprint = fingerprint,
+                Version = CurrentVersion,
+                Status = ResultStatus.CantWrite,
+                Explanation = "Jellyfin's account can't write this subtitle or its folder (a read-only mount, or folder permissions?), so it isn't checked. Tried again in 30 days, or when the file changes.",
+            });
+        }
         var result = new SubtitleResult
         {
             Id = ResultStore.IdFor(job.SubtitlePath),
@@ -172,11 +200,12 @@ public sealed class SubtitleProcessor
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;
+        // A timing decided from lines the AI matched by meaning always waits for review (SUB-28), until there is field data
         var status = outcome.WrongLanguageSuspected ? ResultStatus.WrongLanguage : model.Status switch
         {
             SyncStatus.InSync => ResultStatus.InSync,
             SyncStatus.Unreliable => ResultStatus.Unreliable,
-            _ => policies.Timing == ChangePolicy.Automatic ? ResultStatus.Corrected : ResultStatus.Proposed,
+            _ => policies.Timing == ChangePolicy.Automatic && outcome.Stage != SyncCheck.ByMeaningStage ? ResultStatus.Corrected : ResultStatus.Proposed,
         };
         result = result with
         {
@@ -208,7 +237,7 @@ public sealed class SubtitleProcessor
         {
             Cleaned = Count(applied),
             CleanupPending = Count(pending),
-            Examples = [.. applied.Select(c => Describe(c, false)).Concat(pending.Select(c => Describe(c, true))).Take(MaxExamples)],
+            Examples = [.. outcome.Pairs.Concat(applied.Select(c => Describe(c, false))).Concat(pending.Select(c => Describe(c, true))).Take(MaxExamples)],
         };
 
         // With the timing settled by speech-to-text (and the words matching, so not a translation), the wording can be
@@ -476,6 +505,18 @@ public sealed class SubtitleProcessor
     public void RecordFailure(SubtitleJob job, string error)
     {
         ArgumentNullException.ThrowIfNull(job);
+
+        // With the fingerprint, the failure is tried again only after a while or when the file changes
+        string fingerprint;
+        try
+        {
+            fingerprint = SubtitleFiles.Fingerprint(File.ReadAllBytes(job.SubtitlePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            fingerprint = string.Empty;
+        }
+
         Save(new SubtitleResult
         {
             Id = ResultStore.IdFor(job.SubtitlePath),
@@ -483,10 +524,18 @@ public sealed class SubtitleProcessor
             Name = job.Name,
             SubtitlePath = job.SubtitlePath,
             Time = _clock.GetUtcNow(),
+            Fingerprint = fingerprint,
+            Version = CurrentVersion,
             Status = ResultStatus.Failed,
-            Explanation = error,
+            Explanation = error + " Tried again in 3 days, or when the file changes.",
         });
     }
+
+    /// <summary>Gets whether results can be recorded now (the results file is readable).</summary>
+    public bool ResultsReadable => _results.Readable;
+
+    /// <summary>Gets what is wrong with the results file, if anything.</summary>
+    public string? ResultsProblem => _results.Problem;
 
     private SubtitleResult Save(SubtitleResult result)
     {
