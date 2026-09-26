@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0-alpha] - 2026-09-26
+
 ### Fixed
 
 - **SUB-15:** the built-in speech-to-text program now installs under Jellyfin's data folder

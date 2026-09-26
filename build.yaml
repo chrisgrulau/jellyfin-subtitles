@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.6.1.0"
+version: "0.7.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,8 +14,6 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.6.1-alpha: fixes. Subtitles in legacy encodings (Cyrillic, Central European, Greek, Turkish, Hebrew, Arabic,
-  CJK) are written back in their own encoding instead of being garbled. An unreadable results file is never
-  overwritten; folders that can't be written are detected before any download or check and not redone every night;
-  one odd file can't stop the nightly run; ffmpeg found through PATH works; timings matched by meaning wait for
-  review.
+  0.7.0-alpha: subtitle editor. Edit on a result opens the subtitle's lines: change text and times, add, delete and
+  shift lines, find by text, and play any line's audio; Undo brings the original back. The built-in speech-to-text
+  now installs under Jellyfin's data folder (on Windows it showed up as a broken plugin).
