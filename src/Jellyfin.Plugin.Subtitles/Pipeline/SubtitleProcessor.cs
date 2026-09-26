@@ -196,6 +196,12 @@ public sealed class SubtitleProcessor
             return Save(result with { Status = ResultStatus.Failed, Explanation = "Not a readable text subtitle." });
         }
 
+        // Text that doesn't decode cleanly (a legacy code page guessed wrong): nothing is changed on its own
+        if (document.TextSuspect)
+        {
+            policies = policies with { Timing = ChangePolicy.Review, Text = ChangePolicy.Review, Auditor = null };
+        }
+
         var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
@@ -214,7 +220,9 @@ public sealed class SubtitleProcessor
             Offset = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Offset : 0,
             Stage = outcome.Stage,
             Confidence = model.Confidence,
-            Explanation = explanation,
+            Explanation = document.TextSuspect
+                ? explanation + $" The text didn't decode cleanly as {document.SourceEncoding}, so any change waits for review (the file is written back in that encoding)."
+                : explanation,
         };
 
         // Timing first (when applied), then clean-up: what the policies allow now, the rest held for review
@@ -222,7 +230,7 @@ public sealed class SubtitleProcessor
         // clean-up (adverts, empty lines): its timing isn't touched and nothing is suggested
         var timed = status == ResultStatus.Corrected ? document.Retime(model.Map) : document;
         var fitting = status != ResultStatus.WrongLanguage;
-        var automatic = AutomaticOptions(policies);
+        var automatic = document.TextSuspect ? WithoutTextChanges(AutomaticOptions(policies)) : AutomaticOptions(policies);
         var full = CleanupPolicy.Options(policies.Cleanup);
         if (!fitting)
         {
@@ -446,6 +454,17 @@ public sealed class SubtitleProcessor
         {
             throw new InvalidOperationException(ex.Message, ex);
         }
+    }
+
+    /// <summary>
+    /// Clean-up options that change no text (for text that didn't decode cleanly): only empty lines are removed.
+    /// </summary>
+    /// <param name="o">The options.</param>
+    /// <returns>The options without text changes.</returns>
+    public static CleanOptions WithoutTextChanges(CleanOptions o)
+    {
+        ArgumentNullException.ThrowIfNull(o);
+        return o with { RemoveAdverts = false, MergeDuplicates = false, StripHearingImpaired = false, FixOverlaps = false, ExtendShortCues = false };
     }
 
     /// <summary>

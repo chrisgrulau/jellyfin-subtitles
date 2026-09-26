@@ -7,21 +7,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **SUB-18:** a `results.json` that can't be read, whether locked or its permissions changed, is never overwritten.
-  Checks and searches wait until it can be read, because it holds the undo records. A damaged one is set aside as
-  `results.json.damaged-…` and results start afresh.
-- **SUB-16:** a folder Jellyfin's account can't write is detected before any download or audio work, using a hidden
-  test file.
-  - Such files are shown as **Can't write here** and tried again after 30 days or when they change. Before, the same
-    files were redone every night, using download quota and audio work each time.
-  - Failed checks now wait 3 days before being tried again, unless the file changes.
-- **SUB-17:** one unexpected error in a file no longer stops the nightly run. It is recorded as a failure with its type,
-  and the run carries on. Timecodes and release names only accept ASCII digits, so full-width or Arabic-Indic digits
-  are simply not a timecode, instead of throwing.
-- **SUB-21:** when Jellyfin finds ffmpeg through the system PATH (portable installs, source builds), Subtitles finds it
-  too. Before, both tasks and Ingest's transcript requests stopped with "ffmpeg wasn't found".
-- **SUB-28:** a timing decided from lines the AI matched by meaning always waits for review, even with automatic timing
-  fixes. The matched lines are shown in the result.
+- **SUB-14:** subtitles in legacy encodings are no longer rewritten as garbled text. Before, anything that wasn't
+  UTF-8 or UTF-16 was read as Windows-1252 and written back as UTF-8. That garbled Cyrillic, Central European, Greek,
+  Turkish, Hebrew, Arabic, Chinese, Japanese and Korean subtitles whenever the timing was corrected.
+  - **Writing:** a file is written back in the encoding it was read in, so every line the plugin doesn't change keeps
+    its exact bytes, even if the encoding was guessed wrong. UTF-8 and UTF-16 files are written as UTF-8, as before.
+  - **Reading:** the encoding is guessed from the language in the file name, for example `Film.ru.srt` as
+    Windows-1251, `Film.ja.srt` as Shift-JIS and `Film.zh.srt` as GB18030.
+  - **When the text still looks wrong:** if it contains replacement or control characters, nothing is changed on its
+    own. Timing and clean-up wait for review, and the result says why.
+  - **Unrepresentable edits:** a changed line the file's encoding can't hold is refused, never replaced with "?".
 
 ## [0.6.0-alpha] - 2026-09-26
 

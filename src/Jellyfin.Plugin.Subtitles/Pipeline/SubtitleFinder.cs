@@ -242,7 +242,8 @@ public sealed class SubtitleFinder
         // A new file: the timing correction and the automatic clean-up are applied (nothing existing is changed)
         var model = b.Outcome.Model;
         var timed = model.Status == SyncStatus.Corrected ? b.Document.Retime(model.Map) : b.Document;
-        var (cleaned, applied) = SubtitleCleaner.Clean(timed, SubtitleProcessor.AutomaticOptions(policies));
+        var options = SubtitleProcessor.AutomaticOptions(policies);
+        var (cleaned, applied) = SubtitleCleaner.Clean(timed, b.Document.TextSuspect ? SubtitleProcessor.WithoutTextChanges(options) : options);
         var path = PathFor(job.VideoPath, job.Language, b.Candidate.Candidate.HearingImpaired == true, cleaned.Format);
         if (File.Exists(path))
         {

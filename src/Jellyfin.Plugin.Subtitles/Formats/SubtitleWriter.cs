@@ -28,14 +28,22 @@ public static class SubtitleWriter
     }
 
     /// <summary>
-    /// Encodes written text as UTF-8. SubRip and ASS get a byte-order mark, which stops players that assume a legacy code
-    /// page from garbling accented characters; WebVTT is UTF-8 by definition and gets none.
+    /// Encodes written text. A document read in a legacy code page is written back in that code page, so unchanged lines
+    /// keep their exact bytes. Anything else is UTF-8: SubRip and ASS get a byte-order mark, which stops players that
+    /// assume a legacy code page from garbling accented characters; WebVTT is UTF-8 by definition and gets none.
     /// </summary>
     /// <param name="document">The document.</param>
     /// <returns>The file bytes.</returns>
     public static byte[] ToBytes(SubtitleDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
+
+        // A file read in a legacy code page is written back in it: every line that wasn't changed keeps its bytes
+        if (!SubtitleEncoding.WritesUtf8(document.SourceEncoding))
+        {
+            return SubtitleEncoding.EncodeLegacy(Write(document), document.SourceEncoding!);
+        }
+
         var body = Encoding.UTF8.GetBytes(Write(document));
         return document.Format == SubtitleFormat.WebVtt ? body : [.. Encoding.UTF8.Preamble, .. body];
     }
