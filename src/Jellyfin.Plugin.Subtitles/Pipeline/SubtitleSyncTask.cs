@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.Subtitles.Audio;
 using Jellyfin.Plugin.Subtitles.Configuration;
+using Jellyfin.Plugin.Subtitles.Pricing;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 using MediaBrowser.Controller.Entities;
@@ -21,8 +22,8 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 
 /// <summary>
 /// The daily run: finds text subtitle files beside the library's films and episodes, in the chosen languages, and checks
-/// the ones not checked before (or changed since). Paid speech-to-text isn't used by automatic runs yet: that waits for
-/// cost tracking, so a run can never spend money.
+/// the ones not checked before (or changed since). A paid speech-to-text service is used only within the monthly
+/// spending limit: each call is priced, reserved and recorded (see <see cref="MeteredSpeechToText"/>).
 /// </summary>
 public sealed partial class SubtitleSyncTask : IScheduledTask
 {
@@ -34,6 +35,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     private readonly IHttpClientFactory _http;
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
+    private readonly Spending _spending;
     private readonly SubtitleProcessor _processor;
     private readonly ILogger<SubtitleSyncTask> _logger;
 
@@ -46,9 +48,10 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     /// <param name="http">HTTP client factory.</param>
     /// <param name="keys">Speech-to-text keys.</param>
     /// <param name="builtIn">The built-in speech-to-text.</param>
+    /// <param name="spending">Prices, spend ledger and exchange rates.</param>
     /// <param name="processor">Processes one subtitle.</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, SubtitleProcessor processor, ILogger<SubtitleSyncTask> logger)
+    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleProcessor processor, ILogger<SubtitleSyncTask> logger)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
@@ -56,6 +59,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
+        _spending = spending ?? throw new ArgumentNullException(nameof(spending));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -97,7 +101,8 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromMinutes(3);
-        var speech = FreeSpeechFor(config, _keys, http, _builtIn, out var problem);
+        await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
+        var speech = SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.sync", out var problem);
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
@@ -167,17 +172,21 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     }
 
     /// <summary>
-    /// The speech-to-text service automatic runs may use: the snippet tier's service, if it is free (local or built-in).
-    /// Paid services wait for cost tracking.
+    /// The speech-to-text service automatic runs use: the snippet tier's service. A paid service is used only within the
+    /// spending limits: every call is priced, reserved against the month's limit and settled (see
+    /// <see cref="MeteredSpeechToText"/>).
     /// </summary>
     /// <param name="config">Plugin settings.</param>
     /// <param name="keys">Speech-to-text keys.</param>
     /// <param name="http">HTTP client.</param>
     /// <param name="builtIn">The built-in speech-to-text.</param>
+    /// <param name="spending">Prices, ledger and exchange rates.</param>
+    /// <param name="purpose">What the calls are for (<c>subtitles.sync</c> …).</param>
     /// <param name="problem">Why no service is used, if none.</param>
     /// <returns>The service, or <c>null</c>.</returns>
-    public static ISpeechToText? FreeSpeechFor(PluginConfiguration config, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, out string? problem)
+    public static ISpeechToText? SpeechFor(PluginConfiguration config, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, Spending spending, string purpose, out string? problem)
     {
+        ArgumentNullException.ThrowIfNull(spending);
         ArgumentNullException.ThrowIfNull(config);
         problem = null;
         var tier = config.SyncSnippets;
@@ -186,16 +195,24 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             return null;
         }
 
-        if (SpeechToTextFactory.IsPaid(tier.Provider))
-        {
-            problem = "speech-to-text is set to " + tier.Provider + ", a paid service; automatic runs don't use paid services until cost tracking is available.";
-            return null;
-        }
-
-        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, paidAllowed: false, config.AllowBuiltInDownload, keys, http, builtIn);
+        var limits = Spending.LimitsOf(config);
+        var paid = SpeechToTextFactory.IsPaid(tier.Provider);
+        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, SpendingLimit.AllowsPaidUsage(limits.Overall), config.AllowBuiltInDownload, keys, http, builtIn);
         problem = why;
-        return service;
+        return service is not null && paid ? new MeteredSpeechToText(service, ModelOf(tier.Provider, tier.Model), spending, limits, purpose) : service;
     }
+
+    /// <summary>
+    /// The model a paid provider uses for a setting (its default when the setting is empty), for pricing.
+    /// </summary>
+    /// <param name="provider">Provider id.</param>
+    /// <param name="model">The model setting.</param>
+    /// <returns>The model name.</returns>
+    public static string ModelOf(string provider, string? model)
+        => !string.IsNullOrWhiteSpace(model) ? model.Trim()
+            : provider == SpeechToTextFactory.Deepgram ? DeepgramSpeechToText.DefaultModel
+            : provider == SpeechToTextFactory.OpenAi ? OpenAiCompatibleSpeechToText.OpenAiDefaultModel
+            : string.Empty;
 
     private IEnumerable<SubtitleJob> Jobs(HashSet<string> languages)
     {

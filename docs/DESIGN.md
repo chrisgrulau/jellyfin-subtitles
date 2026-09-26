@@ -128,6 +128,12 @@ with a warning; the default is a small cap (5 a month in the chosen currency), s
 open-ended spending. Limits are set and costs shown in the user's currency; each charge is recorded in the currency it
 was made in and converted as described in jellyfin-plugin-common's *Currencies* notes (ECB daily rates; unknown rates
 pause paid calls in other currencies rather than guess), plus an optional percentage for taxes or card fees.
+
+How it's done: `Pricing/prices.json` holds the providers' published prices (per audio minute, dated, validated as a
+whole). `MeteredSpeechToText` wraps a paid service: it prices each call from the audio length, reserves it in the
+shared `SpendLedger` against the month's limit (in the user's currency, with the ECB rates from `ExchangeRateStore`),
+settles it after the call, or releases it if the call failed. A call is refused if the price is unknown, the rates are
+missing or stale, or it would go over the limit; the run then carries on with the free line-start stage.
 When budgets are enforced, the estimated cost of each call is reserved before it is made, atomically across concurrent
 jobs, and the actual cost is settled afterwards, so parallel jobs can't overshoot the limit together.
 

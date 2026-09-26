@@ -1,0 +1,12 @@
+{
+  "version": "2026-09-26",
+  "note": "Pay-as-you-go list prices from each provider's pricing page on the version date. Used when a reply doesn't say what a call cost. Update by PR; a service without a price here isn't used for paid calls.",
+  "prices": [
+    { "provider": "deepgram", "model": "nova-3", "unit": "audio-minute", "amount": "0.0043", "currency": "USD" },
+    { "provider": "deepgram", "model": "nova-3-multilingual", "unit": "audio-minute", "amount": "0.0052", "currency": "USD" },
+    { "provider": "deepgram", "model": "whisper-large", "unit": "audio-minute", "amount": "0.0048", "currency": "USD" },
+    { "provider": "openai", "model": "whisper-1", "unit": "audio-minute", "amount": "0.006", "currency": "USD" },
+    { "provider": "openai", "model": "gpt-4o-transcribe", "unit": "audio-minute", "amount": "0.006", "currency": "USD" },
+    { "provider": "openai", "model": "gpt-4o-mini-transcribe", "unit": "audio-minute", "amount": "0.003", "currency": "USD" }
+  ]
+}

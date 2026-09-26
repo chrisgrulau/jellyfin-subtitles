@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Paid speech-to-text within your monthly limit.** Deepgram or OpenAI can now be used by the nightly runs.
+  - Every call is priced from the providers' published prices (shipped with the plugin, dated 2026-09-26), reserved
+    against the month's limit in your currency before it is made, and recorded afterwards.
+  - A call that would go over the limit, or whose cost can't be worked out (no price, no current exchange rates), isn't
+    made.
+  - The settings page shows this month's spending, per provider, and the exchange rates used. Test calls are counted
+    too.
+
 ## [0.2.0-alpha] - 2026-09-26
 
 ### Added

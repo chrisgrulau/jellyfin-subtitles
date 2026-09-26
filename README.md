@@ -12,7 +12,7 @@ A [Jellyfin](https://jellyfin.org) plugin that finds subtitles for videos that a
 against what is actually said in the audio, and fixes the timing, so the subtitles you get are the right ones and in sync.
 
 > **Status:** alpha. Checking and fixing existing subtitles, and finding missing ones, work with the built-in
-> speech-to-text or a local service. Paid services in automatic runs come next. The design is in
+> speech-to-text, a local service, or a paid service within your monthly limit. The design is in
 > [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Installing
@@ -89,8 +89,12 @@ subtitle.
   timing unless you ask otherwise.
 - **Budgets and limits**: monthly spending limit for paid services, in your own currency (5 a month by default; 0 means
   no paid services at all, and "no limit" is an explicit choice). Providers' charges (usually in US dollars) are
-  converted with the European Central Bank's daily rates, with an optional percentage for taxes or card fees, cost estimates before bulk runs, and respectful
-  handling of provider limits (no hammering an API that has said stop).
+  converted with the European Central Bank's daily rates, with an optional percentage for taxes or card fees.
+  - Every paid call is priced from the providers' published prices (shipped with the plugin), reserved against the
+    month's limit before it is made, and recorded afterwards, so runs stop at the limit.
+  - A call whose cost can't be worked out isn't made.
+  - The settings page shows this month's spending.
+  - Provider limits are handled respectfully: no hammering an API that has said stop.
 
 ## Settings
 

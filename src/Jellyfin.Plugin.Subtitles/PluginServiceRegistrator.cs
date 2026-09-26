@@ -23,6 +23,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // The built-in speech-to-text installs into the plugin's data folder too (only after the administrator allows it)
         serviceCollection.AddSingleton(sp => new BuiltInHost(DataFolder(sp)));
 
+        // Spending on paid services: published prices, the month's ledger and exchange rates, shared by tasks and page
+        serviceCollection.AddSingleton(sp => new Pricing.Spending(DataFolder(sp)));
+
         // Results, the originals of changed subtitles and the download count also live in the plugin's data folder. One
         // results store is shared, so the checker knows what the finder added.
         serviceCollection.AddSingleton(sp => new ResultStore(Path.Combine(DataFolder(sp), "results.json")));

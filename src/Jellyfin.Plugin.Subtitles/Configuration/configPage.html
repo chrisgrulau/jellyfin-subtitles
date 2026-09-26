@@ -155,6 +155,7 @@
             </label>
             <div class="fieldDescription checkboxFieldDescription">Not recommended.</div>
           </div>
+          <div id="SpendingNow" class="subs-muted" style="margin:.5em 0 1em"></div>
           <div id="NoLimitWarning" class="subs-warning" hidden>With no limit, spending on cloud services is only capped by what you've set with each provider. A full transcript of a whole library can cost a lot.</div>
 
           <details class="subs-advanced">
@@ -304,6 +305,21 @@
           });
         }
 
+        // This month's spending, the limit and the exchange rates behind it
+        function loadSpending() {
+          var box = page.querySelector('#SpendingNow');
+          return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Spending')).then(function (s) {
+            var fmt = function (n) { return s.Currency + ' ' + Number(n).toFixed(n > 0 && n < 0.01 ? 4 : 2); };
+            var spent = s.Spent == null ? 'unknown (no current exchange rates)' : fmt(s.Spent);
+            var parts = ['This month: ' + spent + (s.Limit == null ? ' (no limit)' : ' of ' + fmt(s.Limit))];
+            var per = Object.keys(s.PerProvider || {});
+            if (per.length) { parts.push(per.map(function (k) { return k + ' ' + fmt(s.PerProvider[k]); }).join(', ')); }
+            parts.push(s.RatesDate ? 'exchange rates from ' + s.RatesDate + (s.RatesFresh ? '' : ' (too old: paid services in other currencies wait)') : 'no exchange rates yet (fetched daily from the European Central Bank)');
+            if (s.PricesVersion) { parts.push('prices as of ' + s.PricesVersion); }
+            box.textContent = parts.join(' · ');
+          }, function () { box.textContent = ''; });
+        }
+
         function loadKeys() {
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Keys')).then(renderKeys);
         }
@@ -328,7 +344,7 @@
           } else if (e.target.closest('.svc-test')) {
             result.textContent = 'Testing ' + serviceNames[id] + '…';
             ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify({ Provider: id, Model: modelFor(id), LocalServiceUrl: page.querySelector('#LocalServiceUrl').value.trim() }), contentType: 'application/json', dataType: 'json' })
-              .then(function (r) { result.textContent = (r.Ok ? '✓ ' : '✗ ') + r.Message; }, function () { result.textContent = '✗ The test couldn\'t be run.'; });
+              .then(function (r) { result.textContent = (r.Ok ? '✓ ' : '✗ ') + r.Message; loadSpending(); }, function () { result.textContent = '✗ The test couldn\'t be run.'; });
           }
         });
 
@@ -456,6 +472,7 @@
             loadResults();
             renderTiers(config);
             refreshWarnings();
+            loadSpending();
             return loadKeys();
           }).then(function () { Dashboard.hideLoadingMsg(); });
         });

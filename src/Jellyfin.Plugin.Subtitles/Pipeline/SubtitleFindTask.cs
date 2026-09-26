@@ -9,6 +9,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.Subtitles.Audio;
 using Jellyfin.Plugin.Subtitles.Candidates;
 using Jellyfin.Plugin.Subtitles.Configuration;
+using Jellyfin.Plugin.Subtitles.Pricing;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 using MediaBrowser.Controller.Entities;
@@ -36,6 +37,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     private readonly IHttpClientFactory _http;
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
+    private readonly Spending _spending;
     private readonly SubtitleFinder _finder;
     private readonly ILogger<SubtitleFindTask> _logger;
 
@@ -50,9 +52,10 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     /// <param name="http">HTTP client factory.</param>
     /// <param name="keys">Speech-to-text keys.</param>
     /// <param name="builtIn">The built-in speech-to-text.</param>
+    /// <param name="spending">Prices, spend ledger and exchange rates.</param>
     /// <param name="finder">The finder.</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, SubtitleFinder finder, ILogger<SubtitleFindTask> logger)
+    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, ILogger<SubtitleFindTask> logger)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
@@ -62,6 +65,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
+        _spending = spending ?? throw new ArgumentNullException(nameof(spending));
         _finder = finder ?? throw new ArgumentNullException(nameof(finder));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -103,7 +107,8 @@ public sealed partial class SubtitleFindTask : IScheduledTask
 
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromMinutes(3);
-        var speech = SubtitleSyncTask.FreeSpeechFor(config, _keys, http, _builtIn, out var problem);
+        await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
+        var speech = SubtitleSyncTask.SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.find", out var problem);
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
