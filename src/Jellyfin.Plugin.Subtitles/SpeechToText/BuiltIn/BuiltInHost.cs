@@ -17,10 +17,16 @@ public sealed class BuiltInHost : IDisposable
     /// <param name="dataFolder">The plugin's data folder.</param>
     /// <param name="installer">Installer (for tests); by default one for the published release.</param>
     /// <param name="platform">Platform (for tests); by default this server's.</param>
-    public BuiltInHost(string dataFolder, BuiltInInstaller? installer = null, string? platform = null)
+    /// <param name="legacyFolder">Where earlier versions installed it (inside the plugin folder), moved on first start.</param>
+    public BuiltInHost(string dataFolder, BuiltInInstaller? installer = null, string? platform = null, string? legacyFolder = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataFolder);
         var folder = Path.Combine(dataFolder, "builtin");
+        if (legacyFolder is not null)
+        {
+            MoveFromLegacy(Path.Combine(legacyFolder, "builtin"), folder);
+        }
+
         _work = Path.Combine(folder, "work");
         Installer = installer ?? new BuiltInInstaller(folder);
         Platform = platform ?? BuiltInSource.CurrentPlatform();
@@ -43,6 +49,46 @@ public sealed class BuiltInHost : IDisposable
 
     /// <inheritdoc />
     public void Dispose() => Installer.Dispose();
+
+    /// <summary>
+    /// Moves an install from where earlier versions put it (under Jellyfin's plugins folder, where on Windows its DLLs
+    /// made Jellyfin list a broken plugin whose Uninstall deletes the plugin's data). If it can't be moved (another
+    /// disk, or already there), the old copy is deleted: the program is downloaded again, verified, when next needed.
+    /// </summary>
+    /// <param name="legacy">The old folder.</param>
+    /// <param name="folder">The new folder.</param>
+    public static void MoveFromLegacy(string legacy, string folder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(legacy);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        if (!Directory.Exists(legacy) || string.Equals(Path.GetFullPath(legacy), Path.GetFullPath(folder), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Directory.Exists(folder))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(folder)!);
+                Directory.Move(legacy, folder);
+                return;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Another disk (or in use): fall through and remove the old copy instead
+        }
+
+        try
+        {
+            Directory.Delete(legacy, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Tried again at the next start
+        }
+    }
 
     // Leftovers from runs interrupted by a restart
     private void ClearWork()

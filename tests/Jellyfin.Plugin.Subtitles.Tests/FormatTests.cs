@@ -190,7 +190,8 @@ public class FormatTests
             Assert.Empty(SubtitleReader.Parse(text, format).Cues);
         }
 
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), clock.Elapsed.ToString());
+        // Linear work takes well under a second; the limit allows for a busy machine, and quadratic work would take minutes
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(3), clock.Elapsed.ToString());
     }
 
     [Fact]

@@ -260,4 +260,34 @@ public sealed class BuiltInTests : IDisposable
                 : new HttpResponseMessage(HttpStatusCode.NotFound));
         }
     }
+
+    // SUB-15: an install under the plugins folder moves out of it on start
+    [Fact]
+    public void An_install_in_the_plugin_folder_moves_to_the_data_folder()
+    {
+        var legacy = Path.Combine(_dir, "plugins", "Jellyfin.Plugin.Subtitles", "builtin");
+        Directory.CreateDirectory(Path.Combine(legacy, "bin"));
+        File.WriteAllText(Path.Combine(legacy, "bin", "whisper.dll"), "x");
+        var target = Path.Combine(_dir, "data", "shoal-subtitles", "builtin");
+
+        BuiltInHost.MoveFromLegacy(legacy, target);
+
+        Assert.False(Directory.Exists(legacy));
+        Assert.True(File.Exists(Path.Combine(target, "bin", "whisper.dll")));
+    }
+
+    [Fact]
+    public void An_old_copy_is_removed_when_the_new_place_already_has_one()
+    {
+        var legacy = Path.Combine(_dir, "plugins", "Jellyfin.Plugin.Subtitles", "builtin");
+        var target = Path.Combine(_dir, "data", "shoal-subtitles", "builtin");
+        Directory.CreateDirectory(legacy);
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(legacy, "ggml.dll"), "old");
+
+        BuiltInHost.MoveFromLegacy(legacy, target);
+
+        Assert.False(Directory.Exists(legacy));
+        Assert.True(Directory.Exists(target));
+    }
 }

@@ -20,8 +20,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // Speech-to-text keys live in their own owner-only file in the plugin's data folder, never in the configuration
         serviceCollection.AddSingleton(sp => new SpeechToTextKeys(Path.Combine(DataFolder(sp), "keys.json")));
 
-        // The built-in speech-to-text installs into the plugin's data folder too (only after the administrator allows it)
-        serviceCollection.AddSingleton(sp => new BuiltInHost(DataFolder(sp)));
+        // The built-in speech-to-text installs under Jellyfin's data folder (only after the administrator allows it), never
+        // under the plugins folder, where Jellyfin would take its DLLs for a plugin (SUB-15)
+        serviceCollection.AddSingleton(sp => new BuiltInHost(
+            Path.Combine(sp.GetRequiredService<IApplicationPaths>().DataPath, "shoal-subtitles"),
+            legacyFolder: DataFolder(sp)));
 
         // Spending on paid services: published prices, the month's ledger and exchange rates, shared by tasks and page
         serviceCollection.AddSingleton(sp => new Pricing.Spending(DataFolder(sp)));
