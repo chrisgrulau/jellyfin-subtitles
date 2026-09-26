@@ -279,6 +279,18 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
+    /// The server's film and show libraries, and whether the plugin works on each (the settings page's library picker).
+    /// </summary>
+    /// <returns>The libraries, in the server's order.</returns>
+    [HttpGet("Libraries")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<IReadOnlyList<LibrarySummary>> Libraries()
+    {
+        var scope = JellyfinLibraries.Scope(_library, SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration());
+        return Ok(scope.Libraries.Select(l => new LibrarySummary(LibraryScope.NormaliseId(l.Id)!, l.Name, scope.IsIncluded(l))).ToList());
+    }
+
+    /// <summary>
     /// Undoes this plugin's changes to a file.
     /// </summary>
     /// <param name="id">Result id.</param>
@@ -785,3 +797,11 @@ public sealed record LimitKeyRequest
     /// <summary>Gets a value indicating whether to keep the Admin key, only for reading the balance.</summary>
     public bool KeepForBalance { get; init; }
 }
+
+/// <summary>
+/// A library on the settings page's library picker.
+/// </summary>
+/// <param name="Id">The library's id.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Included">Whether the plugin works on it.</param>
+public sealed record LibrarySummary(string Id, string Name, bool Included);

@@ -15,8 +15,10 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <summary>
 /// The library's films and episodes, walked once in one way for every task: the subtitle files to check, the embedded
 /// tracks to check and the subtitles to find. Only videos whose file exists, with a running time and at least one audio
-/// stream, are listed. "Has a subtitle in this language" is decided by <see cref="FindRules.Counts(bool, bool, bool, bool)"/>
-/// alone: a subtitle this plugin generated doesn't count, so the search for a real one goes on.
+/// stream, in a library the plugin works on (see <see cref="LibraryScope"/>), are listed; a walk can also be limited to
+/// a few videos (new ones). "Has a subtitle in this language" is decided by
+/// <see cref="FindRules.Counts(bool, bool, bool, bool)"/> alone: a subtitle this plugin generated doesn't count, so the
+/// search for a real one goes on.
 /// </summary>
 internal sealed class LibraryVideos
 {
@@ -24,16 +26,22 @@ internal sealed class LibraryVideos
 
     private readonly ILibraryManager _library;
     private readonly IMediaSourceManager _media;
+    private readonly LibraryScope _scope;
+    private readonly IReadOnlyCollection<Guid>? _only;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LibraryVideos"/> class.
     /// </summary>
     /// <param name="library">Library manager.</param>
     /// <param name="media">Media source manager (streams, including external subtitles).</param>
-    public LibraryVideos(ILibraryManager library, IMediaSourceManager media)
+    /// <param name="scope">The libraries worked on.</param>
+    /// <param name="only">Only these videos (new ones), or <c>null</c> for the whole library.</param>
+    public LibraryVideos(ILibraryManager library, IMediaSourceManager media, LibraryScope scope, IReadOnlyCollection<Guid>? only = null)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
+        _scope = scope ?? throw new ArgumentNullException(nameof(scope));
+        _only = only;
     }
 
     /// <summary>
@@ -118,17 +126,22 @@ internal sealed class LibraryVideos
         => streams.Where(s => s.Type == MediaStreamType.Subtitle && FindRules.Counts(s.IsForced, s.IsTextSubtitleStream, countImages, s.IsExternal && SubtitleGenerator.IsGenerated(s.Path)))
             .Select(s => Languages.ToTwoLetter(s.Language)).OfType<string>().ToHashSet(StringComparer.Ordinal);
 
+    // The films and episodes: the whole library, or the videos asked for (those still in the library)
+    private IEnumerable<BaseItem> Items()
+        => _only is null
+            ? _library.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
+                IsVirtualItem = false,
+                Recursive = true,
+            })
+            : _only.Distinct().Select(id => _library.GetItemById(id)).Where(i => i is MediaBrowser.Controller.Entities.Movies.Movie or MediaBrowser.Controller.Entities.TV.Episode && !i.IsVirtualItem).OfType<BaseItem>();
+
     private IEnumerable<LibraryVideo> Walk()
     {
-        var items = _library.GetItemList(new InternalItemsQuery
+        foreach (var item in Items())
         {
-            IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
-            IsVirtualItem = false,
-            Recursive = true,
-        });
-        foreach (var item in items)
-        {
-            if (item is not Video video || string.IsNullOrEmpty(video.Path) || video.RunTimeTicks is not > 0 || !File.Exists(video.Path))
+            if (item is not Video video || string.IsNullOrEmpty(video.Path) || video.RunTimeTicks is not > 0 || !_scope.Includes(video.Path) || !File.Exists(video.Path))
             {
                 continue;
             }

@@ -151,7 +151,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         var combined = subdlKey is null ? null : new CombinedSource([jellyfin, new SubDlSource(subdlHttp, subdlKey, IdsOf)]);
         ICandidateSource source = combined ?? (ICandidateSource)jellyfin;
         // Specials (season 0) last: subtitle sites rarely have them, and they'd use up the run
-        var jobs = new LibraryVideos(_library, _media).Missing(LanguageSettings.EffectiveLanguages(config.Languages), config.CountImageSubtitles)
+        var jobs = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config)).Missing(LanguageSettings.EffectiveLanguages(config.Languages), config.CountImageSubtitles)
             .Where(_finder.NeedsSearch)
             .OrderBy(j => j.Video.Season == 0)
             .Take(Math.Max(1, config.MaxFindsPerRun))

@@ -26,6 +26,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public Collection<string> Languages { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets the ids of the libraries the plugin leaves alone (none by default: every film and show library is
+    /// worked on). Stored as left out rather than chosen, so a library added later is worked on until it is unticked
+    /// (see <see cref="Pipeline.LibraryScope"/>). Starts empty for the same reason as <see cref="Languages"/>.
+    /// </summary>
+    [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "Jellyfin deserializes plugin configuration from JSON, which cannot populate a get-only collection.")]
+    public Collection<string> ExcludedLibraries { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets what happens to timing corrections (shift, drift, cuts).
     /// </summary>
     public ChangePolicy TimingFixes { get; set; } = ChangePolicy.Automatic;

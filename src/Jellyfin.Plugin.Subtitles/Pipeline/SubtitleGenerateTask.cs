@@ -149,7 +149,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         var setup = SubtitleGenerator.SetupOf(tier.Provider, tier.Model);
         var budget = SubtitleGenerator.BudgetOf(config.MaxGenerateHours);
         var began = DateTimeOffset.UtcNow;
-        var videos = new LibraryVideos(_library, _media);
+        var videos = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config));
         var settings = new WholeFileSettings(wanted, config.TuneConfidence, RunStart.PoliciesFor(config).Auditor);
         List<SubtitleJob>? files = null;
         List<SubtitleJob> Files() => files ??= [.. videos.SubtitleFiles(wanted.Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal))];

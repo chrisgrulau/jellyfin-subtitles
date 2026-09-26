@@ -387,6 +387,16 @@ works, just without AI tiebreakers.
   tier's service transcribes it, and a paid service is wrapped in `MeteredSpeechToText` under the caller's purpose. A
   semaphore lets only one transcription run at a time, so the built-in service never runs twice at once.
 
+## Libraries
+
+`LibraryScope` decides which videos the plugin works on. The server's film, show and mixed libraries are read from
+Jellyfin's virtual folders (id, name, folders); a video belongs to the library whose folder holds it (the deepest one,
+when folders nest), so the decision is a plain path match with no extra database queries in the nightly walk. The
+setting is `ExcludedLibraries` (ids): a library added later is worked on until it is unticked, and an id that no longer
+names a library changes nothing. A video in no known library's folder is never left out. `LibraryVideos` applies the
+scope to every walk, so the checks, the search, generating and the whole-file check all honour it (a whole-file check
+picked for a video in a library left out is cleared as unreachable, with the reason).
+
 ## Settings: basic vs advanced
 
 Basic settings are the key decisions in plain language. Advanced settings (costs, per-run limits, clean-up details, AI

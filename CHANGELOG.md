@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Library picker** (FEAT-03): **Libraries** on the settings page lists the server's film, show and mixed libraries,
+  each with a tick. An unticked library is left alone: its videos aren't checked, searched for or generated for (every
+  walk of the library, and so every task, honours it). All are ticked by default; the setting stores the libraries
+  left out (by id), so a library added later is worked on until you untick it.
+
 ## [0.14.0-alpha] - 2026-09-27
 
 ### Added

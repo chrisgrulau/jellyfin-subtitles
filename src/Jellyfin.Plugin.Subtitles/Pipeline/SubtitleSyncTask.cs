@@ -144,7 +144,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             LogPruned(_logger, pruned);
         }
 
-        var videos = new LibraryVideos(_library, _media);
+        var videos = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config));
         var jobs = videos.SubtitleFiles(wanted).ToList();
         var todo = new List<SubtitleJob>();
         foreach (var job in jobs)

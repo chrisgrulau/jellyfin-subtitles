@@ -31,6 +31,8 @@
       #SubtitlesConfigPage .subs-findings { padding-left: 1.2em; }
       #SubtitlesConfigPage .subs-findings li { margin: .4em 0; }
       #SubtitlesConfigPage .subs-filter { padding: .3em .45em; background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 3px; font: inherit; }
+      #SubtitlesConfigPage fieldset.subs-libraries { border: 1px solid rgba(128,128,128,.25); border-radius: 4px; margin: 0 0 1.5em; padding: .5em 1em 1em; }
+      #SubtitlesConfigPage fieldset.subs-libraries .checkboxContainer { margin: .25em 0; }
       #SubtitlesConfigPage .subs-service { padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
       #SubtitlesConfigPage .subs-service h4 { margin: .5em 0; }
       #SubtitlesConfigPage .subs-key { display: flex; gap: .5em; align-items: end; flex-wrap: wrap; }
@@ -97,6 +99,12 @@
             <input id="Languages" type="text" is="emby-input" placeholder="eng" />
             <div class="fieldDescription">Comma separated: codes or names (e.g. <code>eng, fr, German</code>). Anything that isn't a language is ignored and noted in the log.</div>
           </div>
+
+          <fieldset class="subs-libraries">
+            <legend>Libraries</legend>
+            <div id="Libraries" class="subs-muted">Loading…</div>
+            <div class="fieldDescription">Untick a library to leave it alone (for example anime or children's libraries): its videos aren't checked, searched for or generated for. A library added later is worked on until you untick it.</div>
+          </fieldset>
 
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
@@ -473,6 +481,19 @@
         }
 
         // This month's spending, the limit and the exchange rates behind it
+        // The library picker: one tick per film or show library (null until loaded, so a failed load changes nothing)
+        var libraries = null;
+        function loadLibraries() {
+          var box = page.querySelector('#Libraries');
+          return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Libraries')).then(function (list) {
+            libraries = list;
+            box.className = '';
+            box.innerHTML = list.length ? list.map(function (l) {
+              return '<div class="checkboxContainer"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="lib-on" data-id="' + esc(l.Id) + '"' + (l.Included ? ' checked' : '') + ' /><span>' + esc(l.Name) + '</span></label></div>';
+            }).join('') : '<span class="subs-muted">No film or show libraries were found.</span>';
+          }, function () { libraries = null; box.className = 'subs-muted'; box.textContent = 'The libraries couldn\'t be listed; they are left as they were.'; });
+        }
+
         function loadSpending() {
           var box = page.querySelector('#SpendingNow');
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Spending')).then(function (s) {
@@ -1083,6 +1104,7 @@
             page.querySelector('#CheckEmbeddedSubtitles').checked = !!config.CheckEmbeddedSubtitles;
             page.querySelector('#MaxEmbeddedPerRun').value = config.MaxEmbeddedPerRun || 10;
             loadResults();
+            loadLibraries();
             renderTiers(config);
             refreshWarnings();
             loadSpending();
@@ -1098,6 +1120,9 @@
             config.Enabled = page.querySelector('#Enabled').checked;
             config.Languages = page.querySelector('#Languages').value.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0 && s.length <= 40; });
             if (!config.Languages.length) { config.Languages = ['eng']; }
+            if (libraries) {
+              config.ExcludedLibraries = Array.prototype.filter.call(page.querySelectorAll('#Libraries .lib-on'), function (b) { return !b.checked; }).map(function (b) { return b.getAttribute('data-id'); });
+            }
             config.TimingFixes = page.querySelector('#TimingFixes').value;
             config.LocalServiceUrl = page.querySelector('#LocalServiceUrl').value.trim();
             config.MaxSubtitlesPerRun = Math.min(5000, Math.max(1, parseInt(page.querySelector('#MaxSubtitlesPerRun').value, 10) || 50));

@@ -89,6 +89,9 @@ when none can be found** or **Check whole file for doubtful subtitles**, or pick
 makes subtitles from a full transcript for videos the search found nothing for, and compares doubtful subtitles with a
 full transcript; see below.
 
+All three tasks work on every film and show library unless you untick some under **Libraries** on the settings page
+(for example anime or children's libraries).
+
 ## Generated subtitles
 
 When the search found nothing that fits a video in one of your languages, and **Generate subtitles when none can be
