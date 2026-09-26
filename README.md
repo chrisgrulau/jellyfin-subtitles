@@ -11,9 +11,9 @@ they help each other.
 A [Jellyfin](https://jellyfin.org) plugin that finds subtitles for videos that are missing them, checks every candidate
 against what is actually said in the audio, and fixes the timing, so the subtitles you get are the right ones and in sync.
 
-> **Status:** first alpha (0.1.0). Checking and fixing existing subtitles, and finding missing ones, work today with a
-> local speech-to-text service. The built-in speech-to-text and paid services in automatic runs come next. The design
-> is in [docs/DESIGN.md](docs/DESIGN.md).
+> **Status:** alpha. Checking and fixing existing subtitles, and finding missing ones, work with the built-in
+> speech-to-text or a local service. Paid services in automatic runs come next. The design is in
+> [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Installing
 
@@ -21,7 +21,8 @@ Download `jellyfin-plugin-subtitles.zip` from the [releases](https://github.com/
 check it against `SHA256SUMS` (and, if you like, its build provenance with
 `gh attestation verify jellyfin-plugin-subtitles.zip --repo chrisgrulau/jellyfin-subtitles`), and put
 `Jellyfin.Plugin.Subtitles.dll` in `<jellyfin data>/plugins/Subtitles_<version>/`, then restart Jellyfin. For speech-to-text,
-point **Local service address** at an OpenAI-compatible service (for example a faster-whisper server) and press **Test**.
+either allow the **built-in** one on the plugin page (it downloads about 90 MB the first time), or point **Local service
+address** at an OpenAI-compatible service (for example a faster-whisper server); then press **Test**.
 
 ## What it does
 
@@ -56,7 +57,7 @@ Providers:
 
 | Provider | Setup | Cost |
 |---|---|---|
-| **Built-in** (default) | One click to allow it: the plugin then downloads a checksum-verified Whisper program and a small model (about 150 MB) the first time it's needed | Free; CPU, slower |
+| **Built-in** (default) | One click to allow it: the plugin then downloads a checksum-verified Whisper program (whisper.cpp, built by this project for Linux x64/arm64, Windows x64 and macOS) and a model, about 90 MB (`base`, the default) or 200 MB (`small`), the first time it's needed | Free; CPU, slower |
 | **Local service** | A local speech-to-text service (Whisper), with a guided one-line setup on the plugin page | Free; fast with a GPU |
 | **Cloud** (Deepgram, OpenAI …) | Paste an API key | Per minute of audio |
 

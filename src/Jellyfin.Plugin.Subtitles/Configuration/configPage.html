@@ -103,6 +103,11 @@
 
           <h3 class="sectionTitle" style="margin-top:1.5em">Services</h3>
           <p class="subs-muted">Keys are stored on this server in a file only Jellyfin can read. They are never shown again, logged or included in exports; you can replace or clear them. <strong>Test</strong> sends one second of near-silence (for a paid service, a small fraction of a cent).</p>
+          <div class="subs-service" data-service="builtin">
+            <h4>Built-in</h4>
+            <div class="fieldDescription">Runs on this server's CPU. Model <strong>base</strong> (the default; about 90 MB with the program) or <strong>small</strong> (more accurate, slower; about 200 MB), set in the Model box above. Downloaded the first time it's needed, or when you press Test.</div>
+            <div class="subs-key"></div>
+          </div>
           <div class="subs-service" data-service="local">
             <div class="inputContainer">
               <label class="inputLabel inputLabelUnfocused" for="LocalServiceUrl">Local service address</label>
@@ -115,7 +120,7 @@
           <div class="subs-service" data-service="openai"><h4>OpenAI</h4><div class="subs-key"></div></div>
 
           <div id="BuiltInConsent" class="subs-warning" hidden>
-            <p style="margin-top:0"><strong>The built-in speech-to-text needs your permission before its first use.</strong> It downloads a Whisper program (whisper.cpp, built by this project) and a small speech model, about 150 MB in total. They come only over HTTPS from this project's GitHub releases. Each file is checked against a checksum built into the plugin before it runs, and again each time it starts. It runs on this server's CPU with low priority and a time limit, and nothing is sent anywhere.</p>
+            <p style="margin-top:0"><strong>The built-in speech-to-text needs your permission before its first use.</strong> It downloads a Whisper program (whisper.cpp, built by this project) and a speech model: about 90 MB in total with the default model, about 200 MB with the small one. They come only over HTTPS from this project's GitHub releases. Each file is checked against a checksum built into the plugin before it runs, and again each time it starts. It runs on this server's CPU with low priority and a time limit, and nothing is sent anywhere.</p>
             <div class="checkboxContainer" style="margin:0">
               <label class="emby-checkbox-label">
                 <input id="AllowBuiltInDownload" type="checkbox" is="emby-checkbox" />
@@ -270,13 +275,17 @@
           }).join('');
         }
 
-        var serviceNames = { local: 'Local service', deepgram: 'Deepgram', openai: 'OpenAI' };
+        var serviceNames = { builtin: 'Built-in', local: 'Local service', deepgram: 'Deepgram', openai: 'OpenAI' };
 
         function renderKeys(keys) {
           Array.prototype.forEach.call(page.querySelectorAll('.subs-service'), function (box) {
             var id = box.getAttribute('data-service');
             var set = keys && keys[id];
             var optional = id === 'local';
+            if (id === 'builtin') {
+              box.querySelector('.subs-key').innerHTML = '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button><div class="subs-result subs-muted"></div>';
+              return;
+            }
             box.querySelector('.subs-key').innerHTML =
               '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">API key' + (optional ? ' (only if the service needs one)' : '') + ': ' + (set ? '<span class="subs-set">set</span>' : 'not set') + '</label>' +
               '<input is="emby-input" type="password" class="svc-key" autocomplete="off" placeholder="' + (set ? 'Enter a new key to replace it' : 'Paste the key') + '" /></div>' +

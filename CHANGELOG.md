@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Built-in speech-to-text.** Once an administrator allows it, the plugin downloads whisper.cpp (built and published
+  by this project for Linux x64/arm64, Windows x64 and macOS) and a speech model (`base` by default, or `small`) the
+  first time it's needed, and runs it on the server's CPU. Every file is checked against a SHA-256 compiled into the
+  plugin, before it is first run and again before every run; downloads come only from this project's releases over
+  HTTPS. Runs use below-normal priority, at most 8 threads and a time limit. The settings page has a **Built-in** box
+  with **Test** (DOC-02).
+
 ### Fixed
 
 - **SUB-09:** a subtitle replaced from outside (by another tool or a person) after this plugin changed it is treated as
