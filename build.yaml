@@ -14,6 +14,7 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.6.0-alpha: lines matched by meaning. When speech is heard but a subtitle's words don't match it (a translation, a
-  paraphrase, dense dialogue), the Shoal AI plugin (if installed and allowing Subtitles) pairs what is said with
-  subtitle lines by meaning; the pairs must agree on one timing before anything changes. At most 20 AI checks per run.
+  0.6.0-alpha: with the Shoal AI plugin (if installed and allowing Subtitles). Lines matched by meaning: when a
+  subtitle's words don't match what is said (a translation, a paraphrase), the AI pairs them by meaning and the pairs
+  must agree on one timing. Wording audit: lines whose meaning differs from what is said (names, numbers, a missing
+  "not") are flagged with suggested wording that waits for review. At most 20 AI checks per run.

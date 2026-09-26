@@ -9,6 +9,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Lines matched by meaning** (optional, with the Shoal AI plugin: **Ask the AI plugin when the wording differs from
+  what is said**, on by default, at most 20 checks per run).
+  - **When it's used:** speech-to-text heard plenty but the subtitle's words don't match it. Typical cases are a
+    translation (an English subtitle on a film in another language), a paraphrase, or dense dialogue.
+  - **What happens:** the AI pairs the heard phrases with subtitle lines that say the same thing, and those pairs
+    must still agree on one timing before anything is changed.
+  - **Where it applies:** finding subtitles, checking existing ones, and checking tracks inside videos. A right but
+    loosely worded subtitle is no longer skipped as "another language".
+  - **When the content is different:** if the AI says the subtitles are for something else (another version,
+    commentary), that confirms the mismatch.
+  - **What is sent:** only the subtitle language, a few minutes of heard phrases and the nearby subtitle lines. The
+    AI plugin must allow Subtitles, and its spending limits apply.
+- The shared source is updated to include the AI plugin's client (`AiBridgeClient`).
 - **Wording audit** (optional, with the Shoal AI plugin: **Audit the wording with the AI plugin**, on by default).
   - **When:** after a subtitle's timing is settled by speech-to-text.
   - **What it checks:** the AI compares its lines with what is said during those few minutes. It flags lines whose
@@ -24,22 +37,6 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **AI checks per run** now counts line matching and wording audits together.
-
-### Added
-
-- **Lines matched by meaning** (optional, with the Shoal AI plugin: **Ask the AI plugin when the wording differs from
-  what is said**, on by default, at most 20 checks per run).
-  - **When it's used:** speech-to-text heard plenty but the subtitle's words don't match it. Typical cases are a
-    translation (an English subtitle on a film in another language), a paraphrase, or dense dialogue.
-  - **What happens:** the AI pairs the heard phrases with subtitle lines that say the same thing, and those pairs
-    must still agree on one timing before anything is changed.
-  - **Where it applies:** finding subtitles, checking existing ones, and checking tracks inside videos. A right but
-    loosely worded subtitle is no longer skipped as "another language".
-  - **When the content is different:** if the AI says the subtitles are for something else (another version,
-    commentary), that confirms the mismatch.
-  - **What is sent:** only the subtitle language, a few minutes of heard phrases and the nearby subtitle lines. The
-    AI plugin must allow Subtitles, and its spending limits apply.
-- The shared source is updated to include the AI plugin's client (`AiBridgeClient`).
 
 ## [0.5.0-alpha] - 2026-09-26
 
