@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.2.0.0"
+version: "0.3.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,8 +14,7 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.2.0-alpha: built-in speech-to-text. Once you allow it, whisper.cpp and a speech model are downloaded from this
-  project's releases, checked against checksums built into the plugin, and run on the server's CPU. Also: undo is
-  safe after another tool replaces a subtitle, large libraries are checked once each, downloads and huge files are
-  capped, Apply/Undo errors are shown, downloads default to 10 a day and stop when the provider's allowance is used up,
-  and forced-only tracks no longer count as having subtitles.
+  0.3.0-alpha: paid speech-to-text (Deepgram, OpenAI) can be used by the nightly runs within your monthly limit, in
+  your currency. Every call is priced from the providers' published prices, reserved against the limit and recorded;
+  a call that would go over the limit, or whose cost can't be worked out, isn't made. The settings page shows this
+  month's spending.
