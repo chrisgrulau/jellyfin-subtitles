@@ -44,6 +44,8 @@ public class SubtitlesController : ControllerBase
     private readonly ILibraryManager _library;
     private readonly IMediaSourceManager _media;
     private readonly IMediaEncoder _encoder;
+    private readonly RunGate _gate;
+    private readonly ILibraryMonitor _monitor;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitlesController"/> class.
@@ -57,8 +59,12 @@ public class SubtitlesController : ControllerBase
     /// <param name="library">Jellyfin's library (for the editor's audio clips).</param>
     /// <param name="media">Jellyfin's media sources (to choose the audio track).</param>
     /// <param name="encoder">Jellyfin's media encoder (for ffmpeg).</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder)
+    /// <param name="gate">Keeps restoring all originals apart from the scheduled tasks.</param>
+    /// <param name="monitor">Jellyfin's library monitor (told about restored and removed subtitles).</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, RunGate gate, ILibraryMonitor monitor)
     {
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
+        _monitor = monitor ?? throw new ArgumentNullException(nameof(monitor));
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
         _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
@@ -203,8 +209,9 @@ public class SubtitlesController : ControllerBase
     {
         try
         {
-            var wanted = LanguageSettings.EffectiveLanguages((SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()).Languages);
-            var (result, refused) = _processor.RequestWholeFileCheck(id, JobFor, wanted);
+            // The languages wanted for the subtitle's video are its library's, as in the nightly run
+            var scope = JellyfinLibraries.Scope(_library, SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration(), _serverConfig);
+            var (result, refused) = _processor.RequestWholeFileCheck(id, JobFor, job => scope.LanguagesForPath(job.VideoPath).Codes);
             return result is not null ? result : BadRequest(refused);
         }
         catch (InvalidOperationException ex)
@@ -279,6 +286,23 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
+    /// The server's film and show libraries, whether the plugin works on each (the settings page's library picker), and
+    /// the subtitle languages in effect for each, with where they come from.
+    /// </summary>
+    /// <returns>The libraries, in the server's order.</returns>
+    [HttpGet("Libraries")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<IReadOnlyList<LibrarySummary>> Libraries()
+    {
+        var scope = JellyfinLibraries.Scope(_library, SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration(), _serverConfig);
+        return Ok(scope.Libraries.Select(l =>
+        {
+            var languages = scope.LanguagesFor(l);
+            return new LibrarySummary(LibraryScope.NormaliseId(l.Id)!, l.Name, scope.IsIncluded(l), languages.Codes, languages.Source);
+        }).ToList());
+    }
+
+    /// <summary>
     /// Undoes this plugin's changes to a file.
     /// </summary>
     /// <param name="id">Result id.</param>
@@ -296,6 +320,49 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// What "Restore all originals" would do (the first step of its two-step confirmation).
+    /// </summary>
+    /// <returns>The counts.</returns>
+    [HttpGet("RestoreAll")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<RestorePreview> RestoreAllPreview() => _processor.PreviewRestoreAll();
+
+    /// <summary>
+    /// Restores all originals, a batch at a time (for use before uninstalling): every file this plugin changed gets its
+    /// original back and every subtitle it added or generated is removed, except files changed since, which are left
+    /// alone and listed. The page calls this again with the returned cursor until it is done. Refused while a scheduled
+    /// task or the handling of new videos is running.
+    /// </summary>
+    /// <param name="after">The cursor from the previous batch, if any.</param>
+    /// <returns>What this batch did.</returns>
+    [HttpPost("RestoreAll")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<RestoreAllBatch> RestoreAll([FromQuery] string? after)
+    {
+        if (after?.Length > 100)
+        {
+            return BadRequest("That isn't a cursor this endpoint gave.");
+        }
+
+        using var hold = _gate.TryEnterAlone("restoring all originals");
+        if (hold is null)
+        {
+            return Conflict("Nothing was changed: " + (_gate.Busy ?? "something else is running") + ". Try again when it has finished.");
+        }
+
+        var batch = _processor.RestoreAll(string.IsNullOrEmpty(after) ? null : after);
+        foreach (var path in batch.Touched)
+        {
+            // Jellyfin picks up restored and removed subtitles as it would from real-time monitoring
+            _monitor.ReportFileSystemChanged(path);
+        }
+
+        return batch;
     }
 
     /// <summary>
@@ -785,3 +852,13 @@ public sealed record LimitKeyRequest
     /// <summary>Gets a value indicating whether to keep the Admin key, only for reading the balance.</summary>
     public bool KeepForBalance { get; init; }
 }
+
+/// <summary>
+/// A library on the settings page's library picker.
+/// </summary>
+/// <param name="Id">The library's id.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Included">Whether the plugin works on it.</param>
+/// <param name="Languages">The subtitle languages in effect for its videos (three-letter codes, in order).</param>
+/// <param name="LanguagesFrom">Where they come from.</param>
+public sealed record LibrarySummary(string Id, string Name, bool Included, IReadOnlyList<string> Languages, LanguageSource LanguagesFrom);

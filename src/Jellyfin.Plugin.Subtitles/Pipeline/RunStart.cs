@@ -81,8 +81,11 @@ internal sealed class RunStart : IDisposable
     /// auditing the wording, sharing that run's allowance of AI checks.
     /// </summary>
     /// <param name="config">Plugin settings.</param>
+    /// <param name="checks">The allowance of AI checks to share, or <c>null</c> for a new one of
+    /// <see cref="PluginConfiguration.MaxAiChecksPerRun"/> (the handling of new videos shares one a day, see
+    /// <see cref="DailyAiChecks"/>).</param>
     /// <returns>The policies.</returns>
-    public static Policies PoliciesFor(PluginConfiguration config)
+    public static Policies PoliciesFor(PluginConfiguration config, Ai.AiChecks? checks = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         var policies = config.Policies();
@@ -91,7 +94,7 @@ internal sealed class RunStart : IDisposable
             return policies;
         }
 
-        var checks = new Ai.AiChecks(config.MaxAiChecksPerRun);
+        checks ??= new Ai.AiChecks(config.MaxAiChecksPerRun);
         return policies with { Matcher = new Ai.AiLineMatcher(checks), Auditor = config.AuditWording ? new Ai.AiTextAuditor(checks) : null };
     }
 

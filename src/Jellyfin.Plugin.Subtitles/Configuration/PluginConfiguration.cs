@@ -18,12 +18,21 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the subtitle languages to find and check, as ISO 639-2 codes (e.g. <c>eng</c>); empty means English
-    /// (see <see cref="LanguageSettings.EffectiveLanguages"/>). The list starts empty on purpose: Jellyfin's XML loader adds
+    /// Gets or sets the subtitle languages to find and check, as ISO 639-2 codes (e.g. <c>eng</c>); empty means each
+    /// library's own subtitle download languages, then the server's preferred metadata language, then English (see
+    /// <see cref="LanguageSettings.Choose"/>). The list starts empty on purpose: Jellyfin's XML loader adds
     /// saved items to whatever the list starts with, so a default item would be duplicated on every restart.
     /// </summary>
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "Jellyfin deserializes plugin configuration from JSON, which cannot populate a get-only collection.")]
     public Collection<string> Languages { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the ids of the libraries the plugin leaves alone (none by default: every film and show library is
+    /// worked on). Stored as left out rather than chosen, so a library added later is worked on until it is unticked
+    /// (see <see cref="Pipeline.LibraryScope"/>). Starts empty for the same reason as <see cref="Languages"/>.
+    /// </summary>
+    [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "Jellyfin deserializes plugin configuration from JSON, which cannot populate a get-only collection.")]
+    public Collection<string> ExcludedLibraries { get; set; } = [];
 
     /// <summary>
     /// Gets or sets what happens to timing corrections (shift, drift, cuts).
@@ -159,6 +168,21 @@ public class PluginConfiguration : BasePluginConfiguration
     /// its language. Forced-only tracks (signs and foreign-language parts) never count.
     /// </summary>
     public bool CountImageSubtitles { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether videos are handled soon after they are added to the library (on by
+    /// default): once nothing new has been added for <see cref="NewItemsDelayMinutes"/>, their subtitle files are checked
+    /// and missing subtitles searched for, as the nightly tasks would, within the same limits. A new subtitle file beside
+    /// a video is checked the same way. Generating subtitles stays nightly. Like everything else, nothing happens on a
+    /// new install until the settings page has been saved once.
+    /// </summary>
+    public bool HandleNewItems { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets how many minutes after the last video was added new videos are handled (1 to 1440; 10 by default),
+    /// so a season being filed is handled in one go.
+    /// </summary>
+    public int NewItemsDelayMinutes { get; set; } = 10;
 
     // ---- Advanced ----
 

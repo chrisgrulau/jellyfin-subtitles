@@ -342,6 +342,17 @@ The editor opens a subtitle through its result id, so only files this plugin alr
 The original subtitle is always kept. A small JSON record next to each result stores source, scores, sync model and
 parameters, providers used and cost, so any change can be undone and re-runs are idempotent.
 
+**Restore all originals** (`SubtitleProcessor.RestoreAll`, for before uninstalling) applies Undo's own rules to every
+result that holds a change: results with the original kept (`Changed` and a `Backup`) get it back, then subtitles the
+plugin added or generated (`Added`/`Generated` and `Changed`) are removed. Originals go first so a subtitle that was
+added and later corrected is back as added, and so still removable. A file whose content isn't what the plugin last
+wrote (changed since, including an added file someone edited) is left alone, as is one whose original is no longer kept,
+and a changed file that has since been deleted isn't recreated; each is reported with the reason. An added file that is
+already gone is simply recorded as undone. Restored results are `Undone`, which later runs leave alone. The endpoint
+works in batches of 200 in a fixed order (originals, then removals, each by result id) and returns a cursor, so the
+page shows progress without a background job, and a batch never runs alongside a scheduled task or new-video run
+(`RunGate`). Jellyfin is told about each file restored or removed.
+
 ## Budgets, limits and failures
 
 Shared with the other plugins through
@@ -387,12 +398,63 @@ works, just without AI tiebreakers.
   tier's service transcribes it, and a paid service is wrapped in `MeteredSpeechToText` under the caller's purpose. A
   semaphore lets only one transcription run at a time, so the built-in service never runs twice at once.
 
+## New videos
+
+`NewItemsHost` (a hosted service) listens to `ILibraryManager.ItemAdded` and `ItemUpdated` for films and episodes (not
+for artwork-only updates) and queues them in `NewItemsWaiting`: one entry per video, "added" winning over "changed",
+at most 500 (the rest are left to the nightly tasks). Each report re-arms one timer for the quiet delay
+(`NewItemsDelayMinutes`, 10 by default), so the batch runs once nothing has arrived for that long. The handler itself is
+cheap and never throws; it runs on Jellyfin's scanning thread.
+
+A batch runs the nightly tasks' own code (`SubtitleSyncTask.RunForAsync`, then `SubtitleFindTask.RunForAsync`), made
+through dependency injection, with the walk limited to the batch's videos. So every rule applies unchanged: the setup
+gate, the results file being readable, the library picker, languages, files and videos per run, downloads per day
+(`DownloadLedger`) and spending (`SpendLedger`). Differences, on purpose:
+
+- A video that only changed (typically a new subtitle file beside it) has only files the results don't know checked,
+  and isn't searched for: Jellyfin reports videos as changed for many reasons, and the nightly run sees to the rest.
+- No pruning of results and no audit of earlier results (both whole-library chores).
+- The day's new-video runs share one run's allowance of AI checks (`DailyAiChecks`), so frequent small runs never ask
+  more than one nightly run may.
+- Generating stays nightly (hours of CPU). A new video the search found nothing for gets its "not found" result like
+  any other and is a candidate for the next night's generation.
+
+`RunGate` keeps this apart from the nightly tasks: they share the gate; a new-video run (and "Restore all originals")
+needs it alone. A scheduled task that starts during a new-video run waits for it; a new-video batch that finds a
+scheduled task running is put back and tried again after another quiet delay. The queue is in memory: after a restart,
+the nightly tasks pick up whatever was waiting.
+
+## Libraries
+
+`LibraryScope` decides which videos the plugin works on. The server's film, show and mixed libraries are read from
+Jellyfin's virtual folders (id, name, folders); a video belongs to the library whose folder holds it (the deepest one,
+when folders nest), so the decision is a plain path match with no extra database queries in the nightly walk. The
+setting is `ExcludedLibraries` (ids): a library added later is worked on until it is unticked, and an id that no longer
+names a library changes nothing. A video in no known library's folder is never left out. `LibraryVideos` applies the
+scope to every walk, so the checks, the search, generating and the whole-file check all honour it (a whole-file check
+picked for a video in a library left out is cleared as unreachable, with the reason).
+
 ## Settings: basic vs advanced
 
 Basic settings are the key decisions in plain language. Advanced settings (costs, per-run limits, clean-up details, AI
 checks) sit behind a collapsed section with a warning; risky values show their own warning.
 
 ## Languages
+
+Which languages a video's subtitles are wanted in (`LanguageSettings.Choose`, per library through `LibraryScope`):
+
+1. The plugin's **Subtitle languages**, when it names any recognised language (an entry that isn't one is ignored and
+   logged). It applies to every library.
+2. Otherwise the library's subtitle download languages (`LibraryOptions.SubtitleDownloadLanguages`, set in Jellyfin's
+   library settings).
+3. Otherwise the server's preferred metadata language: Jellyfin has no server-wide subtitle language (only per-user
+   preferences), and the metadata language is the closest the server has to "the household's language".
+4. Otherwise English.
+
+The walk carries each video's languages, so checks, searches, embedded tracks, generation and the whole-file check all
+use the video's own library's list (an untagged audio track is taken to be in that list's first language). Where no
+single video is concerned, the union over the libraries worked on is used. The settings page lists what is in effect
+per library, and where it came from.
 
 Same-language subtitles for any language the providers support. Different audio and subtitle languages are on the
 roadmap: identify both languages, transcribe, translate (Whisper can translate straight to English), and synchronise

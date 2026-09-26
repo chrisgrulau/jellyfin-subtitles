@@ -626,10 +626,26 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such result.</exception>
     public (SubtitleResult? Result, string? Refused) RequestWholeFileCheck(string id, Func<SubtitleResult, SubtitleJob?> jobFor, IReadOnlyList<string> wanted)
     {
-        ArgumentNullException.ThrowIfNull(jobFor);
         ArgumentNullException.ThrowIfNull(wanted);
+        return RequestWholeFileCheck(id, jobFor, _ => wanted);
+    }
+
+    /// <summary>
+    /// Asks for a subtitle file to be compared whole with a full transcript, with the languages wanted for its video's
+    /// library (see <see cref="RequestWholeFileCheck(string, Func{SubtitleResult, SubtitleJob?}, IReadOnlyList{string})"/>).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="jobFor">The subtitle as the library lists it (video, language, audio track), or <c>null</c>.</param>
+    /// <param name="wantedFor">The wanted languages for a subtitle's video, in order.</param>
+    /// <returns>The updated result, or why it can't be checked.</returns>
+    /// <exception cref="InvalidOperationException">No such result.</exception>
+    public (SubtitleResult? Result, string? Refused) RequestWholeFileCheck(string id, Func<SubtitleResult, SubtitleJob?> jobFor, Func<SubtitleJob, IReadOnlyList<string>> wantedFor)
+    {
+        ArgumentNullException.ThrowIfNull(jobFor);
+        ArgumentNullException.ThrowIfNull(wantedFor);
         var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
-        if (WholeFileChecker.Ineligible(r, jobFor(r), wanted) is { } why)
+        var job = jobFor(r);
+        if (WholeFileChecker.Ineligible(r, job, job is null ? [] : wantedFor(job)) is { } why)
         {
             return (null, why);
         }
@@ -648,9 +664,92 @@ public sealed class SubtitleProcessor
     /// <param name="id">Result id.</param>
     /// <returns>The updated result.</returns>
     /// <exception cref="InvalidOperationException">Nothing to undo, or the file changed since.</exception>
-    public SubtitleResult Undo(string id)
+    public SubtitleResult Undo(string id) => Undo(_results.FindForRequest(id) ?? throw new InvalidOperationException("No such result."));
+
+    /// <summary>The most files one call of <see cref="RestoreAll"/> handles.</summary>
+    public const int RestoreBatch = 200;
+
+    /// <summary>
+    /// What <see cref="RestoreAll"/> would do: how many changed files would get their original back, and how many added or
+    /// generated subtitles would be removed.
+    /// </summary>
+    /// <returns>The counts.</returns>
+    public RestorePreview PreviewRestoreAll()
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var all = Restorable().ToList();
+        return new RestorePreview(all.Count(r => !IsRemoval(r)), all.Count(IsRemoval));
+    }
+
+    /// <summary>
+    /// Undoes everything this plugin did, for use before uninstalling, a batch at a time: every file it changed gets its
+    /// original back, then every subtitle it added or generated is removed, each exactly as <b>Undo</b> would, so a file
+    /// changed since (by someone else, or by hand) is left alone and reported, as is one whose original is no longer
+    /// kept. A changed file that is gone isn't brought back; an added one that is gone is simply recorded as undone.
+    /// Restored files aren't changed again by later runs (as after Undo). Files are taken in a fixed order (originals
+    /// first, then removals, each by result id), so a caller passes the returned cursor to carry on.
+    /// </summary>
+    /// <param name="after">The cursor from the previous batch, or <c>null</c> to start.</param>
+    /// <param name="max">The most files in this batch (1 to <see cref="RestoreBatch"/>).</param>
+    /// <returns>What was done, what was skipped and why, and the cursor for the next batch (<c>null</c> when done).</returns>
+    public RestoreAllBatch RestoreAll(string? after, int max = RestoreBatch)
+    {
+        var take = Math.Clamp(max, 1, RestoreBatch);
+        var todo = Restorable().Select(r => (Key: RestoreKey(r), Result: r))
+            .Where(x => after is null || string.CompareOrdinal(x.Key, after) > 0)
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .ToList();
+        int restored = 0, removed = 0, gone = 0;
+        var skipped = new List<RestoreSkip>();
+        var touched = new List<string>();
+        foreach (var (_, r) in todo.Take(take))
+        {
+            var removal = IsRemoval(r);
+            if (!File.Exists(r.SubtitlePath) && !removal)
+            {
+                skipped.Add(new RestoreSkip(r.Name, Path.GetFileName(r.SubtitlePath), "The file is no longer there, so its original wasn't put back."));
+                continue;
+            }
+
+            try
+            {
+                var existed = File.Exists(r.SubtitlePath);
+                Undo(r);
+                touched.Add(r.SubtitlePath);
+                if (!removal)
+                {
+                    restored++;
+                }
+                else if (existed)
+                {
+                    removed++;
+                }
+                else
+                {
+                    gone++;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+            {
+                skipped.Add(new RestoreSkip(r.Name, Path.GetFileName(r.SubtitlePath), ex.Message));
+            }
+        }
+
+        var next = todo.Count > take ? todo[take - 1].Key : null;
+        return new RestoreAllBatch(restored, removed, gone, skipped, next, todo.Count - Math.Min(take, todo.Count)) { Touched = touched };
+    }
+
+    // What restoring everything undoes: files holding this plugin's changes (with the original kept), and subtitles it
+    // added or generated that are still as it left them (as far as the results know)
+    private IEnumerable<SubtitleResult> Restorable()
+        => _results.All().Where(r => r.Changed && (IsRemoval(r) || r.Backup is not null));
+
+    private static bool IsRemoval(SubtitleResult r) => r.Status is ResultStatus.Added or ResultStatus.Generated;
+
+    // Originals first: a subtitle the plugin added and then corrected must be back as added before it can be removed
+    private static string RestoreKey(SubtitleResult r) => (IsRemoval(r) ? "1:" : "0:") + r.Id;
+
+    private SubtitleResult Undo(SubtitleResult r)
+    {
         if (r.Status == ResultStatus.Generated && r.Changed)
         {
             try
@@ -848,6 +947,13 @@ public sealed class SubtitleProcessor
         _results.Remove(id);
     }
 
+    /// <summary>
+    /// Whether the plugin has any result for a subtitle file (checked, or added by it).
+    /// </summary>
+    /// <param name="subtitlePath">The file.</param>
+    /// <returns><c>true</c> if it has seen it.</returns>
+    public bool Knows(string subtitlePath) => _results.ForPath(subtitlePath) is not null;
+
     /// <summary>Gets whether any subtitle has been checked yet (an install that has run before counts as set up).</summary>
     public bool HasResults => _results.All().Count > 0;
 
@@ -888,4 +994,35 @@ public sealed class SubtitleProcessor
         _results.Put(result);
         return result;
     }
+}
+
+/// <summary>
+/// What restoring all originals would do.
+/// </summary>
+/// <param name="ToRestore">Changed files that would get their original back.</param>
+/// <param name="ToRemove">Added or generated subtitles that would be removed.</param>
+public sealed record RestorePreview(int ToRestore, int ToRemove);
+
+/// <summary>
+/// A file restoring all originals left alone, and why.
+/// </summary>
+/// <param name="Name">The video's name.</param>
+/// <param name="File">The subtitle's file name.</param>
+/// <param name="Reason">Why, in plain words.</param>
+public sealed record RestoreSkip(string Name, string File, string Reason);
+
+/// <summary>
+/// One batch of restoring all originals.
+/// </summary>
+/// <param name="Restored">Files whose original was put back.</param>
+/// <param name="Removed">Added or generated subtitles removed.</param>
+/// <param name="AlreadyGone">Added or generated subtitles that were already gone (recorded as undone).</param>
+/// <param name="Skipped">Files left alone, with the reason.</param>
+/// <param name="Next">The cursor for the next batch, or <c>null</c> when everything has been done.</param>
+/// <param name="Left">How many files are left for later batches.</param>
+public sealed record RestoreAllBatch(int Restored, int Removed, int AlreadyGone, IReadOnlyList<RestoreSkip> Skipped, string? Next, int Left)
+{
+    /// <summary>Gets the subtitle files changed or removed (to tell Jellyfin; not sent to the page).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<string> Touched { get; init; } = [];
 }
