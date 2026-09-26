@@ -31,7 +31,27 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 
         // Results, the originals of changed subtitles and the download count also live in the plugin's data folder. One
         // results store is shared, so the checker knows what the finder added.
-        serviceCollection.AddSingleton(sp => new ResultStore(Path.Combine(DataFolder(sp), "results.json")));
+        // What needs attention, and subtitles added, are also written to Jellyfin's Activity log (FAM-05)
+        serviceCollection.AddSingleton(sp =>
+        {
+            var activity = sp.GetRequiredService<MediaBrowser.Model.Activity.IActivityManager>();
+            return new SubtitleActivity(
+                note => activity.CreateAsync(new Jellyfin.Database.Implementations.Entities.ActivityLog(note.Name, SubtitleActivity.Type, System.Guid.Empty)
+                {
+                    ShortOverview = note.ShortOverview,
+                    Overview = note.Overview,
+                    LogSeverity = note.Severity,
+                }),
+                System.TimeProvider.System,
+                () => SubtitlesPlugin.Instance?.Configuration.WriteToActivityLog != false);
+        });
+        serviceCollection.AddSingleton(sp =>
+        {
+            var store = new ResultStore(Path.Combine(DataFolder(sp), "results.json"));
+            var activity = sp.GetRequiredService<SubtitleActivity>();
+            store.Recorded = r => _ = activity.NotifyAsync(r);
+            return store;
+        });
         serviceCollection.AddSingleton(sp => new SubtitleProcessor(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"))));
         serviceCollection.AddSingleton(sp => new EmbeddedChecker(sp.GetRequiredService<ResultStore>()));
         // The in-process entry point other plugins of the family use for short transcripts (no HTTP endpoint)
