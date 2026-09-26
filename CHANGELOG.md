@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0-alpha] - 2026-09-26
+
 ### Changed
 
 - **FAM-06:** uses the shared building blocks from the common library (updated to its FAM-06 release).
