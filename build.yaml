@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.9.0.0"
+version: "0.10.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,6 +14,7 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.9.0-alpha: languages are recognised from a built-in ISO 639 table, so the plugin works on servers without full
-  language data. Subtitle languages accept codes or names (eng, fr, German); entries that aren't languages are noted
-  in the log.
+  0.10.0-alpha: built-in Whisper checks the system before downloading and gives up on stalled downloads; container-
+  aware local service search; rewritten subtitles keep their file mode; nothing-found is not recorded when no
+  provider answered; results saved in batches; settings that do nothing yet are marked coming later; page errors and
+  accessibility.
