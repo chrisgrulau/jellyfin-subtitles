@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Mime;
 using System.Threading;
@@ -29,6 +30,7 @@ public class SubtitlesController : ControllerBase
 {
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
+    private readonly Pricing.Spending _spending;
     private readonly IHttpClientFactory _http;
     private readonly SubtitleProcessor _processor;
 
@@ -39,8 +41,10 @@ public class SubtitlesController : ControllerBase
     /// <param name="http">HTTP client factory.</param>
     /// <param name="processor">Subtitle checks, results, apply and undo.</param>
     /// <param name="builtIn">The built-in speech-to-text.</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn)
+    /// <param name="spending">Prices, spend ledger and exchange rates.</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending)
     {
+        _spending = spending ?? throw new ArgumentNullException(nameof(spending));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
@@ -145,6 +149,28 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
+    /// This month's spending on paid services, in the user's currency, with the limit and the exchange rates used.
+    /// </summary>
+    /// <returns>The spending.</returns>
+    [HttpGet("Spending")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<SpendingSummary> Spending()
+    {
+        var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
+        var limits = Pricing.Spending.LimitsOf(config);
+        var rates = _spending.Rates.Current;
+        var month = _spending.Ledger.ThisMonth(limits, rates);
+        return new SpendingSummary(
+            limits.Currency,
+            limits.Overall,
+            month.Total,
+            month.PerProvider.ToDictionary(p => p.Key, p => decimal.Round(p.Value, 4), StringComparer.OrdinalIgnoreCase),
+            rates?.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            rates is not null && rates.IsFresh(DateOnly.FromDateTime(DateTime.Now)),
+            _spending.Prices?.Version);
+    }
+
+    /// <summary>
     /// Checks that a speech-to-text service answers, by sending it one second of near-silence (for a paid service this
     /// costs a small fraction of a cent).
     /// </summary>
@@ -165,6 +191,13 @@ public class SubtitlesController : ControllerBase
         if (service is null)
         {
             return new TestResult(false, problem ?? "Can't be used.");
+        }
+
+        // A paid service's test is priced and counted like any other call (a fraction of a cent)
+        if (SpeechToTextFactory.IsPaid(service.Id))
+        {
+            await _spending.Rates.RefreshAsync(http, cancellationToken).ConfigureAwait(false);
+            service = new MeteredSpeechToText(service, Pipeline.SubtitleSyncTask.ModelOf(service.Id, request.Model), _spending, Pricing.Spending.LimitsOf(config), "subtitles.test");
         }
 
         // One second of a very quiet tone: enough for the service to accept and answer
@@ -218,3 +251,15 @@ public sealed record TestRequest
 /// <param name="Ok">Whether the service answered.</param>
 /// <param name="Message">What to show (keys removed).</param>
 public sealed record TestResult(bool Ok, string Message);
+
+/// <summary>
+/// This month's spending on paid services.
+/// </summary>
+/// <param name="Currency">The user's currency.</param>
+/// <param name="Limit">The monthly limit, or <c>null</c> for no limit.</param>
+/// <param name="Spent">Spent so far this month (open reservations included), or <c>null</c> if it can't be converted.</param>
+/// <param name="PerProvider">Spent per provider.</param>
+/// <param name="RatesDate">The date of the exchange rates in use, if any.</param>
+/// <param name="RatesFresh">Whether those rates are recent enough to use.</param>
+/// <param name="PricesVersion">The version of the published prices shipped with the plugin.</param>
+public sealed record SpendingSummary(string Currency, decimal? Limit, decimal? Spent, IReadOnlyDictionary<string, decimal> PerProvider, string? RatesDate, bool RatesFresh, string? PricesVersion);
