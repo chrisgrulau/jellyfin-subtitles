@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-alpha] - 2026-09-26
+
 ### Added
 
 - **Subtitles inside video files** (opt-in: **Also check subtitles inside video files**, off by default).
@@ -16,9 +18,6 @@ All notable changes to this project are documented here. The format follows
   - What happens after: the video is never changed. A track that's out of time gets a corrected copy added beside the
     video, which Undo removes. A track that's in time is recorded and not read again until the video changes, and a
     failure is tried again after 30 days.
-
-### Added
-
 - **SubDL as an extra subtitle source** (the successor to Subscene), searched after Jellyfin's own providers when a free
   SubDL API key is set on the settings page.
   - It searches by the film's or show's IMDb or TMDb id, with season and episode for TV.
