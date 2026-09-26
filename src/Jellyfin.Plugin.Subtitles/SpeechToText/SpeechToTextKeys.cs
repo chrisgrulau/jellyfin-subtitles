@@ -9,8 +9,9 @@ namespace Jellyfin.Plugin.Subtitles.SpeechToText;
 /// </summary>
 public sealed class SpeechToTextKeys
 {
-    /// <summary>The services a key can be stored for (a local service may need one; most don't).</summary>
-    public static readonly IReadOnlyList<string> Providers = [SpeechToTextFactory.Local, SpeechToTextFactory.Deepgram, SpeechToTextFactory.OpenAi];
+    /// <summary>The services a key can be stored for (a local service may need one; most don't), and an optional separate
+    /// Deepgram billing key used only to read the credit balance.</summary>
+    public static readonly IReadOnlyList<string> Providers = [SpeechToTextFactory.Local, SpeechToTextFactory.Deepgram, SpeechToTextFactory.OpenAi, DeepgramAccount.BillingKey];
 
     private readonly KeyFile _file;
 

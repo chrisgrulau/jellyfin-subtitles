@@ -130,7 +130,30 @@
             <div id="LocalFound" class="subs-muted"></div>
             <div class="subs-key"></div>
           </div>
-          <div class="subs-service" data-service="deepgram"><h4>Deepgram</h4><div class="subs-key"></div></div>
+          <div class="subs-service" data-service="deepgram"><h4>Deepgram</h4><div class="subs-key"></div>
+            <div id="DgAdmin" class="subs-warning" hidden>
+              <p style="margin-top:0"><strong>This is an Admin key.</strong> Besides transcribing, it can create and delete keys and see billing for your whole Deepgram project. It's safer to transcribe with a key that can only transcribe.</p>
+              <div class="checkboxContainer" style="margin:0"><label class="emby-checkbox-label"><input id="DgKeepAdmin" type="checkbox" is="emby-checkbox" checked /><span>Keep the Admin key, only to show the credit balance</span></label></div>
+              <button is="emby-button" type="button" class="raised button-submit" id="DgLimit"><span>Create a transcription-only key</span></button>
+              <div class="subs-muted">The plugin asks Deepgram for a new key with only the <code>usage:write</code> scope and uses it for transcription from then on.</div>
+            </div>
+            <div class="selectContainer" style="margin-top:1em">
+              <label class="selectLabel" for="DeepgramBalance">Credit balance</label>
+              <select is="emby-select" id="DeepgramBalance">
+                <option value="Off">Don't show</option>
+                <option value="SeparateKey">Show it, using a separate billing key (recommended)</option>
+                <option value="TranscriptionKey">Show it, using the transcription key (it must be an Admin key)</option>
+              </select>
+              <div class="fieldDescription">Reading the balance needs a Deepgram Admin or Owner key. A billing key is stored like the others (only Jellyfin can read the file), never shown again, sent only to api.deepgram.com, and used only to read the balance, never to transcribe.</div>
+            </div>
+            <div id="DgBillingKey" class="subs-key" hidden>
+              <div class="inputContainer"><label class="inputLabel inputLabelUnfocused" for="DgBillingInput">Billing key (Admin): <span id="DgBillingState">not set</span></label><input is="emby-input" type="password" id="DgBillingInput" autocomplete="off" placeholder="Paste an Admin key" /></div>
+              <button is="emby-button" type="button" class="raised" id="DgBillingSave"><span>Save billing key</span></button>
+              <button is="emby-button" type="button" class="raised button-alt" id="DgBillingClear"><span>Clear</span></button>
+            </div>
+            <div id="DgSameWarning" class="subs-warning" hidden>Transcribing with an Admin key works, but if the key ever leaked it could be used to manage your Deepgram project. A separate billing key keeps the transcription key limited.</div>
+            <div id="DgBalanceNow" class="subs-muted"></div>
+          </div>
           <div class="subs-service" data-service="openai"><h4>OpenAI</h4><div class="subs-key"></div></div>
 
           <div id="BuiltInConsent" class="subs-warning" hidden>
@@ -358,6 +381,50 @@
           }, function () { box.textContent = 'The search couldn\'t be run.'; });
         });
 
+        // Deepgram: credit balance, which key reads it, and swapping an Admin transcription key for a limited one
+        function dgModeChanged() {
+          var mode = page.querySelector('#DeepgramBalance').value;
+          page.querySelector('#DgBillingKey').hidden = mode !== 'SeparateKey';
+          page.querySelector('#DgSameWarning').hidden = mode !== 'TranscriptionKey';
+        }
+
+        function loadDeepgram(check) {
+          var line = page.querySelector('#DgBalanceNow');
+          return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Deepgram', { check: !!check })).then(function (d) {
+            page.querySelector('#DgBillingState').textContent = d.HasBillingKey ? 'set' : 'not set';
+            if (d.KeyIsAdmin !== null && d.KeyIsAdmin !== undefined) { page.querySelector('#DgAdmin').hidden = !d.KeyIsAdmin; }
+            if (d.Balance) {
+              line.textContent = 'Deepgram credit: ' + d.Balance.Currency + ' ' + Number(d.Balance.Amount).toFixed(2) + ' (checked ' + new Date(d.Balance.Checked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ')';
+            } else {
+              line.textContent = d.Problem || '';
+            }
+          }, function () { line.textContent = ''; });
+        }
+
+        page.querySelector('#DeepgramBalance').addEventListener('change', dgModeChanged);
+        page.querySelector('#DgBillingSave').addEventListener('click', function () {
+          var key = page.querySelector('#DgBillingInput').value.trim();
+          if (!key) { Dashboard.alert('Paste the billing key first.'); return; }
+          ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Keys/deepgram-billing'), data: JSON.stringify({ Key: key }), contentType: 'application/json' })
+            .then(function () { page.querySelector('#DgBillingInput').value = ''; Dashboard.alert('Billing key saved. Save the settings to start showing the balance.'); return loadDeepgram(false); },
+              function () { Dashboard.alert("That doesn't look like an API key."); });
+        });
+        page.querySelector('#DgBillingClear').addEventListener('click', function () {
+          ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/deepgram-billing') }).then(function () { return loadDeepgram(false); });
+        });
+        page.querySelector('#DgLimit').addEventListener('click', function () {
+          var keep = page.querySelector('#DgKeepAdmin').checked;
+          ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Deepgram/LimitKey'), data: JSON.stringify({ KeepForBalance: keep }), contentType: 'application/json', dataType: 'json' })
+            .then(function (r) {
+              Dashboard.alert(r.Message);
+              if (r.Ok) {
+                page.querySelector('#DgAdmin').hidden = true;
+                if (keep) { page.querySelector('#DeepgramBalance').value = 'SeparateKey'; dgModeChanged(); }
+              }
+              return loadDeepgram(false);
+            }, function () { Dashboard.alert('That couldn\'t be done.'); });
+        });
+
         function loadKeys() {
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Keys')).then(renderKeys);
         }
@@ -376,7 +443,7 @@
             var key = box.querySelector('.svc-key').value.trim();
             if (!key) { Dashboard.alert('Paste the key first.'); return; }
             ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Keys/' + id), data: JSON.stringify({ Key: key }), contentType: 'application/json' })
-              .then(loadKeys, function () { Dashboard.alert("That doesn't look like an API key."); });
+              .then(function () { return loadKeys().then(function () { if (id === 'deepgram') { return loadDeepgram(true); } }); }, function () { Dashboard.alert("That doesn't look like an API key."); });
           } else if (e.target.closest('.svc-clearkey')) {
             ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/' + id) }).then(loadKeys);
           } else if (e.target.closest('.svc-test')) {
@@ -489,6 +556,9 @@
             page.querySelector('#ExtraChargesPercent').value = config.ExtraChargesPercent || 0;
             page.querySelector('#NoSpendingLimit').checked = !!config.NoSpendingLimit;
             page.querySelector('#AllowBuiltInDownload').checked = !!config.AllowBuiltInDownload;
+            page.querySelector('#DeepgramBalance').value = config.DeepgramBalance || 'Off';
+            dgModeChanged();
+            loadDeepgram(false);
             page.querySelector('#SelfCalibration').checked = config.SelfCalibration;
             page.querySelector('#AgreementDecides').checked = config.AgreementDecides;
             var cleanup = config.Cleanup || {};
@@ -536,6 +606,7 @@
             config.ExtraChargesPercent = Math.min(100, Math.max(0, parseFloat(page.querySelector('#ExtraChargesPercent').value) || 0));
             config.NoSpendingLimit = page.querySelector('#NoSpendingLimit').checked;
             config.AllowBuiltInDownload = page.querySelector('#AllowBuiltInDownload').checked;
+            config.DeepgramBalance = page.querySelector('#DeepgramBalance').value;
             config.SelfCalibration = page.querySelector('#SelfCalibration').checked;
             config.AgreementDecides = page.querySelector('#AgreementDecides').checked;
             var cleanup = config.Cleanup = config.Cleanup || {};
@@ -555,7 +626,7 @@
                 Model: row.querySelector('.tier-model').value.trim()
               };
             });
-            ApiClient.updatePluginConfiguration(pluginId, config).then(Dashboard.processPluginConfigurationUpdateResult);
+            ApiClient.updatePluginConfiguration(pluginId, config).then(function (r) { Dashboard.processPluginConfigurationUpdateResult(r); loadDeepgram(false); });
           });
           return false;
         });
