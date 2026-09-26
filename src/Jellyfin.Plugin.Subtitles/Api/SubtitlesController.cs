@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Pipeline;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
+using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -27,6 +28,7 @@ namespace Jellyfin.Plugin.Subtitles.Api;
 public class SubtitlesController : ControllerBase
 {
     private readonly SpeechToTextKeys _keys;
+    private readonly BuiltInHost _builtIn;
     private readonly IHttpClientFactory _http;
     private readonly SubtitleProcessor _processor;
 
@@ -36,10 +38,12 @@ public class SubtitlesController : ControllerBase
     /// <param name="keys">The key store.</param>
     /// <param name="http">HTTP client factory.</param>
     /// <param name="processor">Subtitle checks, results, apply and undo.</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor)
+    /// <param name="builtIn">The built-in speech-to-text.</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn)
     {
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
+        _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _http = http ?? throw new ArgumentNullException(nameof(http));
     }
 
@@ -157,7 +161,7 @@ public class SubtitlesController : ControllerBase
         var paidAllowed = SpendingLimit.AllowsPaidUsage(SpendingLimit.Monthly(config.MonthlyBudget, config.NoSpendingLimit));
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(60);
-        var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, config.AllowBuiltInDownload, _keys, http);
+        var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, config.AllowBuiltInDownload, _keys, http, _builtIn);
         if (service is null)
         {
             return new TestResult(false, problem ?? "Can't be used.");

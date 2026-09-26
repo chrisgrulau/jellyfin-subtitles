@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net.Http;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
+using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 using Xunit;
 
 namespace Jellyfin.Plugin.Subtitles.Tests;
@@ -25,7 +26,7 @@ public sealed class FactoryTests : IDisposable
     [Fact]
     public void A_local_service_needs_only_its_address()
     {
-        var (service, problem) = SpeechToTextFactory.Create("local", string.Empty, "http://localhost:8000/v1", paidAllowed: false, builtInAllowed: false, Keys(), _http);
+        var (service, problem) = SpeechToTextFactory.Create("local", string.Empty, "http://localhost:8000/v1", paidAllowed: false, builtInAllowed: false, Keys(), _http, null);
 
         Assert.Null(problem);
         Assert.Equal("local", Assert.IsType<OpenAiCompatibleSpeechToText>(service).Id);
@@ -36,7 +37,7 @@ public sealed class FactoryTests : IDisposable
     [InlineData("not an address")]
     public void A_local_service_without_an_address_says_so(string address)
     {
-        var (service, problem) = SpeechToTextFactory.Create("local", string.Empty, address, false, false, Keys(), _http);
+        var (service, problem) = SpeechToTextFactory.Create("local", string.Empty, address, false, false, Keys(), _http, null);
 
         Assert.Null(service);
         Assert.Contains("address", problem, StringComparison.Ordinal);
@@ -48,7 +49,7 @@ public sealed class FactoryTests : IDisposable
         var keys = Keys();
         keys.Set("local", "local-key-0123456789");
 
-        var (service, problem) = SpeechToTextFactory.Create("local", string.Empty, "http://stt.example.test/v1", false, false, keys, _http);
+        var (service, problem) = SpeechToTextFactory.Create("local", string.Empty, "http://stt.example.test/v1", false, false, keys, _http, null);
 
         Assert.Null(service);
         Assert.Contains("https", problem, StringComparison.Ordinal);
@@ -60,12 +61,12 @@ public sealed class FactoryTests : IDisposable
     public void Paid_services_need_a_key_and_a_limit_above_zero(string provider)
     {
         var keys = Keys();
-        Assert.Contains("key", SpeechToTextFactory.Create(provider, string.Empty, string.Empty, true, false, keys, _http).Problem, StringComparison.Ordinal);
+        Assert.Contains("key", SpeechToTextFactory.Create(provider, string.Empty, string.Empty, true, false, keys, _http, null).Problem, StringComparison.Ordinal);
 
         keys.Set(provider, "cloud-key-0123456789");
-        Assert.Contains("limit is 0", SpeechToTextFactory.Create(provider, string.Empty, string.Empty, false, false, keys, _http).Problem, StringComparison.Ordinal);
+        Assert.Contains("limit is 0", SpeechToTextFactory.Create(provider, string.Empty, string.Empty, false, false, keys, _http, null).Problem, StringComparison.Ordinal);
 
-        var (service, problem) = SpeechToTextFactory.Create(provider, string.Empty, string.Empty, true, false, keys, _http);
+        var (service, problem) = SpeechToTextFactory.Create(provider, string.Empty, string.Empty, true, false, keys, _http, null);
         Assert.Null(problem);
         Assert.Equal(provider, service!.Id);
     }
@@ -73,8 +74,19 @@ public sealed class FactoryTests : IDisposable
     [Fact]
     public void Built_in_asks_for_permission_first()
     {
-        Assert.Contains("permission", SpeechToTextFactory.Create("builtin", string.Empty, string.Empty, true, false, Keys(), _http).Problem, StringComparison.Ordinal);
-        Assert.Contains("isn't available", SpeechToTextFactory.Create("builtin", string.Empty, string.Empty, true, true, Keys(), _http).Problem, StringComparison.Ordinal);
+        Assert.Contains("permission", SpeechToTextFactory.Create("builtin", string.Empty, string.Empty, true, false, Keys(), _http, null).Problem, StringComparison.Ordinal);
+        Assert.Contains("no build", SpeechToTextFactory.Create("builtin", string.Empty, string.Empty, true, true, Keys(), _http, null).Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Built_in_is_created_once_allowed_with_a_known_model()
+    {
+        using var host = new BuiltInHost(_dir, platform: "linux-x64");
+        var (service, problem) = SpeechToTextFactory.Create("builtin", string.Empty, string.Empty, false, true, Keys(), _http, host);
+        Assert.Null(problem);
+        Assert.Equal("builtin", service!.Id);
+        Assert.NotNull(SpeechToTextFactory.Create("builtin", "Small", string.Empty, false, true, Keys(), _http, host).Service);
+        Assert.Contains("Unknown built-in model", SpeechToTextFactory.Create("builtin", "large", string.Empty, false, true, Keys(), _http, host).Problem, StringComparison.Ordinal);
     }
 
     [Fact]

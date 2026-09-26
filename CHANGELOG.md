@@ -5,8 +5,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Built-in speech-to-text.** Once an administrator allows it, the plugin downloads whisper.cpp (built and published
+  by this project for Linux x64/arm64, Windows x64 and macOS) and a speech model (`base` by default, or `small`) the
+  first time it's needed, and runs it on the server's CPU. Every file is checked against a SHA-256 compiled into the
+  plugin, before it is first run and again before every run; downloads come only from this project's releases over
+  HTTPS. Runs use below-normal priority, at most 8 threads and a time limit. The settings page has a **Built-in** box
+  with **Test** (DOC-02).
+
 ### Fixed
 
+- **SUB-09:** a subtitle replaced from outside (by another tool or a person) after this plugin changed it is treated as
+  a new original. If it is in sync it offers no Undo, and if it is corrected, Undo brings back that replacement, never
+  the older file. Each original now gets its own backup.
+- **SUB-10:** results are no longer evicted after 2,000. They are the record of what was checked, changed and can be
+  undone, so one is kept per subtitle file. Results for deleted files are dropped at the start of each run (unless the
+  folder itself is missing, as with an offline share). Past a ceiling of 200,000, only results nothing depends on are
+  dropped. Large libraries are now checked once each instead of the first 2,000 files being re-checked every night.
+  Undo buttons, added subtitles and the 30-day search wait are never lost, and everything waiting for review is always
+  listed.
 - **SUB-04 (rest):** provider downloads are read with a limit and dropped as soon as they pass 10 MB, instead of being
   buffered in full first. A subtitle file on disk larger than 10 MB isn't read at all: it is recorded as **Too large**
   once and not looked at again until it changes.

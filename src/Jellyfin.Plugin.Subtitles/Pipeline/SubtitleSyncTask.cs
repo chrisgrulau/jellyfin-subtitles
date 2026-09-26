@@ -9,6 +9,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.Subtitles.Audio;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
+using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
@@ -32,6 +33,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     private readonly IMediaEncoder _encoder;
     private readonly IHttpClientFactory _http;
     private readonly SpeechToTextKeys _keys;
+    private readonly BuiltInHost _builtIn;
     private readonly SubtitleProcessor _processor;
     private readonly ILogger<SubtitleSyncTask> _logger;
 
@@ -43,15 +45,17 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     /// <param name="encoder">Media encoder (for Jellyfin's ffmpeg).</param>
     /// <param name="http">HTTP client factory.</param>
     /// <param name="keys">Speech-to-text keys.</param>
+    /// <param name="builtIn">The built-in speech-to-text.</param>
     /// <param name="processor">Processes one subtitle.</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, SubtitleProcessor processor, ILogger<SubtitleSyncTask> logger)
+    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, SubtitleProcessor processor, ILogger<SubtitleSyncTask> logger)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
         _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
+        _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -93,12 +97,19 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromMinutes(3);
-        var speech = FreeSpeechFor(config, _keys, http, out var problem);
+        var speech = FreeSpeechFor(config, _keys, http, _builtIn, out var problem);
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
         }
         var wanted = SpendingLimit.EffectiveLanguages(config.Languages).Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal);
+
+        // Results for subtitle files that were deleted are no longer needed
+        var pruned = _processor.PruneGone();
+        if (pruned > 0)
+        {
+            LogPruned(_logger, pruned);
+        }
 
         var jobs = Jobs(wanted).ToList();
         var todo = new List<SubtitleJob>();
@@ -162,9 +173,10 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     /// <param name="config">Plugin settings.</param>
     /// <param name="keys">Speech-to-text keys.</param>
     /// <param name="http">HTTP client.</param>
+    /// <param name="builtIn">The built-in speech-to-text.</param>
     /// <param name="problem">Why no service is used, if none.</param>
     /// <returns>The service, or <c>null</c>.</returns>
-    public static ISpeechToText? FreeSpeechFor(PluginConfiguration config, SpeechToTextKeys keys, HttpClient http, out string? problem)
+    public static ISpeechToText? FreeSpeechFor(PluginConfiguration config, SpeechToTextKeys keys, HttpClient http, BuiltInHost? builtIn, out string? problem)
     {
         ArgumentNullException.ThrowIfNull(config);
         problem = null;
@@ -180,7 +192,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             return null;
         }
 
-        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, paidAllowed: false, config.AllowBuiltInDownload, keys, http);
+        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, paidAllowed: false, config.AllowBuiltInDownload, keys, http, builtIn);
         problem = why;
         return service;
     }
@@ -234,6 +246,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: {Name} couldn't be checked: {Error}")]
     private static partial void LogFailed(ILogger logger, string name, string error);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: dropped {Count} results for subtitle files that no longer exist")]
+    private static partial void LogPruned(ILogger logger, int count);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: speech-to-text not used: {Problem}")]
     private static partial void LogNoSpeech(ILogger logger, string problem);
