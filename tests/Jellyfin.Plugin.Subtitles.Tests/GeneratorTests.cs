@@ -309,6 +309,66 @@ public sealed class GeneratorTests : IDisposable
         Assert.False(File.Exists(SubtitleGenerator.PathFor(job.VideoPath, job.Language)));
     }
 
+    // Each video's first chunk takes three hours on the fake clock
+    private sealed class Slow(Clock clock) : ISpeechToText
+    {
+        private readonly TranscriberTests.FakeSpeech _inner = new("builtin");
+
+        public string Id => "builtin";
+
+        public Task<Transcript> TranscribeAsync(float[] samples, string? language, CancellationToken cancellationToken)
+        {
+            if (_inner.Languages.Count % 3 == 0)
+            {
+                clock.Now = clock.Now.AddHours(3);
+            }
+
+            return _inner.TranscribeAsync(samples, language, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task The_time_budget_stops_starting_videos_but_lets_the_current_one_finish()
+    {
+        var jobs = Enumerable.Range(0, 5).Select(i => Video("Film " + i.ToString(System.Globalization.CultureInfo.InvariantCulture))).ToList();
+        jobs.ForEach(j => NothingFound(j));
+        var recorded = new List<SubtitleResult>();
+
+        var run = await _generator.RunAsync(jobs, j => new TranscriberTests.FakeAudio(j.Duration), new Slow(_clock), Setup, SubtitleGenerator.BudgetOf(4), (_, r) => recorded.Add(r), null, TestContext.Current.CancellationToken);
+
+        // Film 0 starts at 0 h and ends at 3 h; film 1 starts at 3 h (within the budget) and finishes at 6 h; film 2 isn't started
+        Assert.Equal(2, run.Generated);
+        Assert.Equal(3, run.Left);
+        Assert.Equal(TimeSpan.FromHours(4), run.OutOfTime);
+        Assert.Equal(2, recorded.Count);
+        Assert.True(File.Exists(SubtitleGenerator.PathFor(jobs[1].VideoPath, "eng")));
+        Assert.False(File.Exists(SubtitleGenerator.PathFor(jobs[2].VideoPath, "eng")));
+        Assert.True(_generator.NeedsGeneration(jobs[2], English, Setup));
+        Assert.Equal("generated 2 subtitles; 0 videos had no speech to transcribe; 0 failed; stopped after 4 h; 3 left for tomorrow", run.Summary());
+
+        // No limit: the rest are all done
+        var rest = await _generator.RunAsync(jobs.Skip(2).ToList(), j => new TranscriberTests.FakeAudio(j.Duration), new Slow(_clock), Setup, SubtitleGenerator.BudgetOf(0), null, null, TestContext.Current.CancellationToken);
+        Assert.Equal(3, rest.Generated);
+        Assert.Equal(0, rest.Left);
+        Assert.Null(rest.OutOfTime);
+        Assert.DoesNotContain("stopped", rest.Summary(), StringComparison.Ordinal);
+        Assert.Equal(TimeSpan.FromHours(24), SubtitleGenerator.BudgetOf(30));
+    }
+
+    [Fact]
+    public async Task A_service_limit_stops_the_run_and_leaves_the_rest()
+    {
+        var jobs = Enumerable.Range(0, 3).Select(i => Video("Show " + i.ToString(System.Globalization.CultureInfo.InvariantCulture))).ToList();
+        jobs.ForEach(j => NothingFound(j));
+
+        var run = await _generator.RunAsync(jobs, j => new TranscriberTests.FakeAudio(j.Duration), new Refusing(FailureClass.ProviderLimit), Setup, null, null, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, run.Left);
+        Assert.Equal("refused", run.StoppedBy);
+        Assert.Contains("stopped by the service; 3 left for tomorrow", run.Summary(), StringComparison.Ordinal);
+        Assert.True(_generator.NeedsGeneration(jobs[0], English, Setup));
+    }
+
     private sealed class Racing(Action during) : ISpeechToText
     {
         private readonly TranscriberTests.FakeSpeech _inner = new("builtin");

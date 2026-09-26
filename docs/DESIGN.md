@@ -122,7 +122,10 @@ Stage 4, part 1: the last resort when no subtitle can be found.
   `Generated` (even if its file was deleted by hand), `Undone` and `Replaced` never come back on their own; `NoSpeech`
   comes back only when the service/model (`SetupOf`, e.g. `builtin/base`) changes; `Failed` after 3 days; `CantWrite`
   after 30. Ordered by the time of the search result (oldest first), then path; at most `MaxGeneratedPerNight` (20,
-  0–200) a night, counting every video transcribed.
+  0–200) a night, counting every video transcribed. A time budget, `MaxGenerateHours` (4, 0–24, 0 = none), stops the
+  run starting new videos once that long has passed since it began (`SubtitleGenerator.RunAsync`, on the injected
+  clock); the video in progress finishes within its own limit, and the summary line says "stopped after 4 h; N left for
+  tomorrow".
 - **Service:** the Full transcript tier (`FullTranscript`: provider and model), separate from the snippet and AI-context
   tiers; built-in by default, which needs its usual download permission. Built with `forSubtitles`: Deepgram is asked
   to punctuate (`punctuated_word`), OpenAI-compatible services for segments as well as words (OpenAI's words have no

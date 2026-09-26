@@ -107,6 +107,8 @@ public class ConfigurationTests
         Assert.Contains("['FullTranscript', 'Full transcript',", page, StringComparison.Ordinal);
         Assert.Contains("Generated: 'Generated', NoSpeech: 'No speech to transcribe', Replaced: 'Replaced by a found subtitle'", page, StringComparison.Ordinal);
         Assert.Contains("runTask('ShoalSubtitlesGenerate'", page, StringComparison.Ordinal);
+        Assert.Contains("config.MaxGenerateHours = isNaN(hours) ? 4 : Math.max(0, Math.min(24, hours));", page, StringComparison.Ordinal);
+        Assert.Contains("Stop starting new videos after", page, StringComparison.Ordinal);
     }
 
     [Fact]

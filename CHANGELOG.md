@@ -22,7 +22,9 @@ All notable changes to this project are documented here. The format follows
     copy is kept in the originals folder). Undo removes it. The timing check leaves generated subtitles alone.
   - Almost no speech (music, silence) makes no subtitle and records **No speech to transcribe**, not retried unless the
     service or model changes.
-  - At most **Videos transcribed per night** (20 by default, 0 to 200), those waiting longest first.
+  - At most **Videos transcribed per night** (20 by default, 0 to 200), those waiting longest first, and no new video
+    is started after **Stop starting new videos after** hours (4 by default, 0 to 24, 0 = no limit); a video in
+    progress finishes, and the summary line says how many are left for tomorrow.
   - New result statuses: **Generated**, **No speech to transcribe**, **Replaced by a found subtitle**; generated
     subtitles also go to the Activity log.
   - Deepgram is asked for punctuation, and OpenAI-compatible services for segments, only for full transcripts; the

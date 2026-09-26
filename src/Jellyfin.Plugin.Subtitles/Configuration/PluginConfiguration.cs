@@ -85,6 +85,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxGeneratedPerNight { get; set; } = 20;
 
     /// <summary>
+    /// Gets or sets how many hours after the nightly generation starts no new video is started (0 to 24; 4 by default;
+    /// 0 means no limit). A video already being transcribed finishes, within its own time limit.
+    /// </summary>
+    public int MaxGenerateHours { get; set; } = 4;
+
+    /// <summary>
     /// Gets or sets the currency costs and limits are shown and set in (ISO 4217, e.g. <c>AUD</c>). Providers charge in
     /// their own currency (usually US dollars); charges are converted with the European Central Bank's daily rates.
     /// </summary>

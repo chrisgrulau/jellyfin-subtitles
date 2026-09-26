@@ -113,6 +113,9 @@
             <label class="inputLabel inputLabelUnfocused" for="MaxGeneratedPerNight">Videos transcribed per night</label>
             <input id="MaxGeneratedPerNight" type="number" min="0" max="200" step="1" is="emby-input" />
             <div class="fieldDescription">Default 20 (0 to 200). A video with no speech to speak of (music, silence) gets no subtitle and isn't transcribed again unless the Full transcript service or model changes.</div>
+            <label class="inputLabel inputLabelUnfocused" for="MaxGenerateHours">Stop starting new videos after (hours)</label>
+            <input id="MaxGenerateHours" type="number" min="0" max="24" step="1" is="emby-input" />
+            <div class="fieldDescription">Default 4 (0 to 24; 0 means no limit). Once this long has passed since the night's run began, no new video is started; one being transcribed finishes. The rest wait for the next night.</div>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
@@ -960,6 +963,7 @@
             page.querySelector('#FindMissing').checked = config.FindMissing !== false;
             page.querySelector('#GenerateMissing').checked = config.GenerateMissing === true;
             page.querySelector('#MaxGeneratedPerNight').value = config.MaxGeneratedPerNight == null ? 20 : config.MaxGeneratedPerNight;
+            page.querySelector('#MaxGenerateHours').value = config.MaxGenerateHours == null ? 4 : config.MaxGenerateHours;
             page.querySelector('#WriteToActivityLog').checked = config.WriteToActivityLog !== false;
             page.querySelector('#AllowIngest').checked = config.AllowIngest === true;
             page.querySelector('#MaxFindsPerRun').value = config.MaxFindsPerRun || 20;
@@ -990,6 +994,8 @@
             config.GenerateMissing = page.querySelector('#GenerateMissing').checked;
             var perNight = parseInt(page.querySelector('#MaxGeneratedPerNight').value, 10);
             config.MaxGeneratedPerNight = isNaN(perNight) ? 20 : Math.max(0, Math.min(200, perNight));
+            var hours = parseInt(page.querySelector('#MaxGenerateHours').value, 10);
+            config.MaxGenerateHours = isNaN(hours) ? 4 : Math.max(0, Math.min(24, hours));
             config.WriteToActivityLog = page.querySelector('#WriteToActivityLog').checked;
             config.SetupSaved = true;
             config.AllowIngest = page.querySelector('#AllowIngest').checked;

@@ -148,51 +148,30 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         var setup = SubtitleGenerator.SetupOf(tier.Provider, tier.Model);
         var jobs = _generator.Choose(new LibraryVideos(_library, _media).Missing(wanted, config.CountImageSubtitles), wanted, setup, max);
         LogStarting(_logger, jobs.Count, setup);
-        int generated = 0, noSpeech = 0, failed = 0;
-        for (var i = 0; i < jobs.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var job = jobs[i];
-            try
+        var budget = SubtitleGenerator.BudgetOf(config.MaxGenerateHours);
+        var outcome = await _generator.RunAsync(
+            jobs,
+            job => new FfmpegAudioSource(run.Ffmpeg, job.VideoPath, job.AudioStream),
+            speech,
+            setup,
+            budget,
+            (job, result) =>
             {
-                var result = await _generator.GenerateAsync(job, new FfmpegAudioSource(run.Ffmpeg, job.VideoPath, job.AudioStream), speech, setup, cancellationToken).ConfigureAwait(false);
-                if (result is not null)
+                LogResult(_logger, job.Name, result.Status, result.Explanation);
+                if (result.Status == ResultStatus.Generated)
                 {
-                    LogResult(_logger, job.Name, result.Status, result.Explanation);
-                    switch (result.Status)
-                    {
-                        case ResultStatus.Generated:
-                            generated++;
-                            _monitor.ReportFileSystemChanged(result.SubtitlePath);
-                            break;
-                        case ResultStatus.NoSpeech:
-                            noSpeech++;
-                            break;
-                        default:
-                            failed++;
-                            break;
-                    }
+                    _monitor.ReportFileSystemChanged(result.SubtitlePath);
                 }
-            }
-            catch (SpeechToTextException ex)
-            {
-                // The spending limit, the provider's own limit or its sign-in: every further video would be refused too
-                LogStopped(_logger, ex.Message);
-                break;
-            }
-#pragma warning disable CA1031 // One odd video mustn't stop the nightly run: it is recorded as failed and tried again later
-            catch (Exception ex) when (ex is not OperationCanceledException)
-#pragma warning restore CA1031
-            {
-                failed++;
-                LogFailed(_logger, job.Name, ex.Message);
-                _generator.RecordFailure(job, setup, ex.GetType().Name + ": " + ex.Message);
-            }
-
-            progress.Report(100.0 * (i + 1) / jobs.Count);
+            },
+            progress,
+            cancellationToken).ConfigureAwait(false);
+        if (outcome.StoppedBy is { } why)
+        {
+            LogStopped(_logger, why);
         }
 
-        LogSummary(_logger, generated, noSpeech, failed);
+        var summary = outcome.Summary();
+        LogSummary(_logger, summary);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: generating subtitles skipped: {Problem}")]
@@ -207,9 +186,6 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: generating subtitles stopped for tonight: {Message}")]
     private static partial void LogStopped(ILogger logger, string message);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: {Name}: generating a subtitle failed: {Error}")]
-    private static partial void LogFailed(ILogger logger, string name, string error);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: generated {Generated} subtitles; {NoSpeech} videos had no speech to transcribe; {Failed} failed")]
-    private static partial void LogSummary(ILogger logger, int generated, int noSpeech, int failed);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: {Summary}")]
+    private static partial void LogSummary(ILogger logger, string summary);
 }

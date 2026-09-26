@@ -311,6 +311,86 @@ public sealed class SubtitleGenerator
         });
     }
 
+    /// <summary>The longest nightly time budget that can be set, in hours.</summary>
+    public const int MaxBudgetHours = 24;
+
+    /// <summary>
+    /// The night's time budget from the setting: 0 means no limit; otherwise 1 to 24 hours.
+    /// </summary>
+    /// <param name="hours">The setting.</param>
+    /// <returns>The budget, or <c>null</c> for none.</returns>
+    public static TimeSpan? BudgetOf(int hours) => hours <= 0 ? null : TimeSpan.FromHours(Math.Min(hours, MaxBudgetHours));
+
+    /// <summary>
+    /// Generates subtitles for the chosen videos in turn. No new video is started once <paramref name="budget"/> has
+    /// passed since the run began (a video already started finishes, within its own time limit); a service limit or
+    /// sign-in failure stops the run; anything else fails only that video (recorded, tried again later).
+    /// </summary>
+    /// <param name="jobs">The videos (see <see cref="Choose"/>).</param>
+    /// <param name="audioFor">Each video's audio.</param>
+    /// <param name="speech">The "Full transcript" speech-to-text service.</param>
+    /// <param name="setup">The service and model (see <see cref="SetupOf"/>).</param>
+    /// <param name="budget">The night's time budget, or <c>null</c> for none.</param>
+    /// <param name="recorded">Told about each result recorded.</param>
+    /// <param name="progress">Progress, 0 to 100.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What the run did.</returns>
+    public async Task<GenerationRun> RunAsync(IReadOnlyList<FindJob> jobs, Func<FindJob, IAudioSource> audioFor, ISpeechToText speech, string setup, TimeSpan? budget, Action<FindJob, SubtitleResult>? recorded, IProgress<double>? progress, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+        ArgumentNullException.ThrowIfNull(audioFor);
+        var began = _clock.GetUtcNow();
+        int generated = 0, noSpeech = 0, failed = 0;
+        for (var i = 0; i < jobs.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (budget is { } b && _clock.GetUtcNow() - began >= b)
+            {
+                return new GenerationRun(generated, noSpeech, failed, jobs.Count - i, b, null);
+            }
+
+            var job = jobs[i];
+            SubtitleResult? result;
+            try
+            {
+                result = await GenerateAsync(job, audioFor(job), speech, setup, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SpeechToTextException ex)
+            {
+                // The spending limit, the provider's own limit or its sign-in: every further video would be refused too
+                return new GenerationRun(generated, noSpeech, failed, jobs.Count - i, null, ex.Message);
+            }
+#pragma warning disable CA1031 // One odd video mustn't stop the nightly run: it is recorded as failed and tried again later
+            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+            {
+                result = RecordFailure(job, setup, ex.GetType().Name + ": " + ex.Message);
+            }
+
+            if (result is not null)
+            {
+                switch (result.Status)
+                {
+                    case ResultStatus.Generated:
+                        generated++;
+                        break;
+                    case ResultStatus.NoSpeech:
+                        noSpeech++;
+                        break;
+                    default:
+                        failed++;
+                        break;
+                }
+
+                recorded?.Invoke(job, result);
+            }
+
+            progress?.Report(100.0 * (i + 1) / jobs.Count);
+        }
+
+        return new GenerationRun(generated, noSpeech, failed, 0, null, null);
+    }
+
     /// <summary>
     /// Records that generating failed for a reason the run caught (it is tried again after a while).
     /// </summary>
@@ -413,5 +493,38 @@ public sealed class SubtitleGenerator
     {
         _results.Put(result);
         return result;
+    }
+}
+
+/// <summary>
+/// What one night's generation did.
+/// </summary>
+/// <param name="Generated">Subtitles generated.</param>
+/// <param name="NoSpeech">Videos with no speech to transcribe.</param>
+/// <param name="Failed">Videos that failed.</param>
+/// <param name="Left">Videos chosen but not started (left for the next night).</param>
+/// <param name="OutOfTime">The time budget, when the run stopped because it was used up.</param>
+/// <param name="StoppedBy">Why the service stopped the run (a limit or sign-in), if it did.</param>
+public sealed record GenerationRun(int Generated, int NoSpeech, int Failed, int Left, TimeSpan? OutOfTime, string? StoppedBy)
+{
+    /// <summary>
+    /// The run's summary line, for example "generated 3 subtitles; 1 video had no speech to transcribe; 0 failed; stopped
+    /// after 4 h; 12 left for tomorrow".
+    /// </summary>
+    /// <returns>The line.</returns>
+    public string Summary()
+    {
+        static string Videos(int n) => n == 1 ? "1 video" : n.ToString(CultureInfo.InvariantCulture) + " videos";
+        var line = string.Create(CultureInfo.InvariantCulture, $"generated {Generated} subtitle{(Generated == 1 ? string.Empty : "s")}; {Videos(NoSpeech)} had no speech to transcribe; {Failed} failed");
+        if (OutOfTime is { } budget)
+        {
+            line += string.Create(CultureInfo.InvariantCulture, $"; stopped after {budget.TotalHours:0.#} h; {Left} left for tomorrow");
+        }
+        else if (StoppedBy is not null)
+        {
+            line += string.Create(CultureInfo.InvariantCulture, $"; stopped by the service; {Left} left for tomorrow");
+        }
+
+        return line;
     }
 }

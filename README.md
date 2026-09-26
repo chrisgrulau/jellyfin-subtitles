@@ -119,8 +119,10 @@ found** is on, the whole video is transcribed and a subtitle is made from what w
   the video (a two-hour film is 120 minutes: about USD 0.52 on Deepgram Nova-3, USD 0.72 on OpenAI Whisper at the prices
   shipped with this version); the whole video's cost is reserved against your monthly limit before it starts, and a
   video that doesn't fit in what's left of the limit waits.
-- **Pace:** at most **Videos transcribed per night** (20 by default, 0 to 200), the ones waiting longest first. The task
-  runs at 05:00, an hour after the search; it can be run from the plugin page (**Generate now**) or Scheduled Tasks.
+- **Pace:** at most **Videos transcribed per night** (20 by default, 0 to 200), the ones waiting longest first, and no
+  new video is started after **Stop starting new videos after** (4 hours by default, 0 to 24; 0 means no limit; a video
+  already being transcribed finishes). The log's summary line says when the time ran out and how many are left for the
+  next night. The task runs at 05:00, an hour after the search; it can be run from the plugin page (**Generate now**) or Scheduled Tasks.
 
 ## Safety
 
