@@ -149,7 +149,7 @@ public sealed class PipelineTests : IDisposable
 
     // Audio whose "speech" is the subtitle text, spoken 2.5 s later than the subtitles say: the fake speech-to-text knows
     // which stretch was read last and returns those lines' words
-    private sealed class Shifted(SubtitleDocument said, double lateBy) : IAudioSource, ISpeechToText
+    internal sealed class Shifted(SubtitleDocument said, double lateBy) : IAudioSource, ISpeechToText
     {
         private TimeSpan _start;
 
@@ -185,7 +185,7 @@ public sealed class PipelineTests : IDisposable
 
     private static readonly Policies TimingReview = new(ChangePolicy.Review, ChangePolicy.Review, new CleanupSettings());
 
-    private static SubtitleDocument Story()
+    internal static SubtitleDocument Story()
         => new() { Format = SubtitleFormat.Srt, Cues = [.. Enumerable.Range(0, 300).Select(i => new SubtitleCue { Start = TimeSpan.FromSeconds(10 + (i * 5)), End = TimeSpan.FromSeconds(12 + (i * 5)), Text = $"Line {i} says word{i}x and word{i}y" })] };
 
     private (SubtitleProcessor Processor, SubtitleJob Job, string Path) Setup()

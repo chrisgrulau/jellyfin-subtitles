@@ -36,6 +36,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
     private readonly Spending _spending;
+    private readonly EmbeddedChecker _embedded;
     private readonly SubtitleProcessor _processor;
     private readonly ILogger<SubtitleSyncTask> _logger;
 
@@ -49,9 +50,10 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     /// <param name="keys">Speech-to-text keys.</param>
     /// <param name="builtIn">The built-in speech-to-text.</param>
     /// <param name="spending">Prices, spend ledger and exchange rates.</param>
+    /// <param name="embedded">Checks subtitle tracks inside videos (when switched on).</param>
     /// <param name="processor">Processes one subtitle.</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleProcessor processor, ILogger<SubtitleSyncTask> logger)
+    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, EmbeddedChecker embedded, SubtitleProcessor processor, ILogger<SubtitleSyncTask> logger)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
@@ -60,6 +62,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
+        _embedded = embedded ?? throw new ArgumentNullException(nameof(embedded));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -158,6 +161,33 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
             progress.Report(100.0 * (i + 1) / todo.Count);
         }
+
+        if (config.CheckEmbeddedSubtitles)
+        {
+            await CheckEmbeddedAsync(config, wanted, ffmpeg, speech, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // Text subtitle tracks inside videos, a few per run (each is copied out by reading the whole video)
+    private async Task CheckEmbeddedAsync(PluginConfiguration config, HashSet<string> wanted, string ffmpeg, ISpeechToText? speech, CancellationToken cancellationToken)
+    {
+        var todo = EmbeddedJobs(wanted).Where(_embedded.NeedsCheck).Take(Math.Clamp(config.MaxEmbeddedPerRun, 1, 200)).ToList();
+        LogEmbeddedStarting(_logger, todo.Count);
+        foreach (var job in todo)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var bytes = await FfmpegSubtitleExtractor.ExtractAsync(ffmpeg, job.VideoPath, job.StreamIndex, job.Codec, cancellationToken).ConfigureAwait(false);
+                var result = await _embedded.CheckAsync(job, bytes, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, PoliciesOf(config), cancellationToken).ConfigureAwait(false);
+                LogResult(_logger, job.Name, result.Status, result.Explanation);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
+            {
+                LogFailed(_logger, job.Name, ex.Message);
+                _embedded.RecordFailure(job, ex.Message);
+            }
+        }
     }
 
     /// <summary>
@@ -248,6 +278,47 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             }
         }
     }
+
+    // Embedded text tracks in the chosen languages, for videos with no subtitle file of that language beside them
+    private IEnumerable<EmbeddedJob> EmbeddedJobs(HashSet<string> languages)
+    {
+        var items = _library.GetItemList(new InternalItemsQuery
+        {
+            IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
+            IsVirtualItem = false,
+            Recursive = true,
+        });
+        foreach (var item in items)
+        {
+            if (item is not Video video || string.IsNullOrEmpty(video.Path) || video.RunTimeTicks is not > 0 || !File.Exists(video.Path))
+            {
+                continue;
+            }
+
+            var streams = _media.GetMediaStreams(item.Id);
+            var audio = streams.Where(s => s.Type == MediaStreamType.Audio).OrderBy(s => s.Index).Select(s => ((string?)s.Language, s.IsDefault)).ToList();
+            if (audio.Count == 0)
+            {
+                continue;
+            }
+
+            var beside = streams.Where(s => s.Type == MediaStreamType.Subtitle && s.IsExternal).Select(s => Languages.ToTwoLetter(s.Language)).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            foreach (var sub in streams.Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal && !s.IsForced && s.IsTextSubtitleStream))
+            {
+                if (Languages.ToTwoLetter(sub.Language) is not { } lang || !languages.Contains(lang) || beside.Contains(lang)
+                    || !FfmpegSubtitleExtractor.TextCodecs.Contains(sub.Codec ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                beside.Add(lang);
+                yield return new EmbeddedJob(item.Id, item.Name, video.Path, sub.Index, sub.Codec, sub.Language!, TimeSpan.FromTicks(video.RunTimeTicks!.Value), AudioChoice.For(audio, sub.Language), EmbeddedChecker.FingerprintOf(video.Path, sub.Index));
+            }
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: checking {Count} subtitle tracks inside videos")]
+    private static partial void LogEmbeddedStarting(ILogger logger, int count);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: Jellyfin's ffmpeg wasn't found; subtitles can't be checked")]
     private static partial void LogNoFfmpeg(ILogger logger);

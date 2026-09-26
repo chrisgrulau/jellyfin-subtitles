@@ -82,6 +82,16 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool NoSpendingLimit { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether text subtitle tracks inside videos are checked too (off by default:
+    /// copying a track out reads the whole video file). Only tracks in a language with no subtitle file beside the video
+    /// are checked; one that is out of time gets a corrected copy added beside the video.
+    /// </summary>
+    public bool CheckEmbeddedSubtitles { get; set; }
+
+    /// <summary>Gets or sets how many embedded tracks one run checks at most.</summary>
+    public int MaxEmbeddedPerRun { get; set; } = 10;
+
+    /// <summary>
     /// Gets or sets which key reads Deepgram's credit balance for the settings page (off by default). Reading it needs an
     /// Admin or Owner key; a separate key keeps the transcription key limited.
     /// </summary>

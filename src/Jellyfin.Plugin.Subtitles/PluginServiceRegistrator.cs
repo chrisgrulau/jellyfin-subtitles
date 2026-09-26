@@ -30,6 +30,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // results store is shared, so the checker knows what the finder added.
         serviceCollection.AddSingleton(sp => new ResultStore(Path.Combine(DataFolder(sp), "results.json")));
         serviceCollection.AddSingleton(sp => new SubtitleProcessor(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"))));
+        serviceCollection.AddSingleton(sp => new EmbeddedChecker(sp.GetRequiredService<ResultStore>()));
         serviceCollection.AddSingleton(sp => new SubtitleFinder(sp.GetRequiredService<ResultStore>(), new DownloadLedger(Path.Combine(DataFolder(sp), "downloads.json"))));
     }
 
