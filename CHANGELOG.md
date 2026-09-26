@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0-alpha] - 2026-09-26
+
 ### Changed
 
 - **SUB-30:** `results.json` is no longer rewritten whole for every result. Plain results are written in batches (every
