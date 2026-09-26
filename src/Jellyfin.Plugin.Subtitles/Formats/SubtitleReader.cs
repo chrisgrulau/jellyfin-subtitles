@@ -68,8 +68,11 @@ public static partial class SubtitleReader
             return null;
         }
 
-        var (text, _) = SubtitleEncoding.Decode(bytes);
-        return Detect(fileName, text) is { } format ? Parse(text, format) : null;
+        // Not UTF-8 or UTF-16: guess the legacy code page from the language tag in the name (Film.ru.srt → Windows-1251)
+        var (text, encoding) = SubtitleEncoding.Decode(bytes, SubtitleEncoding.CodePageFor(SubtitleEncoding.LanguageTag(fileName)));
+        return Detect(fileName, text) is { } format
+            ? Parse(text, format) with { SourceEncoding = encoding, TextSuspect = !SubtitleEncoding.WritesUtf8(encoding) && SubtitleEncoding.LooksWrong(text) }
+            : null;
     }
 
     /// <summary>

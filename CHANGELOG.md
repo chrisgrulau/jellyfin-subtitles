@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **SUB-14:** subtitles in legacy encodings are no longer rewritten as garbled text. Before, anything that wasn't
+  UTF-8 or UTF-16 was read as Windows-1252 and written back as UTF-8. That garbled Cyrillic, Central European, Greek,
+  Turkish, Hebrew, Arabic, Chinese, Japanese and Korean subtitles whenever the timing was corrected.
+  - **Writing:** a file is written back in the encoding it was read in, so every line the plugin doesn't change keeps
+    its exact bytes, even if the encoding was guessed wrong. UTF-8 and UTF-16 files are written as UTF-8, as before.
+  - **Reading:** the encoding is guessed from the language in the file name, for example `Film.ru.srt` as
+    Windows-1251, `Film.ja.srt` as Shift-JIS and `Film.zh.srt` as GB18030.
+  - **When the text still looks wrong:** if it contains replacement or control characters, nothing is changed on its
+    own. Timing and clean-up wait for review, and the result says why.
+  - **Unrepresentable edits:** a changed line the file's encoding can't hold is refused, never replaced with "?".
+
 ## [0.6.0-alpha] - 2026-09-26
 
 ### Added
