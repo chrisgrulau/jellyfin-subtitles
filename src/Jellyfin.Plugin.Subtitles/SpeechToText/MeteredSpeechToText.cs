@@ -8,12 +8,23 @@ using Jellyfin.Plugin.Subtitles.Pricing;
 namespace Jellyfin.Plugin.Subtitles.SpeechToText;
 
 /// <summary>
-/// A paid speech-to-text service kept within the spending limits: each call's cost (audio length × the published
-/// price) is reserved before it is made and settled afterwards, or released if the call failed. A call whose price or
-/// cost in the user's currency is unknown, or that would go over a limit, isn't made.
+/// A paid speech-to-text service kept within the spending limits, through the shared <see cref="MeteredCall"/>: each
+/// call's cost (audio length × the published price) is reserved before it is made and settled afterwards, or released if
+/// the call failed. A call whose price or cost in the user's currency is unknown, or that would go over a limit, isn't
+/// made.
 /// </summary>
 internal sealed class MeteredSpeechToText : ISpeechToText
 {
+    // Failed calls aren't charged by these providers: a speech-to-text failure or a cancellation releases the reservation;
+    // anything unexpected is recorded at the estimate, since it may have been billed
+    private static readonly MeteredCallOptions Options = new()
+    {
+        IsCharged = static _ => false,
+        IsUncharged = static ex => ex is SpeechToTextException or OperationCanceledException,
+        ChargedCost = static _ => null,
+        Refuse = Refuse,
+    };
+
     private readonly ISpeechToText _inner;
     private readonly Spending _spending;
     private readonly SpendLimits _limits;
@@ -41,7 +52,7 @@ internal sealed class MeteredSpeechToText : ISpeechToText
     public string Id => _inner.Id;
 
     /// <inheritdoc />
-    public async Task<Transcript> TranscribeAsync(float[] samples, string? language, CancellationToken cancellationToken)
+    public Task<Transcript> TranscribeAsync(float[] samples, string? language, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(samples);
         var seconds = samples.Length / (double)Audio.AudioFormat.SampleRate;
@@ -50,25 +61,18 @@ internal sealed class MeteredSpeechToText : ISpeechToText
             throw Refuse("There's no published price for " + Id + (_model.Length > 0 ? " " + _model : string.Empty) + ", so it isn't used for paid calls.");
         }
 
-        var decision = _spending.Ledger.TryReserve(Id, _purpose, estimate, _limits, _spending.Rates.Current);
-        if (decision.ReservationId is not { } reservation)
-        {
-            throw Refuse(decision.Refusal ?? "Not allowed by the spending limits.");
-        }
-
-        try
-        {
-            var transcript = await _inner.TranscribeAsync(samples, language, cancellationToken).ConfigureAwait(false);
-            var actual = _spending.Prices.AudioCost(Id, _model, Math.Max(seconds, transcript.AudioSeconds)) ?? estimate;
-            _spending.Ledger.Settle(reservation, actual);
-            return transcript;
-        }
-        catch (Exception ex) when (ex is SpeechToTextException or OperationCanceledException)
-        {
-            // Failed calls aren't charged by these providers
-            _spending.Ledger.Release(reservation);
-            throw;
-        }
+        var prices = _spending.Prices;
+        return MeteredCall.RunAsync(
+            _spending.Ledger,
+            _limits,
+            _spending.Rates.Current,
+            Id,
+            _purpose,
+            estimate,
+            ct => _inner.TranscribeAsync(samples, language, ct),
+            transcript => prices.AudioCost(Id, _model, Math.Max(seconds, transcript.AudioSeconds)),
+            Options,
+            cancellationToken);
     }
 
     private static SpeechToTextException Refuse(string why) => new(why) { Failure = FailureClass.ProviderLimit };

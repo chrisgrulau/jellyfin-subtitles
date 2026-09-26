@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **FAM-06:** uses the shared building blocks from the common library (updated to its FAM-06 release).
+  - Paid speech-to-text calls are metered by the shared metered call: reserved first, settled at the actual cost, released
+    when the provider failed or the call was cancelled. A call that fails in an unexpected way is now recorded at its
+    estimate (before, its reservation stayed open, which counted the same).
 
 ### Fixed
 
