@@ -67,10 +67,10 @@ public sealed class SubtitleProcessor
     /// <returns>The results.</returns>
     public IReadOnlyList<SubtitleResult> Recent(int limit)
     {
-        // Everything waiting for review is always included, however old
+        // Everything waiting for review comes first, however old, then the most recent (SUB-20)
         var all = _results.All();
-        var recent = all.Take(Math.Clamp(limit, 1, 5000)).ToList();
-        return [.. recent.Concat(all.Skip(recent.Count).Where(r => r.PendingReview))];
+        var waiting = all.Where(r => r.PendingReview).ToList();
+        return [.. waiting, .. all.Where(r => !r.PendingReview).Take(Math.Clamp(limit, 1, 5000))];
     }
 
     /// <summary>
@@ -101,8 +101,25 @@ public sealed class SubtitleProcessor
     /// <param name="subtitlePath">The subtitle file.</param>
     /// <param name="fingerprint">Its current content fingerprint.</param>
     /// <returns><c>true</c> if it should be checked.</returns>
-    public bool NeedsCheck(string subtitlePath, string fingerprint)
+    public bool NeedsCheck(string subtitlePath, string fingerprint) => NeedsCheck(subtitlePath, fingerprint, null);
+
+    /// <summary>
+    /// Whether a subtitle file needs checking; an unclear result is checked again when the speech-to-text service in
+    /// use has changed since (for example once it has been set up), so hard cases get another chance (SUB-19).
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <param name="fingerprint">Its fingerprint now.</param>
+    /// <param name="speechSetup">The speech-to-text service in use now (<c>null</c> to ignore).</param>
+    /// <returns>Whether to check it.</returns>
+    public bool NeedsCheck(string subtitlePath, string fingerprint, string? speechSetup)
     {
+        if (speechSetup is not null && _results.Get(ResultStore.IdFor(subtitlePath)) is { Status: ResultStatus.Unreliable or ResultStatus.WrongLanguage } unclear
+            && string.Equals(unclear.Fingerprint, fingerprint, StringComparison.Ordinal)
+            && !string.Equals(unclear.SpeechSetup, speechSetup, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
         var r = _results.Get(ResultStore.IdFor(subtitlePath));
         if (r is null && _results.ForPath(subtitlePath) is { Status: ResultStatus.Added or ResultStatus.Undone } added)
         {
@@ -215,6 +232,7 @@ public sealed class SubtitleProcessor
         };
         result = result with
         {
+            SpeechSetup = speech?.Id ?? string.Empty,
             Status = status,
             Scale = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Scale : 1,
             Offset = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Offset : 0,
@@ -628,6 +646,59 @@ public sealed class SubtitleProcessor
             Explanation = error + " Tried again in 3 days, or when the file changes.",
         });
     }
+
+    /// <summary>
+    /// Declines what waits for review (a correction, clean-up or suggested wording): nothing is changed, and it isn't
+    /// proposed again unless the file changes.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    /// <exception cref="InvalidOperationException">Nothing waits for review.</exception>
+    public SubtitleResult Decline(string id)
+    {
+        var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        if (!r.PendingReview)
+        {
+            throw new InvalidOperationException("Nothing is waiting for review for this subtitle.");
+        }
+
+        return Save(r with
+        {
+            Status = r.Status == ResultStatus.Proposed ? ResultStatus.Declined : r.Status,
+            Scale = r.Status == ResultStatus.Proposed ? 1 : r.Scale,
+            Offset = r.Status == ResultStatus.Proposed ? 0 : r.Offset,
+            CleanupPending = new Dictionary<string, int>(),
+            Findings = [],
+            Time = _clock.GetUtcNow(),
+            Explanation = r.Explanation + " Declined in review: nothing was changed.",
+        });
+    }
+
+    /// <summary>
+    /// Forgets a result so the subtitle is checked again on the next run, or the video searched again (also after an
+    /// added subtitle was undone). A file this plugin changed must be undone first, so its own output never becomes the
+    /// new original.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <exception cref="InvalidOperationException">No such result, or the file holds this plugin's changes.</exception>
+    public void CheckAgain(string id)
+    {
+        var r = _results.Get(id) ?? throw new InvalidOperationException("No such result.");
+        if (r.Changed && r.Status != ResultStatus.Added)
+        {
+            throw new InvalidOperationException("This subtitle holds this plugin's changes: undo them first, then check it again.");
+        }
+
+        if (r.Status == ResultStatus.Added && r.Changed)
+        {
+            throw new InvalidOperationException("This subtitle was added by this plugin: undo it first to search again.");
+        }
+
+        _results.Remove(id);
+    }
+
+    /// <summary>Gets whether any subtitle has been checked yet (an install that has run before counts as set up).</summary>
+    public bool HasResults => _results.All().Count > 0;
 
     /// <summary>Gets whether results can be recorded now (the results file is readable).</summary>
     public bool ResultsReadable => _results.Readable;

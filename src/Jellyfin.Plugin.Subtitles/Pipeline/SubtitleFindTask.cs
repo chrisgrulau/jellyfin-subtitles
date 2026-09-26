@@ -114,6 +114,13 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             return;
         }
 
+        // A new install downloads nothing until its settings page has been saved once
+        if (!config.SetupSaved && !_finder.HasResults)
+        {
+            LogNoResults(_logger, "waiting for the plugin's settings to be saved once (Dashboard → Plugins → Subtitles)");
+            return;
+        }
+
         var speech = SubtitleSyncTask.SpeechFor(config, _keys, http, _builtIn, _spending, "subtitles.find", out var problem);
         var policies = SubtitleSyncTask.RunPolicies(config) with { Auditor = null };
         if (speech is null && problem is not null)

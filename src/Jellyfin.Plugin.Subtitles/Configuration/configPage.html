@@ -27,6 +27,7 @@
       #SubtitlesConfigPage .subs-lines textarea { width: 100%; min-width: 16em; box-sizing: border-box; font: inherit; resize: vertical; }
       #SubtitlesConfigPage .subs-lines input, #SubtitlesConfigPage .subs-lines textarea { background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 3px; padding: .25em .35em; }
       #SubtitlesConfigPage .subs-lines .ed-bad { border-color: #ff7043; }
+      #SubtitlesConfigPage .subs-filter { padding: .3em .45em; background: rgba(128,128,128,.12); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 3px; font: inherit; }
       #SubtitlesConfigPage .subs-service { padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
       #SubtitlesConfigPage .subs-service h4 { margin: .5em 0; }
       #SubtitlesConfigPage .subs-key { display: flex; gap: .5em; align-items: end; flex-wrap: wrap; }
@@ -50,6 +51,10 @@
             <button is="emby-button" type="button" id="RunNow" class="raised"><span>Check now</span></button>
             <button is="emby-button" type="button" id="FindNow" class="raised"><span>Find missing now</span></button>
             <span id="ResultsSummary" class="subs-muted"></span>
+          </div>
+          <div style="display:flex;gap:.75em;align-items:center;flex-wrap:wrap;margin-top:.5em">
+            <label class="subs-muted">Show <select id="ResFilter" class="subs-filter"><option value="">Everything</option><option value="waiting">Waiting for review</option></select></label>
+            <input id="ResSearch" type="search" class="subs-filter" placeholder="Find a video" aria-label="Find a video" />
           </div>
           <p class="subs-muted">Subtitle files beside your films and episodes are checked daily, and subtitles are found for videos that have none in your languages (Scheduled Tasks → Shoal). Corrections follow the timing setting below; every change keeps the original, and every added subtitle can be removed with Undo.</p>
           <div id="Editor" class="subs-editor" hidden>
@@ -525,7 +530,7 @@
           }
         });
 
-        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large', CantWrite: "Can't write here" };
+        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large', CantWrite: "Can't write here", Declined: 'Declined' };
 
         var kindNames = { RemovedAdvert: 'advert', RemovedEmpty: 'empty line', MergedDuplicate: 'repeat merged', StrippedHearingImpaired: 'sound description', FixedOverlap: 'overlap fixed', ExtendedShortCue: 'brief line lengthened', RewordedFromAudit: 'line reworded', EditedByHand: 'line edited' };
 
@@ -551,25 +556,46 @@
           return parts.join('<br>');
         }
 
-        function renderResults(results) {
+        var lastResults = [];
+
+        function renderResults(all) {
+          lastResults = all;
+          var filter = page.querySelector('#ResFilter');
+          var chosen = filter.value;
+          var present = {};
+          all.forEach(function (r) { present[r.Status] = true; });
+          filter.innerHTML = '<option value="">Everything</option><option value="waiting">Waiting for review</option>' +
+            Object.keys(present).map(function (k) { return '<option value="' + esc(k) + '">' + esc(statusNames[k] || k) + '</option>'; }).join('');
+          filter.value = chosen && (chosen === 'waiting' || present[chosen]) ? chosen : '';
+          var text = page.querySelector('#ResSearch').value.trim().toLowerCase();
+          var results = all.filter(function (r) {
+            return (!filter.value || (filter.value === 'waiting' ? r.PendingReview : r.Status === filter.value)) &&
+              (!text || (r.Name || '').toLowerCase().indexOf(text) >= 0 || (r.SubtitlePath || '').toLowerCase().indexOf(text) >= 0);
+          });
           var tally = {};
           results.forEach(function (r) { tally[r.Status] = (tally[r.Status] || 0) + 1; });
           var pending = results.filter(function (r) { return r.PendingReview; }).length;
-          page.querySelector('#ResultsSummary').textContent = results.length
-            ? Object.keys(tally).map(function (k) { return (statusNames[k] || k) + ': ' + tally[k]; }).join(' · ') + (pending ? ' · waiting for review: ' + pending : '')
+          page.querySelector('#ResultsSummary').textContent = all.length
+            ? Object.keys(tally).map(function (k) { return (statusNames[k] || k) + ': ' + tally[k]; }).join(' · ') + (pending ? ' · waiting for review: ' + pending : '') +
+              (results.length > 100 ? ' · showing the first 100 of ' + results.length : '')
             : 'Nothing checked yet.';
           page.querySelector('#Results').innerHTML = results.length ? '<tr><th>When</th><th>Video</th><th>Timing</th><th>Changes</th><th>Details</th><th></th></tr>' + results.slice(0, 100).map(function (r) {
             var editable = ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'Added'].indexOf(r.Status) >= 0;
             var actions = (editable ? '<button is="emby-button" type="button" class="raised button-alt res-edit" data-id="' + esc(r.Id) + '"><span>Edit</span></button>' : '') +
-              (r.PendingReview ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '"><span>Apply</span></button>' : '') +
-              (r.Changed ? '<button is="emby-button" type="button" class="raised button-alt res-undo" data-id="' + esc(r.Id) + '"><span>Undo</span></button>' : '');
+              (r.PendingReview ? '<button is="emby-button" type="button" class="raised res-apply" data-id="' + esc(r.Id) + '"><span>Apply</span></button>' +
+                '<button is="emby-button" type="button" class="raised button-alt res-decline" data-id="' + esc(r.Id) + '"><span>Decline</span></button>' : '') +
+              (r.Changed ? '<button is="emby-button" type="button" class="raised button-alt res-undo" data-id="' + esc(r.Id) + '"><span>Undo</span></button>' : '') +
+              (!r.Changed && !r.PendingReview ? '<button is="emby-button" type="button" class="raised button-alt res-check" data-id="' + esc(r.Id) + '" title="Check this subtitle again on the next run (or search again for this video)"><span>' + (r.Status === 'Undone' || r.Status === 'NotFound' ? 'Search again' : 'Check again') + '</span></button>' : '');
             var origin = r.Origin ? '<div>From ' + esc(r.Origin) + '</div>' : '';
             var examples = (r.Examples || []).length ? '<details><summary>What changed</summary><ul>' + r.Examples.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>' : '';
-            return '<tr><td style="white-space:nowrap">' + esc(new Date(r.Time).toLocaleString()) + '</td><td>' + esc(r.Name) + '<div class="subs-muted">' + esc((r.SubtitlePath || '').split('/').pop()) + '</div></td>' +
+            return '<tr><td style="white-space:nowrap">' + esc(new Date(r.Time).toLocaleString()) + '</td><td>' + esc(r.Name) + '<div class="subs-muted">' + esc((r.SubtitlePath || '').split(/[\\/]/).pop()) + '</div></td>' +
               '<td class="subs-status st-' + esc(r.Status) + '">' + esc(statusNames[r.Status] || r.Status) + '</td><td>' + change(r) + '</td>' +
               '<td class="subs-muted">' + origin + esc(r.Explanation) + examples + '</td><td style="white-space:nowrap">' + actions + '</td></tr>';
           }).join('') : '';
         }
+
+        page.querySelector('#ResFilter').addEventListener('change', function () { renderResults(lastResults); });
+        page.querySelector('#ResSearch').addEventListener('input', function () { renderResults(lastResults); });
 
         function loadResults() {
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Results', { limit: 500 })).then(renderResults);
@@ -675,9 +701,9 @@
         page.querySelector('#Results').addEventListener('click', function (e) {
           var edit = e.target.closest('.res-edit');
           if (edit) { openEditor(edit.getAttribute('data-id')); return; }
-          var b = e.target.closest('.res-apply, .res-undo');
+          var b = e.target.closest('.res-apply, .res-undo, .res-decline, .res-check');
           if (!b) { return; }
-          var verb = b.classList.contains('res-apply') ? 'Apply' : 'Undo';
+          var verb = b.classList.contains('res-apply') ? 'Apply' : b.classList.contains('res-decline') ? 'Decline' : b.classList.contains('res-check') ? 'CheckAgain' : 'Undo';
           ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + b.getAttribute('data-id') + '/' + verb) })
             .then(loadResults, function (err) {
               // ApiClient rejects with the fetch Response: its text is the server's explanation
@@ -781,6 +807,7 @@
             config.LocalServiceUrl = page.querySelector('#LocalServiceUrl').value.trim();
             config.MaxSubtitlesPerRun = Math.min(5000, Math.max(1, parseInt(page.querySelector('#MaxSubtitlesPerRun').value, 10) || 50));
             config.FindMissing = page.querySelector('#FindMissing').checked;
+            config.SetupSaved = true;
             config.AllowIngest = page.querySelector('#AllowIngest').checked;
             config.MaxFindsPerRun = Math.min(1000, Math.max(1, parseInt(page.querySelector('#MaxFindsPerRun').value, 10) || 20));
             var downloads = parseInt(page.querySelector('#MaxDownloadsPerDay').value, 10);

@@ -149,7 +149,48 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
-    /// Undoes a correction (the original comes back, unless the file was changed since).
+    /// Declines what waits for review for a subtitle: nothing is changed.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Decline")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> Decline([FromRoute] string id)
+    {
+        try
+        {
+            return _processor.Decline(id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Forgets a result so the subtitle is checked again on the next run (or the video searched again).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>No content.</returns>
+    [HttpPost("Results/{id}/CheckAgain")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult CheckAgain([FromRoute] string id)
+    {
+        try
+        {
+            _processor.CheckAgain(id);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Undoes this plugin's changes to a file.
     /// </summary>
     /// <param name="id">Result id.</param>
     /// <returns>The updated result.</returns>
