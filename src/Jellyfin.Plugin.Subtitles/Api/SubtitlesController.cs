@@ -190,6 +190,72 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
+    /// Asks for a subtitle file to be compared whole with a full transcript of its video on the next run of the full
+    /// transcripts task (answers at once; the check itself can take a while).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/CheckWholeFile")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> CheckWholeFile([FromRoute] string id)
+    {
+        try
+        {
+            return _processor.RequestWholeFileCheck(id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Applies one finding waiting for review (a line's suggested wording, a missing line added, or a line with nothing
+    /// heard removed).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="index">The finding's position in the result.</param>
+    /// <param name="time">The finding's time, as listed (so a stale page can't apply another finding).</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Findings/{index}/Apply")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> ApplyFinding([FromRoute] string id, [FromRoute] int index, [FromQuery] double time)
+    {
+        try
+        {
+            return _processor.ApplyFinding(id, index, time);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Declines one finding waiting for review: nothing is changed.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="index">The finding's position in the result.</param>
+    /// <param name="time">The finding's time, as listed.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Findings/{index}/Decline")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> DeclineFinding([FromRoute] string id, [FromRoute] int index, [FromQuery] double time)
+    {
+        try
+        {
+            return _processor.DeclineFinding(id, index, time);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Undoes this plugin's changes to a file.
     /// </summary>
     /// <param name="id">Result id.</param>

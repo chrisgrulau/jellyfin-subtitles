@@ -37,6 +37,21 @@ public sealed class ActivityTests : IDisposable
         Assert.Null(SubtitleActivity.NoteFor(R(ResultStatus.Unreliable)));
     }
 
+    // Stage 4: lines the whole-file check flagged are noted as such
+    [Fact]
+    public void Lines_flagged_by_the_whole_file_check_are_noted()
+    {
+        var r = R(ResultStatus.Unreliable) with
+        {
+            Findings = [new LineFinding(25, "I have five tickets.", "I have four tickets.", "number", "Heard four.") { From = Discrepancy.DiscrepancyReview.WholeFile }],
+            Examples = ["0:00:25 (number): …"],
+        };
+        var note = SubtitleActivity.NoteFor(r)!;
+        Assert.StartsWith("Lines of a subtitle differ from what is said (whole file): Invented Film", note.Name, StringComparison.Ordinal);
+        Assert.Equal(LogLevel.Warning, note.Severity);
+        Assert.Contains("(number)", note.Overview, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Once_a_day_switchable_and_never_throws()
     {

@@ -58,10 +58,15 @@ machine-/AI-translated flags; hearing-impaired and forced preferences; language 
 |---|---|---|
 | A: sync snippets | Check and synchronise | A few minutes per video at most |
 | B: AI context | Excerpt handed to the AI plugin | Extends tier A's snippets to a target length rather than transcribing afresh |
-| C: full transcript | Last-resort subtitles; later a discrepancy finder and precise timing | The whole video in 10-minute chunks; used by [Generated subtitles](#generated-subtitles) |
+| C: full transcript | Last-resort subtitles and the whole-file check; later precise timing | The whole video in 10-minute chunks; used by [Generated subtitles](#generated-subtitles) and the [Whole-file check](#whole-file-check) |
 
-Each tier has its own on/off switch, provider, model and budget. Transcripts are cached by file fingerprint, provider,
-model and time range, so no audio is paid for twice and re-runs are free.
+Each tier has its own on/off switch, provider, model and budget. Full transcripts are cached (`TranscriptCache`, in
+`<plugin data>/transcripts/`) by the video file (path, size and time written), audio stream, language, service and model
+(`SetupOf`, e.g. `builtin/base`), so no whole video is paid for or transcribed twice: generating and the whole-file check
+share them, and a second check is free. Each is a gzipped JSON object with a word per compact array (text, start, end,
+confidence, times to the millisecond; a two-hour film comes to a few hundred kilobytes);
+the folder is kept under 200 MB, the least recently used (read or written) going first; a damaged file is deleted and
+transcribed again. Sync snippets aren't cached: a file is only checked again when it (or the service) changed.
 
 ### Providers
 
@@ -112,7 +117,7 @@ Stage 4, part 1: the last resort when no subtitle can be found.
 
 - **Switch:** `GenerateMissing` (off by default, and nothing runs on a new install until the settings page is saved once,
   as for every task). It needs the Full transcript tier switched on; the page switches the tier on with it.
-- **Where it runs:** its own scheduled task, **Generate missing subtitles** (`ShoalSubtitlesGenerate`, daily at 05:00, an
+- **Where it runs:** its own scheduled task, **Generate missing subtitles and check whole files** (`ShoalSubtitlesGenerate`, daily at 05:00, an
   hour after the search), rather than a step of the search: transcribing whole videos can take hours on a CPU, and the
   search and its **Find missing now** button shouldn't wait for it. It respects cancellation between and within videos.
 - **Which videos** (`SubtitleGenerator.NeedsGeneration`): the library walk's "missing" list (`LibraryVideos.Missing`,
@@ -175,6 +180,79 @@ Stage 4, part 1: the last resort when no subtitle can be found.
   with the video, so a generated file someone deleted isn't made again. `Generated` goes to the Activity log like
   `Added`.
 
+## Whole-file check
+
+Stage 4, part 2: a doubtful subtitle compared line by line with a full transcript of its video. Differences are flagged
+for review, never applied on their own.
+
+- **Switch:** `CheckWholeFile` (off by default) for doubtful subtitles; **Check whole file** in the results
+  (`POST Subtitles/Results/{id}/CheckWholeFile`) queues any subtitle file (`SubtitleResult.WholeFileRequested`) whatever
+  the switch, answering at once. Refused for generated subtitles, embedded tracks and results without a file. Needs the
+  Full transcript tier; the page switches it on with the switch.
+- **Where it runs:** a step of the full-transcript task (`ShoalSubtitlesGenerate`, 05:00), sharing its time budget
+  (`MaxGenerateHours`, counted from when the task began) so whole videos are transcribed one at a time: first the files
+  asked for (someone is waiting), then generation, then doubtful files. At most `MaxWholeFileChecksPerNight` (5, 0–200)
+  a night, the ones asked for counted too; purpose `subtitles.wholefile` for metering. A paid service is reserved for
+  the whole video before it starts, as for generating; a limit or sign-in refusal stops the night.
+- **Which files** (`WholeFileChecker.Choose`, `IsDoubtful`): subtitle files from the library walk (never `*.generated.*`),
+  whose result (its own, or the search's for one it added) is asked for; or, with the switch, doubtful: `Unreliable`
+  ("Unclear"), or settled by speech-to-text with confidence under 0.5 (few agreeing words), or carrying wording-audit
+  findings; not matched by meaning (translations), not generated or embedded; in the audio's language (the chosen audio
+  stream's tag, or the first wanted language for an untagged one); not checked whole before, except a failed transcript
+  after 3 days. Asked-for first, then oldest result first. A file that changed since its result isn't compared (the
+  nightly check sees it first); other languages, unreadable or badly decoded text are noted and not compared.
+- **Alignment** (`DiscrepancyFinder`, pure and deterministic): the file's times are moved onto the audio's clock by a
+  correction waiting for review (`Proposed`), otherwise taken as they are. Each subtitle word may match an equal heard
+  word within ±3 s of its line (`Tolerance`); the longest run of matches in order on both sides wins (Hunt–Szymanski:
+  the longest increasing subsequence of the candidate pairs). Heard words between a line's first and last match are that
+  line's. Each line is then moved by the median offset of the matches within a minute of it (clamped to ±3 s); heard
+  words left between lines' matches go to a line they are heard during (0.5 s padding), keeping order; a line with no
+  matches takes the unclaimed words within ±3 s nearer to it than to its neighbours.
+- **Normalising** (`SpokenText`): markup, sound descriptions in brackets, music notes and upper-case speaker labels
+  removed; case and punctuation ignored; English contractions split (`don't` → `do not`, `can't` → `can not`, `'s` →
+  `is` on both sides); numbers in words become digits (`twenty-five` 25, `one hundred and five` 105, `nineteen ninety`
+  1990, `a thousand` 1000; a comma ends a number, so "two, three" stays two), digit separators dropped. Names are
+  capitalised words where a sentence doesn't start (not "I"); not in German, or in text all in one case.
+- **Findings** (one per line; kinds, most important first):
+  - `negation`: the line and what is heard for it have different numbers of `not`/`no`/`never`/`nothing`/`nobody`/
+    `none`/`neither`/`nor`/`nowhere`, and so do the line with its neighbours.
+  - `number`: a number in the line not heard for it or its neighbours, or heard but not in the line or its neighbours
+    (a line break in another place isn't a difference). With one on each side, the fix replaces it in place.
+  - `name`: a word heard in the place of another (in the aligned line) where either is a name, and neither appears on
+    the other side nearby. With one, the fix replaces it in place.
+  - `words`: at least 4 heard words, over half of those heard for the line, aren't in it or its neighbours.
+  - `missing-line`: heard speech (split at pauses over 1 s) of at least 4 words and 1.5 s that no line is shown during;
+    the fix adds it, from its first word to its last (at least 1 s, ending before the next line).
+  - `extra`: a line of at least 3 spoken words with nothing heard within ±3 s; music (♪, ♫, `#`) and sound descriptions
+    are never flagged. The fix removes it.
+  - Otherwise the fix is the heard words as a line (a capital first, wrapped at 42 characters).
+- **Guards:** with at least 20 subtitle words and fewer than 25 % of them heard, or with lines with nothing heard more
+  than a quarter of the spoken lines (at least 4), the transcript is taken to be at fault (another version or language,
+  music, the wrong audio track) and nothing is flagged; the result says so. At most 50 findings are kept (the counts
+  cover them all).
+- **Confidence:** a finding resting on heard words below the service's threshold is dropped (the result says how many):
+  the heard number or name, the heard negation, or the mean of the words behind a missing line or missing words.
+  Services that give no confidence (OpenAI's whisper-1) aren't second-guessed. Thresholds: see
+  [Decisions and confidence](#decisions-and-confidence).
+- **AI confirmation (optional):** with the AI plugin, `UseAi`, `AuditWording` and AI checks left in the run, the lines
+  flagged for their wording (up to 30; not missing lines or lines with nothing heard) are offered to the wording
+  auditor (`subtitles.audit`) with what was heard for each, as one question. Lines it doesn't flag are dropped; no
+  answer keeps them all. Within `MaxAiChecksPerRun`, shared with the rest of the task's run.
+- **Results:** the findings are `LineFinding`s with `From` = `whole file`, `Heard`, and for a missing line `End`, times
+  and text as in the file; they replace the previous whole-file findings and keep the audit's. `WholeFile` records when,
+  the service, the counts by kind and a summary, which also ends the explanation ("Whole file checked against a full
+  transcript by …: 1 number, 1 missing line — waiting for review"). Whole-file findings make a result wait for review;
+  the results list filters **Differs from what is said (whole file)** and **Whole-file check queued**; the Activity log
+  says "Lines of a subtitle differ from what is said (whole file)".
+- **Review** (`DiscrepancyReview`; `POST Subtitles/Results/{id}/Findings/{index}/Apply|Decline?time=`): each finding is
+  applied (wording replaced, missing line added styled like the first line, or line removed) or declined on its own;
+  the time must match, so a stale page can't act on another finding, and a line is found again by its text and time
+  (within 1.5 s), so a changed line is never touched. **Apply** on the result applies every finding with a fix, then any
+  timing and held-back clean-up, and keeps lines with nothing heard for review (Apply refuses when only those are left);
+  **Decline** clears them all. The editor opens at a finding with the fix filled in (a missing line added), saved only
+  with Save; saving closes the whole-file findings it dealt with. Applied fixes count as `FixedFromWholeFile`; Undo
+  restores the original.
+
 ## Decisions and confidence
 
 - Timing fixes: automatic by default. Text changes: review by default; never silent.
@@ -212,9 +290,19 @@ Stage 4, part 1: the last resort when no subtitle can be found.
       exhausted allowance doesn't keep transcribing.
 - Planned, not built: agreement between independent sources outweighing a single model's confidence (with a switch to
   send such cases to review instead). The setting is shown disabled ("coming later").
-- Confidence is not comparable across models, so thresholds are per model (starting points: Deepgram word confidence
-  ≥ 0.90 over a line; Whisper average log-probability ≥ −0.3 with compression-ratio and no-speech guards). Planned, not
-  built: calibrating them against subtitles already known to be good (the setting is shown disabled).
+- Confidence is not comparable across models, so thresholds are per service and model (`ConfidenceCalibration`).
+  Starting points (floors): Deepgram word confidence 0.90; Whisper-family services (built-in, local, OpenAI), whose words
+  carry a probability, e^−0.3 ≈ 0.74, the word-level equivalent of Whisper's average log-probability guard of −0.3. The
+  whole-file check drops findings resting on words below the threshold.
+- Automatic calibration (`TuneConfidence`, off by default; the page explains it): every subtitle found `InSync` or
+  `Corrected` by speech-to-text, with no wording-audit findings and text that decoded cleanly, is compared with its sync
+  snippets by the same finder (only lines inside the snippets), and each heard word matched to a line adds to a
+  hundred-bin histogram per service and model (`<plugin data>/calibration.json`): matched, and flagged (behind a name,
+  number or negation difference, which in a good subtitle is a mishearing). The threshold is the lowest at which at
+  most 2 % of the matched words would be flagged, once 1,000 words have been seen; never below the floor (so it only
+  ever makes the check stricter) and at most 0.99. Counts are halved above five million, and 50 services and models kept.
+  Learning never fails a check. "Missing words" findings aren't counted: subtitles condense speech, so that measures
+  the subtitle, not the word confidence.
 
 ## Editor
 

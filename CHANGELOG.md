@@ -9,7 +9,8 @@ All notable changes to this project are documented here. The format follows
 
 - **Stage 4: generated subtitles.** When the search finds nothing that fits a video in one of your languages, the
   plugin can transcribe the whole video and add a subtitle made from it: **Generate subtitles when none can be found**
-  (off by default) and a new nightly task, **Generate missing subtitles** (05:00; **Generate now** on the plugin page).
+  (off by default) and a new nightly task, **Generate missing subtitles and check whole files** (05:00; **Run full
+  transcripts now** on the plugin page).
   - Only in the language spoken: the audio track's language must be the subtitle's (a track without a tag counts as
     your first subtitle language).
   - Written as `<video>.<language>.generated.srt`; Jellyfin lists it with the title "generated". Lines follow common
@@ -29,6 +30,27 @@ All notable changes to this project are documented here. The format follows
     subtitles also go to the Activity log.
   - Deepgram is asked for punctuation, and OpenAI-compatible services for segments, only for full transcripts; the
     sync check's requests are unchanged.
+- **Stage 4: whole-file check.** A doubtful subtitle is compared line by line with a full transcript of its video, and
+  the lines that differ wait for your review: **Check whole file for doubtful subtitles** (off by default), and **Check
+  whole file** on any subtitle in the results (checked on the next run, even with the switch off).
+  - Doubtful means: the timing check was unclear or settled by few matching words, or the AI wording audit flagged
+    lines. Generated subtitles, translations and subtitles in another language than the audio's are never checked.
+  - Finds lines heard but missing, lines with nothing heard (not sound descriptions, music or short interjections), and
+    lines whose names, numbers or negations differ from what is said or that leave out most of it. Case, punctuation,
+    contractions and numbers in digits or words don't count; timing may be off by up to 3 seconds. Deterministic; with
+    the AI plugin, lines flagged for their wording can be confirmed within the run's AI checks.
+  - Words heard with low confidence flag nothing (Deepgram under 0.90, Whisper-based services under 0.74).
+  - Each line is listed with its time, what was heard and a suggested fix, with its own **Apply** (**Add line**,
+    **Remove line**), **Decline** and **Edit** (the editor opens at the line with the fix filled in). **Apply** on the
+    result takes every suggested fix; lines with nothing heard are removed only one by one. Undo restores the original.
+    New filter **Differs from what is said (whole file)**; Activity log entries.
+  - At most **Subtitle files checked whole per night** (5 by default, 0 to 200), picked ones first, within the same
+    time budget as generating (now shared by both), in the same nightly task.
+  - Full transcripts are kept (compressed, in the data folder, at most 200 MB), so checking again or generating from
+    the same video costs nothing more.
+- **Tune confidence thresholds automatically** now works (off by default): each speech-to-text service and model learns
+  a stricter threshold from subtitles already found in sync, so that at most 2 % of their words would be flagged; it
+  never goes below the starting points.
 
 ## [0.12.0-alpha] - 2026-09-26
 

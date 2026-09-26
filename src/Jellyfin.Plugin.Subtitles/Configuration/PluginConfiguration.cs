@@ -85,10 +85,26 @@ public class PluginConfiguration : BasePluginConfiguration
     public int MaxGeneratedPerNight { get; set; } = 20;
 
     /// <summary>
-    /// Gets or sets how many hours after the nightly generation starts no new video is started (0 to 24; 4 by default;
-    /// 0 means no limit). A video already being transcribed finishes, within its own time limit.
+    /// Gets or sets how many hours after the nightly full-transcript run starts no new video is started (0 to 24; 4 by
+    /// default; 0 means no limit), shared by generating subtitles and checking whole files. A video already being
+    /// transcribed finishes, within its own time limit.
     /// </summary>
     public int MaxGenerateHours { get; set; } = 4;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether doubtful subtitles (an unclear timing, a timing settled by few agreeing
+    /// words, or wording the audit flagged) are compared whole with a full transcript of their video, a few a night, and
+    /// lines that differ (missing, extra, or differing in names, numbers, negations or words) wait for review. Off by
+    /// default. Files picked in the results with <b>Check whole file</b> are compared either way. Needs the "Full
+    /// transcript" speech-to-text switched on.
+    /// </summary>
+    public bool CheckWholeFile { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many subtitle files are compared whole per night at most (0 to 200; 5 by default), those picked in
+    /// the results first.
+    /// </summary>
+    public int MaxWholeFileChecksPerNight { get; set; } = 5;
 
     /// <summary>
     /// Gets or sets the currency costs and limits are shown and set in (ISO 4217, e.g. <c>AUD</c>). Providers charge in
@@ -168,10 +184,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public decimal ExtraChargesPercent { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether confidence thresholds are tuned automatically against subtitles already
-    /// known to be good. Not used yet (coming later); the settings page shows it disabled.
+    /// Gets or sets a value indicating whether the confidence below which the whole-file check doesn't trust what was
+    /// heard is tuned automatically, per speech-to-text service and model, from subtitles already known to be good (off
+    /// by default). A tuned threshold is only ever stricter than the documented starting point (see
+    /// <see cref="Discrepancy.ConfidenceCalibration"/>).
     /// </summary>
-    public bool SelfCalibration { get; set; } = true;
+    public bool TuneConfidence { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether agreement between independent sources decides a disagreement on its own;

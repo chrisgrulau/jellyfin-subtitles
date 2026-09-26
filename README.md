@@ -11,9 +11,9 @@ they help each other.
 A [Jellyfin](https://jellyfin.org) plugin that finds subtitles for videos that are missing them, checks every candidate
 against what is actually said in the audio, and fixes the timing, so the subtitles you get are the right ones and in sync.
 
-> **Status:** alpha. Checking and fixing existing subtitles, finding missing ones and, as a last resort, generating them
-> from a full transcript work with the built-in speech-to-text, a local service, or a paid service within your monthly
-> limit. The design is in [docs/DESIGN.md](docs/DESIGN.md).
+> **Status:** alpha. Checking and fixing existing subtitles, finding missing ones, as a last resort generating them
+> from a full transcript, and comparing doubtful subtitles line by line with a full transcript work with the built-in
+> speech-to-text, a local service, or a paid service within your monthly limit. The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Installing
 
@@ -59,7 +59,7 @@ Three uses, each switched on or off separately and each with its own provider an
 |---|---|---|
 | Check and synchronise | A few short snippets per video | On |
 | Context for AI decisions | A slightly longer excerpt, when the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) is installed. Also used for the short transcripts [Ingest](https://github.com/chrisgrulau/jellyfin-ingest) may ask for (**Let Ingest ask for short transcripts**, off by default) to tell which episode a new video is | Off |
-| Full transcript | The whole video, to generate subtitles when none can be found (see [Generated subtitles](#generated-subtitles)). Its own service and model, so for example Deepgram can check and synchronise while full transcripts stay free on the built-in one | Off |
+| Full transcript | The whole video, to generate subtitles when none can be found (see [Generated subtitles](#generated-subtitles)) and to check doubtful subtitles line by line (see [Whole-file check](#whole-file-check)). Its own service and model, so for example Deepgram can check and synchronise while full transcripts stay free on the built-in one. Transcripts are kept, so a video is never transcribed twice with the same service and model | Off |
 
 Providers:
 
@@ -84,8 +84,10 @@ downloaded one at a time and checked against the audio the same way; one is adde
 timing corrected. Existing subtitle files are never replaced, downloads are capped per day, and Undo removes an added
 subtitle.
 
-A third daily task (**Generate missing subtitles**, off until you switch on **Generate subtitles when none can be
-found**) makes subtitles from a full transcript for videos the search found nothing for; see below.
+A third daily task (**Generate missing subtitles and check whole files**, off until you switch on **Generate subtitles
+when none can be found** or **Check whole file for doubtful subtitles**, or pick a subtitle with **Check whole file**)
+makes subtitles from a full transcript for videos the search found nothing for, and compares doubtful subtitles with a
+full transcript; see below.
 
 ## Generated subtitles
 
@@ -122,7 +124,41 @@ found** is on, the whole video is transcribed and a subtitle is made from what w
 - **Pace:** at most **Videos transcribed per night** (20 by default, 0 to 200), the ones waiting longest first, and no
   new video is started after **Stop starting new videos after** (4 hours by default, 0 to 24; 0 means no limit; a video
   already being transcribed finishes). The log's summary line says when the time ran out and how many are left for the
-  next night. The task runs at 05:00, an hour after the search; it can be run from the plugin page (**Generate now**) or Scheduled Tasks.
+  next night. The task runs at 05:00, an hour after the search; it can be run from the plugin page (**Run full
+  transcripts now**) or Scheduled Tasks.
+
+## Whole-file check
+
+A subtitle that looks doubtful can be compared, line by line, with a full transcript of its video. Off by default:
+**Check whole file for doubtful subtitles**.
+
+- **Which subtitles:** only doubtful ones: the timing check was unclear, or settled by only a few matching words, or the
+  AI wording audit flagged lines; and any you pick with **Check whole file** in the results (even with the switch off).
+  Never generated subtitles (they are the transcript), translations matched by meaning, or subtitles in a language other
+  than the audio's.
+- **What it finds:** lines heard but missing from the subtitle (at least 4 words over 1.5 seconds with no line shown);
+  lines with nothing heard around them (sound descriptions, music and short interjections are left alone); and lines
+  whose names, numbers or negations ("not", "never", "no" …) differ from what is said, or that leave out most of what
+  is said. Case, punctuation, contractions ("don't" / "do not") and numbers in digits or words ("25" / "twenty-five")
+  don't count as differences, and the subtitle's timing may be off by up to 3 seconds (a correction waiting for review
+  is allowed for). If too little of the subtitle is heard, or too many lines have nothing heard, the transcript is taken
+  to be at fault and nothing is flagged.
+- **Confidence:** words the speech-to-text wasn't sure of don't flag anything: below 0.90 for Deepgram, 0.74 for the
+  Whisper-based services (the built-in, local and OpenAI). With **Tune confidence thresholds automatically** (off by
+  default), each service and model learns a stricter threshold from subtitles already known to be good; it never goes
+  below those starting points. With the AI plugin, lines whose wording differs can also be confirmed by it (within the
+  run's AI checks); lines it doesn't confirm are left out.
+- **Review:** nothing is changed on its own. The result lists each line with its time, what was heard and a suggested
+  fix, with its own **Apply** (or **Add line** / **Remove line**), **Decline** and **Edit** (which opens the editor at
+  that line with the fix filled in, saved only when you save). **Apply** on the result takes every suggested fix at once
+  but leaves lines with nothing heard for you to remove one by one. Undo brings the original back. Show **Differs from
+  what is said (whole file)** to list them; they also go to the Activity log.
+- **Cost and pace:** it uses the **Full transcript** service, the same as generated subtitles, and a paid one is charged
+  for the whole video (reserved before it starts). Transcripts are kept (compressed, at most 200 MB, the least recently
+  used going first), so checking again, or generating from the same video, costs nothing more. At most **Subtitle files
+  checked whole per night** (5 by default, 0 to 200; files you picked go first and count too), within the same
+  **Stop starting new videos after** hours as generating. Picked files are checked on the next run (05:00, or **Run
+  full transcripts now**).
 
 ## Safety
 
@@ -148,8 +184,8 @@ found** is on, the whole video is transcribed and a subtitle is made from what w
 
 **Dashboard → Plugins → Subtitles.** Basic settings cover the key decisions in plain language; an **Advanced settings**
 section holds finer controls (costs, how much is checked per run, clean-up details, AI checks) with warnings where a
-change could make results worse. Automatic threshold tuning and "Let agreement between sources settle disagreements" are
-shown there as coming later; they have no effect yet.
+change could make results worse. "Let agreement between sources settle disagreements" is shown there as coming later; it
+has no effect yet.
 
 ## Requirements
 
@@ -168,23 +204,25 @@ shown there as coming later; they have no effect yet.
 2. With the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) installed: lines matched by meaning when the
    wording differs from what is said (done); wording audit of checked subtitles and, a few per night, the existing library (done);
    subtitle editor with audio playback (done).
-3. Full transcription: last-resort subtitles (done), discrepancy finder, automatic confidence calibration.
+3. Full transcription: last-resort subtitles (done), whole-file check of doubtful subtitles (done), automatic
+   confidence calibration (done, off by default); later, precise timing from the full transcript.
 4. More languages; later, subtitles in a different language from the audio.
 
 ## What it stores and sends
 
 **Stored** in the plugin's data folder (`<jellyfin data>/plugins/Jellyfin.Plugin.Subtitles/`): `keys.json` (owner-only),
 `results.json` (a result per subtitle: paths, video names, what was changed; kept while the file exists),
-`originals/` (the original of every file it changed, for Undo), `spend.json` and `rates.json` (spending), and
-`downloads.json` (the day's download count). The built-in speech-to-text lives in `<jellyfin data>/shoal-subtitles/`.
+`originals/` (the original of every file it changed, for Undo), `spend.json` and `rates.json` (spending),
+`downloads.json` (the day's download count), `transcripts/` (full transcripts, compressed, at most 200 MB) and
+`calibration.json` (counts per speech-to-text model for tuning confidence). The built-in speech-to-text lives in `<jellyfin data>/shoal-subtitles/`.
 
 **Sent:**
 
 | To | When | What |
 |---|---|---|
 | Your subtitle providers (through Jellyfin), SubDL | Finding missing subtitles | The video's title, year, season and episode, as Jellyfin's own search does |
-| A cloud speech-to-text service | Only if you chose one | A few one-minute audio snippets per checked file; for generated subtitles, only if you chose a cloud service for full transcripts, the whole video's audio in ten-minute parts (the built-in and local services keep audio on the server) |
-| Shoal AI → your AI provider | Only if installed and allowing Subtitles | The subtitle language, a few minutes of heard phrases and the subtitle lines around them |
+| A cloud speech-to-text service | Only if you chose one | A few one-minute audio snippets per checked file; for generated subtitles and whole-file checks, only if you chose a cloud service for full transcripts, the whole video's audio in ten-minute parts (the built-in and local services keep audio on the server) |
+| Shoal AI → your AI provider | Only if installed and allowing Subtitles | The subtitle language, a few minutes of heard phrases and the subtitle lines around them; for a whole-file check, the lines flagged for their wording and what was heard for them |
 
 **Needs write access** to your media folders: corrections are written beside the video.
 
