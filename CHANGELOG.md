@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **SUB-30:** `results.json` is no longer rewritten whole for every result. Plain results are written in batches (every
+  25 results or 5 seconds, and when a run ends or the server stops); a result that records a change to a file or its
+  undo, a review decision or an added subtitle is still written at once. Results are indexed by id and by path, so large
+  libraries don't search the whole list for each file.
+
 ### Fixed
 
 - **SUB-22:** the built-in speech-to-text is no longer downloaded on servers that can't run it. On musl systems

@@ -95,6 +95,19 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
+        try
+        {
+            await RunAsync(progress, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Results are written in batches; whatever is still waiting is written when the run ends, however it ends
+            _finder.FlushResults();
+        }
+    }
+
+    private async Task RunAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
         var config = SubtitlesPlugin.Instance?.Configuration;
         if (config is null || !config.Enabled || !config.FindMissing)
         {

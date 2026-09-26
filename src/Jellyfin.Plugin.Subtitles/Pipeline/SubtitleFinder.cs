@@ -115,6 +115,11 @@ public sealed class SubtitleFinder
     /// <summary>Gets whether anything has been checked or searched yet (an install that has run before counts as set up).</summary>
     public bool HasResults => _results.All().Count > 0;
 
+    /// <summary>
+    /// Writes results still waiting to be saved (at the end of a run).
+    /// </summary>
+    public void FlushResults() => _results.Flush();
+
     /// <summary>Gets whether results can be recorded now (the results file is readable).</summary>
     public bool ResultsReadable => _results.Readable;
 
