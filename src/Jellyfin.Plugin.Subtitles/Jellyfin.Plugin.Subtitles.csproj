@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <RootNamespace>Jellyfin.Plugin.Subtitles</RootNamespace>
-    <AssemblyVersion>0.12.0.0</AssemblyVersion>
-    <FileVersion>0.12.0.0</FileVersion>
+    <AssemblyVersion>0.13.0.0</AssemblyVersion>
+    <FileVersion>0.13.0.0</FileVersion>
     <!-- Only for LibraryImport's generated code (reading glibc's version for the built-in speech-to-text) -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
