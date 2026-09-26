@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0-alpha] - 2026-09-27
+
 ### Added
 
 - **Stage 4: whole-file check.** A doubtful subtitle is compared line by line with a full transcript of its video, and
