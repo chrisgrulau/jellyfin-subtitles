@@ -53,9 +53,16 @@ public class PluginConfiguration : BasePluginConfiguration
     public TranscriptionTier SyncSnippets { get; set; } = new() { Enabled = true };
 
     /// <summary>
-    /// Gets or sets speech-to-text for the slightly longer excerpt given to the AI plugin as context, when it is installed.
+    /// Gets or sets speech-to-text for the slightly longer excerpt given to the AI plugin as context, when it is installed
+    /// (including the couple of minutes Ingest may ask for, when <see cref="AllowIngest"/> is on).
     /// </summary>
     public TranscriptionTier AiContext { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Ingest plugin may ask for a short transcript (at most three minutes of
+    /// a video it is filing), to tell which episode a file is. Uses the "Context for AI decisions" service.
+    /// </summary>
+    public bool AllowIngest { get; set; }
 
     /// <summary>
     /// Gets or sets speech-to-text of the whole video (last-resort subtitles, discrepancy checks, precise timing).
