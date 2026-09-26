@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -13,8 +12,9 @@ namespace Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 /// <summary>
 /// The built-in speech-to-text: whisper.cpp's command-line program, run on this server's CPU. The program and model are
 /// fetched and checked by <see cref="BuiltInInstaller"/> on first use (only once the administrator has allowed it) and
-/// checked again before every run. Each run is bounded: low priority, a capped thread count, a time limit, and the whole
-/// process tree is killed on cancel or timeout. Arguments are passed as a list (no shell) and every path is absolute.
+/// checked again before every run. Each run is bounded (see <see cref="ExternalProcess"/>): low priority, a capped
+/// thread count, a time limit, and the whole process tree is killed on cancel or timeout. Arguments are passed as a list
+/// (no shell) and every path is absolute.
 /// </summary>
 public sealed class BuiltInSpeechToText : ISpeechToText
 {
@@ -139,91 +139,25 @@ public sealed class BuiltInSpeechToText : ISpeechToText
     // Runs the program; returns the end of what it wrote to stderr (its own messages; never media content)
     private static async Task<string> RunAsync(string program, string[] arguments, double audioSeconds, CancellationToken cancellationToken)
     {
-        var start = new ProcessStartInfo(program)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(program)!,
-        };
-        foreach (var a in arguments)
-        {
-            start.ArgumentList.Add(a);
-        }
-
-        using var process = new Process { StartInfo = start };
-        var errors = new StringBuilder();
-        process.ErrorDataReceived += (_, e) =>
-        {
-            lock (errors)
-            {
-                    if (e.Data is { } line)
-                {
-                    errors.AppendLine(line);
-                    if (errors.Length > 8000)
-                    {
-                        errors.Remove(0, errors.Length - 4000);
-                    }
-                }
-            }
-        };
-        process.OutputDataReceived += (_, _) => { };
-
+        ExternalProcessResult<object>? run;
         try
         {
-            process.Start();
+            run = await ExternalProcess.RunAsync(program, arguments, TimeLimit(audioSeconds), ExternalProcess.DiscardAsync, Path.GetDirectoryName(program)!, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
         {
             throw new SpeechToTextException("The built-in speech-to-text couldn't be started: " + ex.Message, ex) { Failure = FailureClass.BadRequest };
         }
-
-        try
+        catch (TimeoutException)
         {
-            process.PriorityClass = ProcessPriorityClass.BelowNormal;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
-        {
-            // Lowering priority is best-effort
-        }
-
-        process.BeginErrorReadLine();
-        process.BeginOutputReadLine();
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        limit.CancelAfter(TimeLimit(audioSeconds));
-        try
-        {
-            await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException)
-            {
-                // Already ended
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
             throw new SpeechToTextException("The built-in speech-to-text took too long and was stopped.") { Failure = FailureClass.Transient };
         }
 
-        // (WaitForExitAsync also waits for the redirected output to be read to the end)
-        string tail;
-        lock (errors)
+        if (run!.ExitCode != 0)
         {
-            tail = errors.ToString().Trim();
+            throw new SpeechToTextException(string.Create(CultureInfo.InvariantCulture, $"The built-in speech-to-text failed (exit code {run.ExitCode}): {run.Errors}")) { Failure = FailureClass.Transient };
         }
 
-        tail = tail.Length > 300 ? tail[^300..] : tail;
-        if (process.ExitCode != 0)
-        {
-            throw new SpeechToTextException(string.Create(CultureInfo.InvariantCulture, $"The built-in speech-to-text failed (exit code {process.ExitCode}): {tail}")) { Failure = FailureClass.Transient };
-        }
-
-        return tail;
+        return run.Errors;
     }
 }

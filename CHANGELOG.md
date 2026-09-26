@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format follows
     setting is read with the shared "setting, or USD" rule.
   - The settings page offers the currencies the server sends with the spending summary (`Currencies`), instead of its
     own copy of the list.
+  - ffmpeg (reading audio, copying subtitle tracks out of videos) and the built-in speech-to-text run through one shared
+    runner, which handles standard error the same way for all three: only its end is kept in memory while the program
+    runs, and a failure reports its last 300 characters (before, ffmpeg's messages were read whole and cut to their first
+    300 or 4,000 characters).
 - **SUB-31:** the code is reorganised without changing what it does, except as noted:
   - Choosing the speech-to-text service moved out of the sync task into its own class; the change policies are read
     from the settings; one helper starts every run (ffmpeg, HTTP client, exchange rates, speech-to-text service).
