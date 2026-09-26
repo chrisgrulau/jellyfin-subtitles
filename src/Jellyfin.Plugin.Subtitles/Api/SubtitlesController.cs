@@ -408,9 +408,10 @@ public class SubtitlesController : ControllerBase
         var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(10);
-        var found = await LocalServices.FindAsync(http, config.LocalServiceUrl, cancellationToken).ConfigureAwait(false);
+        var inContainer = LocalServices.InContainer();
+        var found = await LocalServices.FindAsync(http, config.LocalServiceUrl, inContainer, cancellationToken).ConfigureAwait(false);
         var accel = _serverConfig.GetEncodingOptions().HardwareAccelerationType.ToString();
-        return new LocalServicesResult(found, accel, LocalServices.Suggest(accel));
+        return new LocalServicesResult(found, accel, LocalServices.Suggest(accel, inContainer));
     }
 
     /// <summary>

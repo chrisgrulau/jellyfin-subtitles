@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 - **SUB-22:** the built-in speech-to-text is no longer downloaded on servers that can't run it. On musl systems
   (Alpine-based images) and with glibc older than 2.35, the settings page, Test and the nightly run say so plainly and
   suggest a local or cloud service instead; nothing is downloaded.
+- **SUB-23:** **Find a local service** works when Jellyfin runs in a container (Docker or Podman). It then also looks
+  for the suggested service by name and on the host, and suggests running it on a Docker network shared with Jellyfin
+  (address `http://speaches:8000/v1`), or on the host with `--add-host=host.docker.internal:host-gateway`, instead of a
+  port published only on the host's loopback, which a container can't reach.
 
 ## [0.9.0-alpha] - 2026-09-26
 
