@@ -39,6 +39,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     private readonly BuiltInHost _builtIn;
     private readonly Spending _spending;
     private readonly SubtitleFinder _finder;
+    private readonly SubtitleActivity? _activity;
     private readonly ILogger<SubtitleFindTask> _logger;
 
     /// <summary>
@@ -55,8 +56,10 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     /// <param name="spending">Prices, spend ledger and exchange rates.</param>
     /// <param name="finder">The finder.</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, ILogger<SubtitleFindTask> logger)
+    /// <param name="activity">Jellyfin's Activity log, for a search a provider stopped.</param>
+    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, ILogger<SubtitleFindTask> logger, SubtitleActivity? activity = null)
     {
+        _activity = activity;
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
         _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
@@ -169,6 +172,11 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             {
                 // The provider's own daily allowance is used up, or it can't sign in: every further search would fail too
                 LogProviderStopped(_logger, ex.Message);
+                if (_activity is not null)
+                {
+                    await _activity.NotifyStoppedAsync(ex.Message).ConfigureAwait(false);
+                }
+
                 break;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

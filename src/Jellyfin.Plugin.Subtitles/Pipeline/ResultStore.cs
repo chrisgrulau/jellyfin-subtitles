@@ -295,6 +295,11 @@ public sealed class ResultStore
     }
 
     /// <summary>
+    /// Gets or sets what else happens when a result is recorded (copying it to Jellyfin's Activity log).
+    /// </summary>
+    public Action<SubtitleResult>? Recorded { get; set; }
+
+    /// <summary>
     /// Adds or replaces the result for a subtitle.
     /// </summary>
     /// <param name="result">The result.</param>
@@ -316,6 +321,8 @@ public sealed class ResultStore
 
             Save(list);
         }
+
+        Recorded?.Invoke(result);
     }
 
     private List<SubtitleResult> Load()

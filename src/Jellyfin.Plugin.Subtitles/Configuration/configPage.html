@@ -95,6 +95,13 @@
             </label>
             <div class="fieldDescription checkboxFieldDescription">Searches your subtitle providers (such as the OpenSubtitles plugin), checks the best candidates against the audio, and adds one only if it fits. Existing subtitle files are never replaced.</div>
           </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="WriteToActivityLog" type="checkbox" is="emby-checkbox" />
+              <span>Also write to Jellyfin's Activity log</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">Subtitles waiting for your review, subtitles added, folders that can't be written and searches a provider stopped also appear under Dashboard → Activity (at most once a day each).</div>
+          </div>
           <div class="subs-service" data-service="subdl">
             <h4>SubDL</h4>
             <div class="fieldDescription">An extra subtitle site (the successor to Subscene), searched after Jellyfin's own providers. It needs a free API key from subdl.com. Its downloads count towards the daily limit under Advanced.</div>
@@ -782,6 +789,7 @@
             page.querySelector('#LocalServiceUrl').value = config.LocalServiceUrl || '';
             page.querySelector('#MaxSubtitlesPerRun').value = config.MaxSubtitlesPerRun || 50;
             page.querySelector('#FindMissing').checked = config.FindMissing !== false;
+            page.querySelector('#WriteToActivityLog').checked = config.WriteToActivityLog !== false;
             page.querySelector('#AllowIngest').checked = config.AllowIngest === true;
             page.querySelector('#MaxFindsPerRun').value = config.MaxFindsPerRun || 20;
             page.querySelector('#MaxDownloadsPerDay').value = config.MaxDownloadsPerDay == null ? 10 : config.MaxDownloadsPerDay;
@@ -807,6 +815,7 @@
             config.LocalServiceUrl = page.querySelector('#LocalServiceUrl').value.trim();
             config.MaxSubtitlesPerRun = Math.min(5000, Math.max(1, parseInt(page.querySelector('#MaxSubtitlesPerRun').value, 10) || 50));
             config.FindMissing = page.querySelector('#FindMissing').checked;
+            config.WriteToActivityLog = page.querySelector('#WriteToActivityLog').checked;
             config.SetupSaved = true;
             config.AllowIngest = page.querySelector('#AllowIngest').checked;
             config.MaxFindsPerRun = Math.min(1000, Math.max(1, parseInt(page.querySelector('#MaxFindsPerRun').value, 10) || 20));
