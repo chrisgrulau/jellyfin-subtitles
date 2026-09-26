@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Wording audit of earlier subtitles.** After each run's checks, a few subtitles checked before the audit existed
+  are audited, oldest first: **Earlier subtitles audited per run**, 5 by default, 0 turns it off.
+  - Only subtitles that are in sync or were corrected are audited, and only if the file is unchanged since, nothing
+    is waiting for review, and it isn't a translation.
+  - A few stretches are transcribed again. If the fresh transcript no longer finds the subtitle in sync, it isn't
+    audited, and it isn't tried again until the file changes.
+  - Each subtitle is audited once. Each attempt counts towards the per-run number, and audits use what is left of
+    the run's AI checks.
+
+### Added
+
 - **Wording audit** (optional, with the Shoal AI plugin: **Audit the wording with the AI plugin**, on by default).
   - **When:** after a subtitle's timing is settled by speech-to-text.
   - **What it checks:** the AI compares its lines with what is said during those few minutes. It flags lines whose

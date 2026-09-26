@@ -183,4 +183,58 @@ public sealed class AuditTests : IDisposable
         Assert.Equal(["subtitleLanguage", "heard", "lines"], doc.RootElement.EnumerateObject().Select(p => p.Name));
         Assert.Equal(string.Empty, AiTextAuditor.Read(new AiReply(false, null, null, "No.", "not-allowed")).Note);
     }
+
+    private static readonly Policies Plain = new(ChangePolicy.Automatic, ChangePolicy.Review, new CleanupSettings());
+
+    [Fact]
+    public async Task A_subtitle_checked_before_the_audit_is_audited_once_later()
+    {
+        var (processor, job, path) = Setup();
+        var fake = new PipelineTests.Shifted(PipelineTests.Story(), 0);
+        await processor.ProcessAsync(job, fake, fake, Plain, CancellationToken.None);
+        Assert.True(processor.NeedsAudit(path));
+        var auditor = new Auditor(_ => new AuditAnswer([new AuditFinding(1, "number", "Line 1 says 7", "Heard seven.")], string.Empty, "AI (test)"));
+
+        var audited = await processor.AuditAsync(job, fake, fake, auditor, CancellationToken.None);
+
+        Assert.NotNull(audited);
+        Assert.True(audited.Audited);
+        Assert.Single(audited.Findings);
+        Assert.True(audited.PendingReview);
+        Assert.False(processor.NeedsAudit(path));
+        Assert.Null(await processor.AuditAsync(job, fake, fake, auditor, CancellationToken.None));
+        Assert.Equal(1, auditor.Calls);
+    }
+
+    [Fact]
+    public async Task No_answer_leaves_it_for_another_run_and_a_changed_file_is_left_alone()
+    {
+        var (processor, job, path) = Setup();
+        var fake = new PipelineTests.Shifted(PipelineTests.Story(), 0);
+        await processor.ProcessAsync(job, fake, fake, Plain, CancellationToken.None);
+
+        var none = await processor.AuditAsync(job, fake, fake, new Auditor(_ => new AuditAnswer([], "The wording wasn't audited: this run's limit of AI checks was reached.", null)), CancellationToken.None);
+
+        Assert.Null(none);
+        Assert.True(processor.NeedsAudit(path));
+        await File.AppendAllTextAsync(path, "\n", TestContext.Current.CancellationToken);
+        Assert.False(processor.NeedsAudit(path, SubtitleFiles.Fingerprint(await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken))));
+    }
+
+    [Fact]
+    public async Task A_subtitle_no_longer_in_sync_isnt_audited_or_tried_again()
+    {
+        var (processor, job, path) = Setup();
+        var inSync = new PipelineTests.Shifted(PipelineTests.Story(), 0);
+        await processor.ProcessAsync(job, inSync, inSync, Plain, CancellationToken.None);
+        var late = new PipelineTests.Shifted(PipelineTests.Story(), 3);
+        var auditor = new Auditor(_ => throw new InvalidOperationException("not asked"));
+
+        var result = await processor.AuditAsync(job, late, late, auditor, CancellationToken.None);
+
+        Assert.Equal(0, auditor.Calls);
+        Assert.True(result!.Audited);
+        Assert.Contains("didn't find it in sync", result.Explanation, StringComparison.Ordinal);
+        Assert.False(processor.NeedsAudit(path));
+    }
 }
