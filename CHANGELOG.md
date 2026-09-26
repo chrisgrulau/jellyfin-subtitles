@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0-alpha] - 2026-09-26
+
 ### Added
 
 - **Lines matched by meaning** (optional, with the Shoal AI plugin: **Ask the AI plugin when the wording differs from
