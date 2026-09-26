@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0-alpha] - 2026-09-26
+
 ### Added
 
 - **Paid speech-to-text within your monthly limit.** Deepgram or OpenAI can now be used by the nightly runs.
