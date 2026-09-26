@@ -5,14 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Changed
-
-- Shared code updated (COM-03, COM-04, COM-05):
-  - provider waits are bounded;
-  - quota errors are recognised by the providers' own wording;
-  - secrets are redacted before error text is shortened;
-  - the key file is owner-only on Windows too;
-  - "is this a local address" (where a key may go over plain HTTP) is the one shared definition.
+## [0.2.0-alpha] - 2026-09-26
 
 ### Added
 
@@ -22,6 +15,15 @@ All notable changes to this project are documented here. The format follows
   plugin, before it is first run and again before every run; downloads come only from this project's releases over
   HTTPS. Runs use below-normal priority, at most 8 threads and a time limit. The settings page has a **Built-in** box
   with **Test** (DOC-02).
+
+### Changed
+
+- Shared code updated (COM-03, COM-04, COM-05):
+  - provider waits are bounded;
+  - quota errors are recognised by the providers' own wording;
+  - secrets are redacted before error text is shortened;
+  - the key file is owner-only on Windows too;
+  - "is this a local address" (where a key may go over plain HTTP) is the one shared definition.
 
 ### Fixed
 
