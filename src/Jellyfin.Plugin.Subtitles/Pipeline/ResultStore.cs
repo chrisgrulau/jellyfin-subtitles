@@ -40,6 +40,9 @@ public enum ResultStatus
 
     /// <summary>No subtitle that fits this video was found (searched again after a while).</summary>
     NotFound,
+
+    /// <summary>The file is too large to be a subtitle; it isn't read again until it changes.</summary>
+    TooLarge,
 }
 
 /// <summary>

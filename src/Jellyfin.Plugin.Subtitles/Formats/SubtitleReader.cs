@@ -1,4 +1,6 @@
 using System;
+using System.Threading.Tasks;
+using System.Threading;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -25,6 +27,32 @@ public static partial class SubtitleReader
 
     /// <summary>Gets the default ASS v4+ event format.</summary>
     public static IReadOnlyList<string> DefaultEventFormat => DefaultAssFormat;
+
+    /// <summary>
+    /// Reads a stream into memory, stopping as soon as it is larger than <see cref="MaxBytes"/> (so an oversized or
+    /// endless download is never buffered in full).
+    /// </summary>
+    /// <param name="stream">The stream.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The bytes, or <c>null</c> if it is too large.</returns>
+    public static async Task<byte[]?> ReadLimitedAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > MaxBytes)
+            {
+                return null;
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+
+        return buffer.ToArray();
+    }
 
     /// <summary>
     /// Reads a subtitle file from its bytes: size check, decoding, format detection and parsing. This is the entry point

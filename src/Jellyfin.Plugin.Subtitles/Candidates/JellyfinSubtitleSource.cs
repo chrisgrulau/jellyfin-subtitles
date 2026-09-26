@@ -61,9 +61,9 @@ public sealed class JellyfinSubtitleSource : ICandidateSource
         var stream = response.Stream;
         await using (stream.ConfigureAwait(false))
         {
-            using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return new FetchedSubtitle(buffer.ToArray(), response.Format ?? candidate.Format ?? "srt", response.Language ?? candidate.Language);
+            // Stops reading as soon as it's too big to be a subtitle
+            var bytes = await Formats.SubtitleReader.ReadLimitedAsync(stream, cancellationToken).ConfigureAwait(false);
+            return bytes is null ? null : new FetchedSubtitle(bytes, response.Format ?? candidate.Format ?? "srt", response.Language ?? candidate.Language);
         }
     }
 
