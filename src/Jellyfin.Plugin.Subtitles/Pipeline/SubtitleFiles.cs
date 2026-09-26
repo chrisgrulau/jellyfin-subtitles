@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Subtitles.Pipeline;
 
@@ -11,20 +12,23 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// written to a hidden temporary file beside it and then renamed into place (so a crash never leaves a half-written
 /// subtitle), and undo only restores the original if nobody has changed the file since.
 /// </summary>
-public sealed class SubtitleFiles
+public sealed partial class SubtitleFiles
 {
     private static readonly System.Collections.Generic.Dictionary<string, (bool Ok, DateTimeOffset At)> Writable = new(StringComparer.Ordinal);
 
     private readonly string _backups;
+    private readonly ILogger? _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitleFiles"/> class.
     /// </summary>
     /// <param name="backupFolder">Where originals are kept (the plugin's data folder).</param>
-    public SubtitleFiles(string backupFolder)
+    /// <param name="logger">Logger (for the details of what couldn't be kept, at debug level).</param>
+    public SubtitleFiles(string backupFolder, ILogger? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(backupFolder);
         _backups = backupFolder;
+        _logger = logger;
     }
 
     /// <summary>
@@ -244,15 +248,22 @@ public sealed class SubtitleFiles
     }
 
     // The new content goes to a temporary file that takes the place of the original, keeping how the original could be
-    // used: on Unix its permission bits are copied (so group write access for other tools or people survives); on
-    // Windows File.Replace keeps the original's access list. The owner and group can't be kept without privileges.
-    private static void WriteAtomically(string path, byte[] content)
+    // used: on Linux its group, where the server's user may set it (SUB-24); on Unix its permission bits (so group write
+    // access for other tools or people survives); on Windows File.Replace keeps the original's access list. The owner
+    // can't be kept without privileges.
+    private void WriteAtomically(string path, byte[] content)
     {
         var temp = Path.Combine(Path.GetDirectoryName(path)!, ".shoal-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
             File.WriteAllBytes(temp, content);
             var exists = File.Exists(path);
+            if (exists && OperatingSystem.IsLinux())
+            {
+                // Before the mode: changing the group may clear set-id bits, which the mode then restores
+                CopyGroup(path, temp);
+            }
+
             if (exists && !OperatingSystem.IsWindows())
             {
                 CopyMode(path, temp);
@@ -273,6 +284,33 @@ public sealed class SubtitleFiles
             }
         }
     }
+
+    // Best effort: the rewrite never fails over the group (EPERM when the server's user isn't in it, a file system without
+    // groups, a C library without statx); the file then keeps the server's group, as before
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    private void CopyGroup(string from, string to)
+    {
+        if (UnixGroup.GroupOf(from, out var problem) is not { } gid)
+        {
+            if (_logger is not null)
+            {
+                LogGroupUnread(_logger, from, problem);
+            }
+
+            return;
+        }
+
+        if (UnixGroup.GroupOf(to, out _) != gid && !UnixGroup.SetGroup(to, gid, out problem) && _logger is not null)
+        {
+            LogGroupNotKept(_logger, from, gid, problem);
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Shoal Subtitles: couldn't read the group of {Path}: {Problem}")]
+    private static partial void LogGroupUnread(ILogger logger, string path, string? problem);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Shoal Subtitles: the rewritten {Path} couldn't keep its group {Group}: {Problem}")]
+    private static partial void LogGroupNotKept(ILogger logger, string path, uint group, string? problem);
 
     [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
     private static void CopyMode(string from, string to)

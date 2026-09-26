@@ -16,6 +16,11 @@ All notable changes to this project are documented here. The format follows
 - **SUB-29:** **Test** uses the settings page's values as they are, before Save: besides the service, model, address and
   download permission, now also the currency, monthly spending limit, "no limit" and extra charges. They're made safe by
   the same rules Save applies, and nothing is saved. Before, a limit just raised from 0 refused the test until Save.
+- **SUB-24:** on Linux, a rewritten subtitle, and one put back by Undo, also keeps the original's group (read with
+  `statx`, set with `chown` on the temporary file before it takes the original's place), so a library shared through a
+  group stays writable for the other tools and people in it. Where that isn't allowed (Jellyfin's user isn't in the
+  group) or the system can't do it, the file gets Jellyfin's group as before, and the rewrite goes ahead; the reason is
+  logged at debug level. The owner still becomes Jellyfin's user. macOS keeps the mode only.
 
 ## [0.11.0-alpha] - 2026-09-26
 

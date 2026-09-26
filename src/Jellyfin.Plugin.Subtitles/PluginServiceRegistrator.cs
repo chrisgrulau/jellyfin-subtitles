@@ -52,7 +52,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             store.Recorded = r => _ = activity.NotifyAsync(r);
             return store;
         });
-        serviceCollection.AddSingleton(sp => new SubtitleProcessor(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"))));
+        serviceCollection.AddSingleton(sp => new SubtitleProcessor(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SubtitleFiles>>())));
         serviceCollection.AddSingleton(sp => new EmbeddedChecker(sp.GetRequiredService<ResultStore>()));
         // The in-process entry point other plugins of the family use for short transcripts (no HTTP endpoint): its work is
         // a registered service; the static method they find by reflection forwards to it
