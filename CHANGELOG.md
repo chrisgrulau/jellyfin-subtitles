@@ -17,6 +17,9 @@ All notable changes to this project are documented here. The format follows
 - **SUB-24:** a rewritten subtitle, and one put back by Undo, keeps the original's permissions: on Linux and macOS its
   mode (so group write access for other tools survives), on Windows its access list (the file is swapped in with
   `File.Replace`). The owner and group still become Jellyfin's user where the file is written.
+- **SUB-25:** a built-in speech-to-text download that stops arriving (an expired NAT entry, flaky Wi-Fi) gives up after
+  60 seconds without data and is tried again later. Before, it could wait until the server restarted, and the nightly
+  tasks and Ingest's transcript requests queued behind it.
 
 ## [0.9.0-alpha] - 2026-09-26
 

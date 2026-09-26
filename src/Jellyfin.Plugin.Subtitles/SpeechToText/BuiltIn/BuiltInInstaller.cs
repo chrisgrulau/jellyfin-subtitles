@@ -48,6 +48,12 @@ public sealed class BuiltInInstaller : IDisposable
     }
 
     /// <summary>
+    /// Gets how long a download may go without receiving anything before it's given up (60 s by default). A stalled
+    /// connection would otherwise hold the install lock, and everything waiting for it, until the server restarts.
+    /// </summary>
+    public TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Makes sure the program for a platform and a model are installed and intact, downloading what is missing.
     /// </summary>
     /// <param name="platform">Platform (see <see cref="BuiltInSource.CurrentPlatform"/>).</param>
@@ -269,7 +275,19 @@ public sealed class BuiltInInstaller : IDisposable
                     throw Integrity("the download was redirected to " + url.Host + ", which isn't allowed");
                 }
 
-                using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                idle.CancelAfter(IdleTimeout);
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, idle.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw Stalled(file);
+                }
+
+                using var owned = response;
                 if (response.StatusCode is HttpStatusCode.Moved or HttpStatusCode.Found or HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
                 {
                     if (hop >= MaxRedirects || response.Headers.Location is not { } next)
@@ -291,7 +309,7 @@ public sealed class BuiltInInstaller : IDisposable
                     throw Integrity(file.Name + " isn't the expected size");
                 }
 
-                await SaveAsync(response, file, temp, cancellationToken).ConfigureAwait(false);
+                await SaveAsync(response, file, temp, IdleTimeout, cancellationToken).ConfigureAwait(false);
                 return;
             }
         }
@@ -307,8 +325,27 @@ public sealed class BuiltInInstaller : IDisposable
         }
     }
 
-    private static async Task SaveAsync(HttpResponseMessage response, BuiltInDownload file, string temp, CancellationToken cancellationToken)
+    private static SpeechToTextException Stalled(BuiltInDownload file)
+        => new("Downloading " + file.Name + " stalled: nothing arrived for a while. It will be tried again.") { Failure = FailureClass.Transient };
+
+    // Each read must bring something within the idle time; the timer starts again after every chunk
+    private static async Task SaveAsync(HttpResponseMessage response, BuiltInDownload file, string temp, TimeSpan idleTimeout, CancellationToken cancellationToken)
     {
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        try
+        {
+            idle.CancelAfter(idleTimeout);
+            await SaveAsync(response, file, temp, idle, idleTimeout).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw Stalled(file);
+        }
+    }
+
+    private static async Task SaveAsync(HttpResponseMessage response, BuiltInDownload file, string temp, CancellationTokenSource idle, TimeSpan idleTimeout)
+    {
+        var cancellationToken = idle.Token;
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using (body.ConfigureAwait(false))
@@ -330,6 +367,7 @@ public sealed class BuiltInInstaller : IDisposable
 
                     sha.AppendData(buffer, 0, read);
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    idle.CancelAfter(idleTimeout);
                 }
 
                 if (total != file.Bytes)

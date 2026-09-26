@@ -206,6 +206,80 @@ public sealed class BuiltInTests : IDisposable
         Assert.Equal(3.0, words[2].Start, 3);
     }
 
+    // SUB-25: a body that stops arriving gives up instead of holding the install lock
+    [Fact]
+    public async Task A_stalled_download_gives_up_and_releases_the_lock()
+    {
+        var files = Release();
+        using var handler = new StallingServer(files.Served["whisper-cli-linux-x64.zip"]);
+        using var installer = new BuiltInInstaller(_dir, files.Source, handler) { IdleTimeout = TimeSpan.FromMilliseconds(200) };
+
+        var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => installer.EnsureAsync("linux-x64", "base", TestContext.Current.CancellationToken));
+        Assert.Contains("stalled", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(Jellyfin.Plugin.Common.Resilience.FailureClass.Transient, ex.Failure);
+
+        // The lock is free again: the next attempt runs (and stalls) rather than waiting forever
+        await Assert.ThrowsAsync<SpeechToTextException>(() => installer.EnsureAsync("linux-x64", "base", TestContext.Current.CancellationToken));
+        Assert.Equal(2, handler.Requests);
+    }
+
+    private sealed class StallingServer(byte[] body) : HttpMessageHandler
+    {
+        public int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests++;
+            var content = new StreamContent(new Stalling(body.AsMemory(0, body.Length / 2).ToArray()));
+            content.Headers.ContentLength = body.Length;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        }
+    }
+
+    // Sends the first part, then nothing more until cancelled
+    private sealed class Stalling(byte[] first) : Stream
+    {
+        private bool _sent;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (!_sent)
+            {
+                _sent = true;
+                first.CopyTo(buffer);
+                return first.Length;
+            }
+
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private static string Sha(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
     private static byte[] Zip(Dictionary<string, string> entries)
