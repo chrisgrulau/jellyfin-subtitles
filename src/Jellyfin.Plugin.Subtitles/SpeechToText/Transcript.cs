@@ -78,6 +78,9 @@ public sealed class SpeechToTextException : Exception
     /// <summary>Gets what kind of failure it was (decides retries and alerts).</summary>
     internal FailureClass Failure { get; init; } = FailureClass.Transient;
 
+    /// <summary>Gets the HTTP status the provider answered with, if the failure was an HTTP error.</summary>
+    public System.Net.HttpStatusCode? StatusCode { get; init; }
+
     /// <summary>Gets how long the provider asked us to wait, if it said.</summary>
     public TimeSpan? RetryAfter { get; init; }
 

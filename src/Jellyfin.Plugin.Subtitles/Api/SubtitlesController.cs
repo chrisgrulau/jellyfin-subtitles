@@ -88,6 +88,7 @@ public class SubtitlesController : ControllerBase
         }
 
         _keys.Set(provider, request.Key!);
+        DeepgramAccount.ClearCache();
         return NoContent();
     }
 
@@ -150,6 +151,119 @@ public class SubtitlesController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Deepgram's credit balance (when the settings say which key may read it), and whether the transcription key is an
+    /// Admin key that should be swapped for a limited one.
+    /// </summary>
+    /// <param name="check">Also check whether the transcription key is an Admin key (after it was saved).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The status.</returns>
+    [HttpGet("Deepgram")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<DeepgramStatus>> DeepgramStatusOf([FromQuery] bool check, CancellationToken cancellationToken)
+    {
+        var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
+        using var http = _http.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(20);
+        var transcription = _keys.Get(SpeechToTextFactory.Deepgram);
+        var billing = _keys.Get(DeepgramAccount.BillingKey);
+        bool? admin = null;
+        string? problem = null;
+        if (check && transcription is not null)
+        {
+            try
+            {
+                admin = await DeepgramAccount.CanReadBillingAsync(http, transcription, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SpeechToTextException ex)
+            {
+                problem = ex.Message;
+            }
+        }
+
+        var balanceKey = config.DeepgramBalance switch
+        {
+            BalanceSource.SeparateKey => billing,
+            BalanceSource.TranscriptionKey => transcription,
+            _ => null,
+        };
+        DeepgramBalance? balance = null;
+        if (balanceKey is not null)
+        {
+            try
+            {
+                balance = await DeepgramAccount.BalanceAsync(http, balanceKey, TimeProvider.System, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SpeechToTextException ex)
+            {
+                problem = ex.Message;
+            }
+        }
+        else if (config.DeepgramBalance != BalanceSource.Off)
+        {
+            problem = config.DeepgramBalance == BalanceSource.SeparateKey ? "Add the billing key to show the balance." : "Add the Deepgram key to show the balance.";
+        }
+
+        return new DeepgramStatus(transcription is not null, billing is not null, config.DeepgramBalance, admin, balance, problem);
+    }
+
+    /// <summary>
+    /// Replaces an Admin transcription key with a new key that can only transcribe, created with the Admin key. The Admin
+    /// key is then either kept only for reading the balance, or forgotten (revoke it in Deepgram's console if unused).
+    /// </summary>
+    /// <param name="request">Whether to keep the Admin key for the balance.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What was done.</returns>
+    [HttpPost("Deepgram/LimitKey")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<TestResult>> LimitDeepgramKey([FromBody, Required] LimitKeyRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_keys.Get(SpeechToTextFactory.Deepgram) is not { } admin)
+        {
+            return BadRequest("Add the Deepgram key first.");
+        }
+
+        using var http = _http.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(30);
+        try
+        {
+            if (!await DeepgramAccount.CanReadBillingAsync(http, admin, cancellationToken).ConfigureAwait(false))
+            {
+                return new TestResult(false, "The Deepgram key is already a limited key; nothing to change.");
+            }
+
+            var limited = await DeepgramAccount.CreateTranscriptionKeyAsync(http, admin, "Shoal Subtitles (transcription only, created by the plugin)", cancellationToken).ConfigureAwait(false);
+            _keys.Set(SpeechToTextFactory.Deepgram, limited);
+            var config = SubtitlesPlugin.Instance?.Configuration;
+            if (request.KeepForBalance)
+            {
+                _keys.Set(DeepgramAccount.BillingKey, admin);
+                if (config is not null)
+                {
+                    config.DeepgramBalance = BalanceSource.SeparateKey;
+                    SubtitlesPlugin.Instance!.SaveConfiguration();
+                }
+            }
+            else if (config is { DeepgramBalance: BalanceSource.TranscriptionKey })
+            {
+                config.DeepgramBalance = BalanceSource.Off;
+                SubtitlesPlugin.Instance!.SaveConfiguration();
+            }
+
+            DeepgramAccount.ClearCache();
+            return new TestResult(true, request.KeepForBalance
+                ? "Done: transcription now uses a new key that can only transcribe; the Admin key is kept only to read the balance."
+                : "Done: transcription now uses a new key that can only transcribe. The Admin key isn't kept; revoke it in Deepgram's console if nothing else uses it.");
+        }
+        catch (SpeechToTextException ex)
+        {
+            return new TestResult(false, ex.Message);
         }
     }
 
@@ -294,3 +408,23 @@ public sealed record SpendingSummary(string Currency, decimal? Limit, decimal? S
 /// <param name="HardwareAcceleration">Jellyfin's hardware acceleration setting.</param>
 /// <param name="Suggestion">A suggested way to run one.</param>
 public sealed record LocalServicesResult(IReadOnlyList<FoundService> Found, string HardwareAcceleration, SetupSuggestion Suggestion);
+
+/// <summary>
+/// Deepgram's key and balance status for the settings page (never the keys themselves).
+/// </summary>
+/// <param name="HasKey">Whether a transcription key is set.</param>
+/// <param name="HasBillingKey">Whether a separate billing key is set.</param>
+/// <param name="BalanceSource">Which key reads the balance.</param>
+/// <param name="KeyIsAdmin">Whether the transcription key is an Admin or Owner key, when checked.</param>
+/// <param name="Balance">The credit balance, if read.</param>
+/// <param name="Problem">Why something couldn't be shown.</param>
+public sealed record DeepgramStatus(bool HasKey, bool HasBillingKey, BalanceSource BalanceSource, bool? KeyIsAdmin, DeepgramBalance? Balance, string? Problem);
+
+/// <summary>
+/// Body of <see cref="SubtitlesController.LimitDeepgramKey"/>.
+/// </summary>
+public sealed record LimitKeyRequest
+{
+    /// <summary>Gets a value indicating whether to keep the Admin key, only for reading the balance.</summary>
+    public bool KeepForBalance { get; init; }
+}

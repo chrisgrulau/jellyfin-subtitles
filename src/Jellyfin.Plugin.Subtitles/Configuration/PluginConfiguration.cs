@@ -82,6 +82,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool NoSpendingLimit { get; set; }
 
     /// <summary>
+    /// Gets or sets which key reads Deepgram's credit balance for the settings page (off by default). Reading it needs an
+    /// Admin or Owner key; a separate key keeps the transcription key limited.
+    /// </summary>
+    public BalanceSource DeepgramBalance { get; set; } = BalanceSource.Off;
+
+    /// <summary>
     /// Gets or sets a value indicating whether the administrator has agreed to the built-in speech-to-text downloading
     /// and running its Whisper program and model on this server. Nothing is downloaded until they have, after being told
     /// what, how big and from where.
