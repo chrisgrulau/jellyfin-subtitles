@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Common;
 using Jellyfin.Plugin.Common.Ai;
 using Jellyfin.Plugin.Subtitles.Sync;
 
@@ -93,14 +94,21 @@ public sealed class AiLineMatcher : ILineMatcher
             return new LineMatch(LineVerdict.Unsure, [], "The AI plugin wasn't asked: this run's limit of AI checks was reached.", null);
         }
 
-        var data = new
+        // Fitted to the AI plugin's limit (FAM-02): shorter texts first, then fewer lines (a prefix, so the positions
+        // the answer names are still the ones offered)
+        var (data, sentPhrases, sentCues) = Fit((text, share) =>
         {
-            subtitleLanguage = language,
-            heard = phrases.Select(p => new { index = p.Index, at = Math.Round(p.Start, 1), text = p.Text }),
-            lines = cues.Select(c => new { index = c.Index, at = Math.Round(c.Start, 1), text = c.Text }),
-        };
+            var p = phrases.Take(Math.Max(1, phrases.Count * share / 100)).ToList();
+            var c = cues.Take(Math.Max(1, cues.Count * share / 100)).ToList();
+            return (new
+            {
+                subtitleLanguage = language,
+                heard = p.Select(x => new { index = x.Index, at = Math.Round(x.Start, 1), text = Cut(x.Text, text) }),
+                lines = c.Select(x => new { index = x.Index, at = Math.Round(x.Start, 1), text = Cut(x.Text, text) }),
+            }, p.Count, c.Count);
+        });
         var reply = await _ask("subtitles", Purpose, Instructions, data, Schema, 4096, "medium", cancellationToken).ConfigureAwait(false);
-        return Read(reply, phrases.Count, cues.Count);
+        return Read(reply, sentPhrases, sentCues);
     }
 
     /// <summary>
@@ -116,7 +124,7 @@ public sealed class AiLineMatcher : ILineMatcher
         if (!reply.Ok || reply.Answer is not { ValueKind: JsonValueKind.Object } answer)
         {
             // Not installed or not allowed: say nothing; anything else: say why the AI didn't help
-            return new LineMatch(LineVerdict.Unsure, [], reply.Failure is "not-installed" or "not-allowed" ? string.Empty : "The AI plugin couldn't help: " + reply.Error, null);
+            return new LineMatch(LineVerdict.Unsure, [], reply.Failure is "not-installed" or "not-allowed" or "off" ? string.Empty : "The AI plugin couldn't help: " + reply.Error, null);
         }
 
         var reason = answer.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? Trim(r.GetString()) : string.Empty;
@@ -147,6 +155,35 @@ public sealed class AiLineMatcher : ILineMatcher
                 return new LineMatch(LineVerdict.Unsure, [], reason.Length > 0 ? "The AI plugin couldn't tell: " + reason : string.Empty, null);
         }
     }
+
+    /// <summary>
+    /// The first shape of the data that fits the AI plugin's limit, trying shorter texts, then fewer items.
+    /// </summary>
+    /// <param name="make">Builds the data for a text length and a share (percent) of the items.</param>
+    /// <returns>The data that fits (or the smallest tried).</returns>
+    internal static (object Data, int A, int B) Fit(Func<int, int, (object Data, int A, int B)> make)
+    {
+        (int Text, int Share)[] steps = [(150, 100), (90, 100), (50, 100), (50, 70), (50, 50), (50, 30)];
+        var shape = make(steps[0].Text, steps[0].Share);
+        foreach (var (text, share) in steps)
+        {
+            shape = make(text, share);
+            if (BridgeJson.Bytes(shape.Data) <= AiBridgeClient.MaxDataBytes - 1024)
+            {
+                break;
+            }
+        }
+
+        return shape;
+    }
+
+    /// <summary>
+    /// Text cut to a length (for fitting a question to the limit).
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="max">The longest kept.</param>
+    /// <returns>The text.</returns>
+    internal static string Cut(string text, int max) => text.Length > max ? text[..max] + "…" : text;
 
     // Model text goes into the results list only: kept short and on one line
     private static string Trim(string? text)
