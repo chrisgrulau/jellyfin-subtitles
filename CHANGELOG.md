@@ -22,6 +22,12 @@ All notable changes to this project are documented here. The format follows
     are left to the nightly tasks.
   - On by default, including on upgrade: it only brings forward work the nightly tasks would do, within the same
     limits.
+- **Each library's subtitle languages are the default** (FEAT-06): with **Subtitle languages** left empty, a library's
+  videos use that library's subtitle download languages (Jellyfin's library settings), or else the server's preferred
+  metadata language (Jellyfin has no server-wide subtitle language), or else English. The plugin's own setting, when it
+  names any language, still applies everywhere. **Libraries** on the settings page shows the languages in effect for each
+  library and where they come from. The setting can now be saved empty (it used to be filled in as `eng`); installs that
+  saved it keep their languages until it is cleared.
 - **Library picker** (FEAT-03): **Libraries** on the settings page lists the server's film, show and mixed libraries,
   each with a tick. An unticked library is left alone: its videos aren't checked, searched for or generated for (every
   walk of the library, and so every task, honours it). All are ticked by default; the setting stores the libraries

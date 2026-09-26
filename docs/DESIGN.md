@@ -430,6 +430,21 @@ checks) sit behind a collapsed section with a warning; risky values show their o
 
 ## Languages
 
+Which languages a video's subtitles are wanted in (`LanguageSettings.Choose`, per library through `LibraryScope`):
+
+1. The plugin's **Subtitle languages**, when it names any recognised language (an entry that isn't one is ignored and
+   logged). It applies to every library.
+2. Otherwise the library's subtitle download languages (`LibraryOptions.SubtitleDownloadLanguages`, set in Jellyfin's
+   library settings).
+3. Otherwise the server's preferred metadata language: Jellyfin has no server-wide subtitle language (only per-user
+   preferences), and the metadata language is the closest the server has to "the household's language".
+4. Otherwise English.
+
+The walk carries each video's languages, so checks, searches, embedded tracks, generation and the whole-file check all
+use the video's own library's list (an untagged audio track is taken to be in that list's first language). Where no
+single video is concerned, the union over the libraries worked on is used. The settings page lists what is in effect
+per library, and where it came from.
+
 Same-language subtitles for any language the providers support. Different audio and subtitle languages are on the
 roadmap: identify both languages, transcribe, translate (Whisper can translate straight to English), and synchronise
 mainly on the speech/silence pattern, with fuzzy text matching as a secondary signal.

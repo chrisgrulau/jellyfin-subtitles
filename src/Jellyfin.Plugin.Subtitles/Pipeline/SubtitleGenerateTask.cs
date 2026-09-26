@@ -9,6 +9,7 @@ using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Pricing;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Model.Tasks;
@@ -37,6 +38,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     private readonly SubtitleGenerator _generator;
     private readonly WholeFileChecker _checker;
     private readonly RunGate _gate;
+    private readonly IServerConfigurationManager _server;
     private readonly ILogger<SubtitleGenerateTask> _logger;
 
     /// <summary>
@@ -53,10 +55,12 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     /// <param name="generator">The generator.</param>
     /// <param name="checker">The whole-file check.</param>
     /// <param name="gate">Keeps this task and other work on subtitle files apart.</param>
+    /// <param name="server">Jellyfin's configuration (for the languages' last fallback).</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleGenerateTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleGenerator generator, WholeFileChecker checker, RunGate gate, ILogger<SubtitleGenerateTask> logger)
+    public SubtitleGenerateTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleGenerator generator, WholeFileChecker checker, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleGenerateTask> logger)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
+        _server = server ?? throw new ArgumentNullException(nameof(server));
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
         _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
@@ -149,22 +153,24 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
             return;
         }
 
-        var wanted = LanguageSettings.EffectiveLanguages(config.Languages);
+        // Each video's languages are its library's (see LibraryScope)
+        var scope = JellyfinLibraries.Scope(_library, config, _server);
+        IReadOnlyList<string> WantedFor(string videoPath) => scope.LanguagesForPath(videoPath).Codes;
         var setup = SubtitleGenerator.SetupOf(tier.Provider, tier.Model);
         var budget = SubtitleGenerator.BudgetOf(config.MaxGenerateHours);
         var began = DateTimeOffset.UtcNow;
-        var videos = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config));
-        var settings = new WholeFileSettings(wanted, config.TuneConfidence, RunStart.PoliciesFor(config).Auditor);
+        var videos = new LibraryVideos(_library, _media, scope);
+        var settings = new WholeFileSettings(scope.AllLanguages(), config.TuneConfidence, RunStart.PoliciesFor(config).Auditor) { WantedFor = WantedFor };
         List<SubtitleJob>? files = null;
-        List<SubtitleJob> Files() => files ??= [.. videos.SubtitleFiles(wanted.Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal))];
+        List<SubtitleJob> Files() => files ??= [.. videos.SubtitleFiles()];
         var checks = 0;
 
         // Files picked in the results first (someone is waiting for them), then generation, then doubtful files
         if (asked)
         {
             // Picked files the run can't reach (the settings or the library changed since) leave the queue, with the reason
-            _checker.ClearUnreachable(Files(), wanted);
-            var outcome = await CheckWholeAsync(run, config, tier, setup, settings, _checker.Choose(Files(), wanted, automatic: false, maxWhole), budget, began, cancellationToken).ConfigureAwait(false);
+            _checker.ClearUnreachable(Files(), j => WantedFor(j.VideoPath));
+            var outcome = await CheckWholeAsync(run, config, tier, setup, settings, _checker.Choose(Files(), j => WantedFor(j.VideoPath), automatic: false, maxWhole), budget, began, cancellationToken).ConfigureAwait(false);
             checks += outcome?.Checked + outcome?.Failed ?? 0;
             if (outcome?.StoppedBy is not null || outcome?.OutOfTime is not null)
             {
@@ -181,7 +187,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
                 return;
             }
 
-            var jobs = _generator.Choose(videos.Missing(wanted, config.CountImageSubtitles), wanted, setup, max);
+            var jobs = _generator.Choose(videos.Missing(config.CountImageSubtitles), j => WantedFor(j.VideoPath), setup, max);
             LogStarting(_logger, jobs.Count, setup);
             var outcome = await _generator.RunAsync(
                 jobs,
@@ -215,7 +221,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
 
         if (config.CheckWholeFile && maxWhole - checks > 0)
         {
-            await CheckWholeAsync(run, config, tier, setup, settings, _checker.Choose(Files(), wanted, automatic: true, maxWhole - checks), budget, began, cancellationToken).ConfigureAwait(false);
+            await CheckWholeAsync(run, config, tier, setup, settings, _checker.Choose(Files(), j => WantedFor(j.VideoPath), automatic: true, maxWhole - checks), budget, began, cancellationToken).ConfigureAwait(false);
         }
     }
 

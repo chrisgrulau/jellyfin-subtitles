@@ -626,10 +626,26 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such result.</exception>
     public (SubtitleResult? Result, string? Refused) RequestWholeFileCheck(string id, Func<SubtitleResult, SubtitleJob?> jobFor, IReadOnlyList<string> wanted)
     {
-        ArgumentNullException.ThrowIfNull(jobFor);
         ArgumentNullException.ThrowIfNull(wanted);
+        return RequestWholeFileCheck(id, jobFor, _ => wanted);
+    }
+
+    /// <summary>
+    /// Asks for a subtitle file to be compared whole with a full transcript, with the languages wanted for its video's
+    /// library (see <see cref="RequestWholeFileCheck(string, Func{SubtitleResult, SubtitleJob?}, IReadOnlyList{string})"/>).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="jobFor">The subtitle as the library lists it (video, language, audio track), or <c>null</c>.</param>
+    /// <param name="wantedFor">The wanted languages for a subtitle's video, in order.</param>
+    /// <returns>The updated result, or why it can't be checked.</returns>
+    /// <exception cref="InvalidOperationException">No such result.</exception>
+    public (SubtitleResult? Result, string? Refused) RequestWholeFileCheck(string id, Func<SubtitleResult, SubtitleJob?> jobFor, Func<SubtitleJob, IReadOnlyList<string>> wantedFor)
+    {
+        ArgumentNullException.ThrowIfNull(jobFor);
+        ArgumentNullException.ThrowIfNull(wantedFor);
         var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
-        if (WholeFileChecker.Ineligible(r, jobFor(r), wanted) is { } why)
+        var job = jobFor(r);
+        if (WholeFileChecker.Ineligible(r, job, job is null ? [] : wantedFor(job)) is { } why)
         {
             return (null, why);
         }

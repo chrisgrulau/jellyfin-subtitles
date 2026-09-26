@@ -18,8 +18,9 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the subtitle languages to find and check, as ISO 639-2 codes (e.g. <c>eng</c>); empty means English
-    /// (see <see cref="LanguageSettings.EffectiveLanguages"/>). The list starts empty on purpose: Jellyfin's XML loader adds
+    /// Gets or sets the subtitle languages to find and check, as ISO 639-2 codes (e.g. <c>eng</c>); empty means each
+    /// library's own subtitle download languages, then the server's preferred metadata language, then English (see
+    /// <see cref="LanguageSettings.Choose"/>). The list starts empty on purpose: Jellyfin's XML loader adds
     /// saved items to whatever the list starts with, so a default item would be duplicated on every restart.
     /// </summary>
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "Jellyfin deserializes plugin configuration from JSON, which cannot populate a get-only collection.")]

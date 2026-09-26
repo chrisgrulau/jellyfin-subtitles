@@ -50,7 +50,8 @@ public class SubtitlesPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
             c.NewItemsDelayMinutes = Math.Clamp(c.NewItemsDelayMinutes, 1, 1440);
             var excluded = (c.ExcludedLibraries ?? []).Select(Pipeline.LibraryScope.NormaliseId).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
             c.ExcludedLibraries = [.. excluded];
-            var languages = LanguageSettings.EffectiveLanguages(c.Languages);
+            // Empty means each library's own subtitle languages (see LanguageSettings.Choose)
+            var languages = LanguageSettings.Recognised(c.Languages);
             c.Languages.Clear();
             foreach (var l in languages)
             {

@@ -23,7 +23,22 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Tuned">Whether confidence thresholds are tuned automatically (see <see cref="ConfidenceCalibration"/>).</param>
 /// <param name="Auditor">The AI plugin, to confirm lines whose wording differs (optional; within the run's AI checks).</param>
 /// <param name="Options">The comparison's options, or <c>null</c> for the defaults.</param>
-public sealed record WholeFileSettings(IReadOnlyList<string> Wanted, bool Tuned, ITextAuditor? Auditor = null, DiscrepancyOptions? Options = null);
+public sealed record WholeFileSettings(IReadOnlyList<string> Wanted, bool Tuned, ITextAuditor? Auditor = null, DiscrepancyOptions? Options = null)
+{
+    /// <summary>Gets the wanted languages for a video, by its path (each library's own), or <c>null</c> for <see cref="Wanted"/> everywhere.</summary>
+    public Func<string, IReadOnlyList<string>>? WantedFor { get; init; }
+
+    /// <summary>
+    /// The wanted languages for a subtitle's video.
+    /// </summary>
+    /// <param name="job">The subtitle.</param>
+    /// <returns>The languages, in order.</returns>
+    public IReadOnlyList<string> WantedOf(SubtitleJob job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        return WantedFor?.Invoke(job.VideoPath) ?? Wanted;
+    }
+}
 
 /// <summary>
 /// The whole-file check: a doubtful subtitle is compared with a full transcript of its video (the "Full transcript"
@@ -171,8 +186,21 @@ public sealed class WholeFileChecker
     /// <returns>How many were cleared.</returns>
     public int ClearUnreachable(IEnumerable<SubtitleJob> jobs, IReadOnlyList<string> wanted)
     {
-        ArgumentNullException.ThrowIfNull(jobs);
         ArgumentNullException.ThrowIfNull(wanted);
+        return ClearUnreachable(jobs, _ => wanted);
+    }
+
+    /// <summary>
+    /// Clears the queue flag of files asked for that the run can't check, with the languages wanted for each video's
+    /// library (see <see cref="ClearUnreachable(IEnumerable{SubtitleJob}, IReadOnlyList{string})"/>).
+    /// </summary>
+    /// <param name="jobs">The subtitle files beside the library's videos, in the wanted languages.</param>
+    /// <param name="wantedFor">The wanted languages for a subtitle's video, in order.</param>
+    /// <returns>How many were cleared.</returns>
+    public int ClearUnreachable(IEnumerable<SubtitleJob> jobs, Func<SubtitleJob, IReadOnlyList<string>> wantedFor)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+        ArgumentNullException.ThrowIfNull(wantedFor);
         var byPath = new Dictionary<string, SubtitleJob>(StringComparer.Ordinal);
         foreach (var j in jobs)
         {
@@ -182,7 +210,8 @@ public sealed class WholeFileChecker
         var cleared = 0;
         foreach (var r in _results.All().Where(r => r.WholeFileRequested).ToList())
         {
-            if (Ineligible(r, byPath.GetValueOrDefault(r.SubtitlePath), wanted) is { } why)
+            var job = byPath.GetValueOrDefault(r.SubtitlePath);
+            if (Ineligible(r, job, job is null ? [] : wantedFor(job)) is { } why)
             {
                 Note(r, string.Empty, "not compared: " + why, false);
                 cleared++;
@@ -216,8 +245,23 @@ public sealed class WholeFileChecker
     /// <returns>The files, in order.</returns>
     public IReadOnlyList<SubtitleJob> Choose(IEnumerable<SubtitleJob> jobs, IReadOnlyList<string> wanted, bool automatic, int max)
     {
-        ArgumentNullException.ThrowIfNull(jobs);
         ArgumentNullException.ThrowIfNull(wanted);
+        return Choose(jobs, _ => wanted, automatic, max);
+    }
+
+    /// <summary>
+    /// The files to check tonight, with the languages wanted for each video's library (see
+    /// <see cref="Choose(IEnumerable{SubtitleJob}, IReadOnlyList{string}, bool, int)"/>).
+    /// </summary>
+    /// <param name="jobs">The subtitle files beside the library's videos.</param>
+    /// <param name="wantedFor">The wanted languages for a subtitle's video, in order.</param>
+    /// <param name="automatic">Whether doubtful subtitles are checked without being asked for.</param>
+    /// <param name="max">The most to take (0 to <see cref="MaxPerNight"/>).</param>
+    /// <returns>The files, in order.</returns>
+    public IReadOnlyList<SubtitleJob> Choose(IEnumerable<SubtitleJob> jobs, Func<SubtitleJob, IReadOnlyList<string>> wantedFor, bool automatic, int max)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+        ArgumentNullException.ThrowIfNull(wantedFor);
         var take = Math.Clamp(max, 0, MaxPerNight);
         if (take == 0)
         {
@@ -238,7 +282,7 @@ public sealed class WholeFileChecker
             {
                 chosen.Add((job, true, r.Time));
             }
-            else if (automatic && IsDoubtful(r) && SameLanguage(job, wanted)
+            else if (automatic && IsDoubtful(r) && SameLanguage(job, wantedFor(job))
                 && (r.WholeFile is null || (r.WholeFile.Failed && now - r.WholeFile.Time >= RetryFailedAfter)))
             {
                 chosen.Add((job, false, r.Time));
@@ -279,7 +323,7 @@ public sealed class WholeFileChecker
             return null;
         }
 
-        if (Ineligible(r, job, settings.Wanted) is { } why)
+        if (Ineligible(r, job, settings.WantedOf(job)) is { } why)
         {
             return Note(r, setup, "not compared: " + why, false);
         }
@@ -366,7 +410,7 @@ public sealed class WholeFileChecker
     /// Checks the chosen files in turn. No new file is started once <paramref name="budget"/> has passed since
     /// <paramref name="began"/>; a service limit or sign-in failure stops the run; anything else is recorded for that file.
     /// </summary>
-    /// <param name="jobs">The files (see <see cref="Choose"/>).</param>
+    /// <param name="jobs">The files (see <see cref="Choose(IEnumerable{SubtitleJob}, IReadOnlyList{string}, bool, int)"/>).</param>
     /// <param name="audioFor">Each video's audio.</param>
     /// <param name="speech">The "Full transcript" speech-to-text service.</param>
     /// <param name="setup">The service and model.</param>

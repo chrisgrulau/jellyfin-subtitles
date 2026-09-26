@@ -95,7 +95,9 @@ same limits (**Handle new videos soon after they're added**, on by default). A s
 video is checked the same way. Generating subtitles stays nightly.
 
 All three tasks work on every film and show library unless you untick some under **Libraries** on the settings page
-(for example anime or children's libraries).
+(for example anime or children's libraries). The subtitle languages are those under **Subtitle languages**; left empty,
+each library uses its own subtitle download languages from Jellyfin's library settings (then the server's preferred
+metadata language, then English), and the page shows what is in effect for each library.
 
 ## Generated subtitles
 

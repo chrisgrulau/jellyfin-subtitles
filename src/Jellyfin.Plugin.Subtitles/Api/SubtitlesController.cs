@@ -203,8 +203,9 @@ public class SubtitlesController : ControllerBase
     {
         try
         {
-            var wanted = LanguageSettings.EffectiveLanguages((SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()).Languages);
-            var (result, refused) = _processor.RequestWholeFileCheck(id, JobFor, wanted);
+            // The languages wanted for the subtitle's video are its library's, as in the nightly run
+            var scope = JellyfinLibraries.Scope(_library, SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration(), _serverConfig);
+            var (result, refused) = _processor.RequestWholeFileCheck(id, JobFor, job => scope.LanguagesForPath(job.VideoPath).Codes);
             return result is not null ? result : BadRequest(refused);
         }
         catch (InvalidOperationException ex)
@@ -279,15 +280,20 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
-    /// The server's film and show libraries, and whether the plugin works on each (the settings page's library picker).
+    /// The server's film and show libraries, whether the plugin works on each (the settings page's library picker), and
+    /// the subtitle languages in effect for each, with where they come from.
     /// </summary>
     /// <returns>The libraries, in the server's order.</returns>
     [HttpGet("Libraries")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<IReadOnlyList<LibrarySummary>> Libraries()
     {
-        var scope = JellyfinLibraries.Scope(_library, SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration());
-        return Ok(scope.Libraries.Select(l => new LibrarySummary(LibraryScope.NormaliseId(l.Id)!, l.Name, scope.IsIncluded(l))).ToList());
+        var scope = JellyfinLibraries.Scope(_library, SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration(), _serverConfig);
+        return Ok(scope.Libraries.Select(l =>
+        {
+            var languages = scope.LanguagesFor(l);
+            return new LibrarySummary(LibraryScope.NormaliseId(l.Id)!, l.Name, scope.IsIncluded(l), languages.Codes, languages.Source);
+        }).ToList());
     }
 
     /// <summary>
@@ -804,4 +810,6 @@ public sealed record LimitKeyRequest
 /// <param name="Id">The library's id.</param>
 /// <param name="Name">Its name.</param>
 /// <param name="Included">Whether the plugin works on it.</param>
-public sealed record LibrarySummary(string Id, string Name, bool Included);
+/// <param name="Languages">The subtitle languages in effect for its videos (three-letter codes, in order).</param>
+/// <param name="LanguagesFrom">Where they come from.</param>
+public sealed record LibrarySummary(string Id, string Name, bool Included, IReadOnlyList<string> Languages, LanguageSource LanguagesFrom);

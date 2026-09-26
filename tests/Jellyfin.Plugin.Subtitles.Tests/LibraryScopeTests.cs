@@ -1,4 +1,5 @@
 using System;
+using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Pipeline;
 using Xunit;
 
@@ -67,4 +68,57 @@ public class LibraryScopeTests
     [InlineData("6f9619ff8b86d011b42d00c04fc964ff", "6f9619ff8b86d011b42d00c04fc964ff")]
     public void Library_ids_are_compared_in_one_form(string id, string? expected)
         => Assert.Equal(expected, LibraryScope.NormaliseId(id));
+}
+
+// FEAT-06: with no languages of its own, the plugin uses each library's subtitle download languages, then the server's
+// preferred metadata language, then English.
+public class LibraryLanguageTests
+{
+    private static readonly LibraryInfo French = new(Guid.NewGuid().ToString(), "Films FR", ["/media/fr"]) { SubtitleLanguages = ["fre", "eng"] };
+    private static readonly LibraryInfo Plain = new(Guid.NewGuid().ToString(), "Shows", ["/media/tv"]);
+
+    [Fact]
+    public void The_plugins_own_languages_win_everywhere()
+    {
+        var scope = new LibraryScope([French, Plain], null, ["German", "sv"], "fr");
+        var fr = scope.LanguagesForPath("/media/fr/A.mkv");
+        Assert.Equal(["deu", "swe"], fr.Codes);
+        Assert.Equal(LanguageSource.Plugin, fr.Source);
+        Assert.Equal(["deu", "swe"], scope.LanguagesForPath("/media/tv/B.mkv").Codes);
+        Assert.Equal(["deu", "swe"], scope.LanguagesForPath("/elsewhere/C.mkv").Codes);
+    }
+
+    [Fact]
+    public void Without_them_each_library_uses_its_own_then_the_server_then_english()
+    {
+        var scope = new LibraryScope([French, Plain], null, [], "de");
+        var fr = scope.LanguagesForPath("/media/fr/A.mkv");
+        Assert.Equal(["fre", "eng"], fr.Codes);
+        Assert.Equal(LanguageSource.Library, fr.Source);
+
+        var tv = scope.LanguagesForPath("/media/tv/B.mkv");
+        Assert.Equal(["deu"], tv.Codes);
+        Assert.Equal(LanguageSource.Server, tv.Source);
+
+        var bare = new LibraryScope([Plain], null, null, null).LanguagesForPath("/media/tv/B.mkv");
+        Assert.Equal(["eng"], bare.Codes);
+        Assert.Equal(LanguageSource.Default, bare.Source);
+    }
+
+    [Fact]
+    public void Settings_that_name_no_language_count_as_unset()
+    {
+        Assert.Equal(LanguageSource.Library, LanguageSettings.Choose(["Elvish", " "], ["fre"], null).Source);
+        Assert.Equal(LanguageSource.Server, LanguageSettings.Choose(null, ["Klingon"], "English").Source);
+        Assert.Equal(["eng"], LanguageSettings.Choose(null, null, "Elvish").Codes);
+        Assert.Empty(LanguageSettings.Recognised(["Elvish", null]));
+        Assert.Equal(["fre", "deu"], LanguageSettings.Recognised(["fre", "German", "FRE"]));
+    }
+
+    [Fact]
+    public void All_languages_are_those_of_the_libraries_worked_on_and_the_fallback()
+    {
+        var scope = new LibraryScope([French, Plain], [Plain.Id], null, "ja");
+        Assert.Equal(["fre", "eng", "jpn"], scope.AllLanguages());
+    }
 }

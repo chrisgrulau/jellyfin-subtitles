@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Jellyfin.Plugin.Subtitles.Configuration;
 
 namespace Jellyfin.Plugin.Subtitles.Pipeline;
 
@@ -11,11 +12,17 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Id">The library's id (its collection folder's item id).</param>
 /// <param name="Name">Its name, for display.</param>
 /// <param name="Locations">Its folders.</param>
-public sealed record LibraryInfo(string Id, string Name, IReadOnlyList<string> Locations);
+public sealed record LibraryInfo(string Id, string Name, IReadOnlyList<string> Locations)
+{
+    /// <summary>Gets the library's subtitle download languages (Jellyfin's library settings), as stored there.</summary>
+    public IReadOnlyList<string> SubtitleLanguages { get; init; } = [];
+}
 
 /// <summary>
 /// Which libraries the plugin works on (all by default; the settings page can leave some out, such as anime or children's
-/// libraries). Every walk of the library, the handling of new videos and generating subtitles ask it. A video belongs to
+/// libraries), and in which languages (see <see cref="LanguageSettings.Choose"/>: the plugin's own setting, or else each
+/// library's subtitle download languages, the server's preferred language, English). Every walk of the library, the
+/// handling of new videos and generating subtitles ask it. A video belongs to
 /// the library whose folder holds it (the longest match, when folders nest); a video in no known library's folder is
 /// never left out. Libraries are stored as left out rather than chosen, so a library added later is worked on, like
 /// every other, until it is unticked.
@@ -26,15 +33,21 @@ public sealed class LibraryScope
 
     private readonly HashSet<string> _excluded;
     private readonly List<(string Folder, LibraryInfo Library)> _folders;
+    private readonly IReadOnlyList<string>? _configured;
+    private readonly string? _server;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LibraryScope"/> class.
     /// </summary>
     /// <param name="libraries">The server's libraries.</param>
-    /// <param name="excluded">The ids of libraries left out (see <see cref="Configuration.PluginConfiguration.ExcludedLibraries"/>).</param>
-    public LibraryScope(IEnumerable<LibraryInfo> libraries, IEnumerable<string>? excluded)
+    /// <param name="excluded">The ids of libraries left out (see <see cref="PluginConfiguration.ExcludedLibraries"/>).</param>
+    /// <param name="configuredLanguages">The plugin's <see cref="PluginConfiguration.Languages"/> setting.</param>
+    /// <param name="serverLanguage">The server's preferred metadata language, if set.</param>
+    public LibraryScope(IEnumerable<LibraryInfo> libraries, IEnumerable<string>? excluded, IEnumerable<string>? configuredLanguages = null, string? serverLanguage = null)
     {
         ArgumentNullException.ThrowIfNull(libraries);
+        _configured = configuredLanguages?.ToList();
+        _server = serverLanguage;
         Libraries = [.. libraries.Where(l => l is not null)];
         _excluded = (excluded ?? []).Select(NormaliseId).OfType<string>().ToHashSet(StringComparer.Ordinal);
         _folders = [.. Libraries
@@ -97,4 +110,26 @@ public sealed class LibraryScope
     /// <param name="path">The video's file.</param>
     /// <returns><c>true</c> to work on it.</returns>
     public bool Includes(string? path) => LibraryOf(path) is not { } library || IsIncluded(library);
+
+    /// <summary>
+    /// The languages for a library's videos (see <see cref="LanguageSettings.Choose"/>).
+    /// </summary>
+    /// <param name="library">The library, or <c>null</c> for a video in no known library.</param>
+    /// <returns>The languages and where they came from.</returns>
+    public LanguageChoice LanguagesFor(LibraryInfo? library) => LanguageSettings.Choose(_configured, library?.SubtitleLanguages, _server);
+
+    /// <summary>
+    /// The languages for a video (those of the library holding it).
+    /// </summary>
+    /// <param name="path">The video's file.</param>
+    /// <returns>The languages and where they came from.</returns>
+    public LanguageChoice LanguagesForPath(string? path) => LanguagesFor(LibraryOf(path));
+
+    /// <summary>
+    /// Every language wanted anywhere: those of the libraries worked on, then those for videos in no known library, each
+    /// once (for what isn't tied to one video, such as the log of unrecognised settings).
+    /// </summary>
+    /// <returns>Three-letter codes, in order.</returns>
+    public IReadOnlyList<string> AllLanguages()
+        => [.. Libraries.Where(IsIncluded).SelectMany(l => LanguagesFor(l).Codes).Concat(LanguagesFor(null).Codes).Distinct(StringComparer.Ordinal)];
 }

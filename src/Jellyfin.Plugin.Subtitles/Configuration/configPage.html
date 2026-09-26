@@ -96,14 +96,14 @@
 
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="Languages">Subtitle languages</label>
-            <input id="Languages" type="text" is="emby-input" placeholder="eng" />
-            <div class="fieldDescription">Comma separated: codes or names (e.g. <code>eng, fr, German</code>). Anything that isn't a language is ignored and noted in the log.</div>
+            <input id="Languages" type="text" is="emby-input" placeholder="Each library's own" />
+            <div class="fieldDescription">Comma separated: codes or names (e.g. <code>eng, fr, German</code>). Anything that isn't a language is ignored and noted in the log. Leave it empty to use each library's subtitle download languages (Jellyfin's library settings), or else the server's preferred metadata language, or else English; what is in effect is shown under Libraries.</div>
           </div>
 
           <fieldset class="subs-libraries">
             <legend>Libraries</legend>
             <div id="Libraries" class="subs-muted">Loading…</div>
-            <div class="fieldDescription">Untick a library to leave it alone (for example anime or children's libraries): its videos aren't checked, searched for or generated for. A library added later is worked on until you untick it.</div>
+            <div class="fieldDescription">Beside each library: the subtitle languages in effect for it, and where they come from. Untick a library to leave it alone (for example anime or children's libraries): its videos aren't checked, searched for or generated for. A library added later is worked on until you untick it.</div>
           </fieldset>
 
           <div class="checkboxContainer checkboxContainer-withDescription">
@@ -495,13 +495,15 @@
         // This month's spending, the limit and the exchange rates behind it
         // The library picker: one tick per film or show library (null until loaded, so a failed load changes nothing)
         var libraries = null;
+        var languageSources = { Plugin: 'from Subtitle languages above', Library: 'from the library\'s subtitle download languages', Server: 'from the server\'s preferred metadata language', Default: 'nothing set, so English' };
         function loadLibraries() {
           var box = page.querySelector('#Libraries');
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Libraries')).then(function (list) {
             libraries = list;
             box.className = '';
             box.innerHTML = list.length ? list.map(function (l) {
-              return '<div class="checkboxContainer"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="lib-on" data-id="' + esc(l.Id) + '"' + (l.Included ? ' checked' : '') + ' /><span>' + esc(l.Name) + '</span></label></div>';
+              return '<div class="checkboxContainer"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="lib-on" data-id="' + esc(l.Id) + '"' + (l.Included ? ' checked' : '') + ' /><span>' + esc(l.Name) +
+                ' <span class="subs-muted">(' + esc((l.Languages || []).join(', ')) + ': ' + esc(languageSources[l.LanguagesFrom] || l.LanguagesFrom) + ')</span></span></label></div>';
             }).join('') : '<span class="subs-muted">No film or show libraries were found.</span>';
           }, function () { libraries = null; box.className = 'subs-muted'; box.textContent = 'The libraries couldn\'t be listed; they are left as they were.'; });
         }
@@ -1075,7 +1077,7 @@
           Dashboard.showLoadingMsg();
           ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             page.querySelector('#Enabled').checked = config.Enabled;
-            page.querySelector('#Languages').value = (config.Languages || []).filter(function (l, i, a) { return a.indexOf(l) === i; }).join(', ') || 'eng';
+            page.querySelector('#Languages').value = (config.Languages || []).filter(function (l, i, a) { return a.indexOf(l) === i; }).join(', ');
             page.querySelector('#TimingFixes').value = config.TimingFixes;
             page.querySelector('#TextChanges').value = config.TextChanges;
             fillCurrencies(config.Currency || 'USD');
@@ -1134,7 +1136,6 @@
           ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             config.Enabled = page.querySelector('#Enabled').checked;
             config.Languages = page.querySelector('#Languages').value.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0 && s.length <= 40; });
-            if (!config.Languages.length) { config.Languages = ['eng']; }
             if (libraries) {
               config.ExcludedLibraries = Array.prototype.filter.call(page.querySelectorAll('#Libraries .lib-on'), function (b) { return !b.checked; }).map(function (b) { return b.getAttribute('data-id'); });
             }
@@ -1193,7 +1194,7 @@
                 Model: row.querySelector('.tier-model').value.trim()
               };
             });
-            ApiClient.updatePluginConfiguration(pluginId, config).then(function (r) { Dashboard.processPluginConfigurationUpdateResult(r); loadDeepgram(false); });
+            ApiClient.updatePluginConfiguration(pluginId, config).then(function (r) { Dashboard.processPluginConfigurationUpdateResult(r); loadDeepgram(false); loadLibraries(); });
           });
           return false;
         });
