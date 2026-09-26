@@ -58,12 +58,25 @@ public sealed class Spending : IDisposable
     internal static SpendLimits LimitsOf(PluginConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return new SpendLimits(
-            SpendingLimit.NormaliseCurrency(config.Currency),
-            SpendingLimit.Monthly(config.MonthlyBudget, config.NoSpendingLimit),
-            new Dictionary<string, decimal>(),
-            SpendingLimit.NormaliseExtraPercent(config.ExtraChargesPercent));
+        return LimitsOf(config.Currency, config.MonthlyBudget, config.NoSpendingLimit, config.ExtraChargesPercent);
     }
+
+    /// <summary>
+    /// The limits from spending settings, made safe by the same rules Save applies (a supported currency or USD, a
+    /// monthly limit of at least 0, extra charges from 0 to 100 %): used for saved settings and for the settings page's
+    /// unsaved values (Test, SUB-29).
+    /// </summary>
+    /// <param name="currency">The currency setting.</param>
+    /// <param name="monthly">The monthly limit.</param>
+    /// <param name="noLimit">Whether "no limit" is chosen.</param>
+    /// <param name="extraPercent">The extra-charges percentage.</param>
+    /// <returns>The limits.</returns>
+    internal static SpendLimits LimitsOf(string? currency, decimal monthly, bool noLimit, decimal extraPercent)
+        => new(
+            SpendingLimit.NormaliseCurrency(currency),
+            SpendingLimit.Monthly(monthly, noLimit),
+            new Dictionary<string, decimal>(),
+            SpendingLimit.NormaliseExtraPercent(extraPercent));
 
     /// <summary>
     /// The exchange rates to check a paid call against, refreshed first when due (see

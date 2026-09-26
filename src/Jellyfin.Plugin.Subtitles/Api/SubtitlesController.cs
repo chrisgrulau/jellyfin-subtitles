@@ -485,7 +485,8 @@ public class SubtitlesController : ControllerBase
 
     /// <summary>
     /// Checks that a speech-to-text service answers, by sending it one second of near-silence (for a paid service this
-    /// costs a small fraction of a cent).
+    /// costs a small fraction of a cent). It uses the page's values as they are, before Save (the service, model,
+    /// address, download permission and spending limits); nothing is saved.
     /// </summary>
     /// <param name="request">The service, model and (for a local service) address to test, as on the settings page.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -497,7 +498,10 @@ public class SubtitlesController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
         var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
-        var paidAllowed = SpendingLimit.AllowsPaidUsage(SpendingLimit.Monthly(config.MonthlyBudget, config.NoSpendingLimit));
+
+        // The page's values as they are now, before Save (SUB-29), made safe as Save would; nothing is stored
+        var limits = request.Limits(config.Currency, config.MonthlyBudget, config.NoSpendingLimit, config.ExtraChargesPercent);
+        var paidAllowed = SpendingLimit.AllowsPaidUsage(limits.Overall);
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(60);
         var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, request.AllowBuiltInDownload ?? config.AllowBuiltInDownload, _keys, http, _builtIn);
@@ -519,7 +523,7 @@ public class SubtitlesController : ControllerBase
         if (SpeechToTextFactory.IsPaid(service.Id))
         {
             await _spending.CurrentRatesAsync(http, cancellationToken).ConfigureAwait(false);
-            service = SpeechSelection.Metered(service, request.Model, config, _spending, "subtitles.test");
+            service = SpeechSelection.Metered(service, request.Model, limits, _spending, "subtitles.test");
         }
 
         // One second of a very quiet tone: enough for the service to accept and answer
@@ -598,6 +602,34 @@ public sealed record TestRequest
     /// the saved setting.
     /// </summary>
     public bool? AllowBuiltInDownload { get; init; }
+
+    /// <summary>Gets the currency as currently chosen on the page; <c>null</c> for the saved setting.</summary>
+    public string? Currency { get; init; }
+
+    /// <summary>Gets the monthly spending limit as currently entered; <c>null</c> for the saved setting.</summary>
+    public decimal? MonthlyBudget { get; init; }
+
+    /// <summary>Gets whether "no limit" is currently ticked; <c>null</c> for the saved setting.</summary>
+    public bool? NoSpendingLimit { get; init; }
+
+    /// <summary>Gets the extra-charges percentage as currently entered; <c>null</c> for the saved setting.</summary>
+    public decimal? ExtraChargesPercent { get; init; }
+
+    /// <summary>
+    /// The spending limits Test works within: the values sent, or the saved ones where none was sent, made safe by the
+    /// rules Save applies (SUB-29).
+    /// </summary>
+    /// <param name="savedCurrency">The saved currency.</param>
+    /// <param name="savedMonthly">The saved monthly limit.</param>
+    /// <param name="savedNoLimit">The saved "no limit".</param>
+    /// <param name="savedExtraPercent">The saved extra-charges percentage.</param>
+    /// <returns>The limits.</returns>
+    internal Jellyfin.Plugin.Common.Costs.SpendLimits Limits(string? savedCurrency, decimal savedMonthly, bool savedNoLimit, decimal savedExtraPercent)
+        => Pricing.Spending.LimitsOf(
+            string.IsNullOrWhiteSpace(Currency) ? savedCurrency : Currency,
+            MonthlyBudget ?? savedMonthly,
+            NoSpendingLimit ?? savedNoLimit,
+            ExtraChargesPercent ?? savedExtraPercent);
 }
 
 /// <summary>

@@ -479,7 +479,7 @@
             Array.prototype.forEach.call(box.querySelectorAll('.local-use'), function (b) {
               b.addEventListener('click', function () {
                 page.querySelector('#LocalServiceUrl').value = found[parseInt(b.getAttribute('data-i'), 10)].Address;
-                Dashboard.alert('Address filled in. Save the settings, then press Test.');
+                Dashboard.alert('Address filled in. Press Test to check it, then Save.');
               });
             });
             box.querySelector('.local-copy').addEventListener('click', function () {
@@ -616,6 +616,20 @@
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Keys')).then(renderKeys);
         }
 
+        // What Test uses: the page's values as they are now, before Save (SUB-29); the spending values as Save sends them
+        function testValues(id) {
+          return {
+            Provider: id,
+            Model: modelFor(id),
+            LocalServiceUrl: page.querySelector('#LocalServiceUrl').value.trim(),
+            AllowBuiltInDownload: page.querySelector('#AllowBuiltInDownload').checked,
+            Currency: page.querySelector('#Currency').value,
+            MonthlyBudget: Math.max(0, parseFloat(page.querySelector('#MonthlyBudget').value) || 0),
+            NoSpendingLimit: page.querySelector('#NoSpendingLimit').checked,
+            ExtraChargesPercent: Math.min(100, Math.max(0, parseFloat(page.querySelector('#ExtraChargesPercent').value) || 0))
+          };
+        }
+
         function modelFor(id) {
           var row = Array.prototype.filter.call(page.querySelectorAll('.subs-tier:not([data-soon])'), function (r) { return r.querySelector('.tier-provider').value === id; })[0];
           return row ? row.querySelector('.tier-model').value.trim() : '';
@@ -638,7 +652,7 @@
               .then(function (st) { showBuiltInDownload(st); return loadBuiltInDownload(); }, function (err) { problemText(err).then(Dashboard.alert); });
           } else if (e.target.closest('.svc-test')) {
             result.textContent = 'Testing ' + serviceNames[id] + '…';
-            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify({ Provider: id, Model: modelFor(id), LocalServiceUrl: page.querySelector('#LocalServiceUrl').value.trim(), AllowBuiltInDownload: page.querySelector('#AllowBuiltInDownload').checked }), contentType: 'application/json', dataType: 'json' })
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify(testValues(id)), contentType: 'application/json', dataType: 'json' })
               .then(function (r) {
                 result.textContent = (r.Ok ? '✓ ' : r.Downloading ? '… ' : '✗ ') + r.Message;
                 if (r.Downloading) { retestAfterDownload = true; loadBuiltInDownload(); } else { loadSpending(); }

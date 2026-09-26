@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   request, which a reverse proxy's timeout cancelled every time. Only one download runs at a time; a nightly run that
   needs the built-in speech-to-text still downloads it itself (or waits for the one running). A download is cancelled
   when the server stops. New endpoints: `GET` and `POST Subtitles/BuiltIn/Download`.
+- **SUB-29:** **Test** uses the settings page's values as they are, before Save: besides the service, model, address and
+  download permission, now also the currency, monthly spending limit, "no limit" and extra charges. They're made safe by
+  the same rules Save applies, and nothing is saved. Before, a limit just raised from 0 refused the test until Save.
 
 ## [0.11.0-alpha] - 2026-09-26
 
