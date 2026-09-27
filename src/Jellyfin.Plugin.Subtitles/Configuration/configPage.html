@@ -107,6 +107,22 @@
       #SubtitlesConfigPage #SpeechErrorsMore, #SubtitlesConfigPage .restore-more { display: block; margin: .75em auto; }
       /* A service with no key field (built-in: Download now, Test) centres its buttons */
       #SubtitlesConfigPage .subs-key:not(:has(.inputContainer)) { justify-content: center; }
+      /* In-progress feedback on buttons that call the server: a small spinner in the text colour (a still "…" when motion
+         is reduced), then the outcome next to the buttons */
+      #SubtitlesConfigPage .subs-spinner { display: inline-block; width: .85em; height: .85em; margin-right: .45em; vertical-align: -.1em; box-sizing: border-box; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: subs-spin .8s linear infinite; }
+      #SubtitlesConfigPage .subs-spinner:only-child { margin-right: 0; }
+      @keyframes subs-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        #SubtitlesConfigPage .subs-spinner { animation: none; border: 0; width: auto; height: auto; margin: 0; vertical-align: baseline; }
+        #SubtitlesConfigPage .subs-spinner:not(:only-child) { display: none; }
+        #SubtitlesConfigPage .subs-spinner:only-child::before { content: '…'; }
+      }
+      #SubtitlesConfigPage .subs-btn:disabled { opacity: .6; cursor: not-allowed; }
+      #SubtitlesConfigPage .subs-busy, #SubtitlesConfigPage .subs-btn.subs-busy:disabled { cursor: progress; }
+      #SubtitlesConfigPage .subs-busy:disabled { opacity: .85; }
+      #SubtitlesConfigPage .subs-outcome { margin: .3em 0; font-size: .9em; white-space: normal; }
+      #SubtitlesConfigPage .subs-outcome-bad { padding: .3em .6em; border-radius: 4px; background: rgba(255,112,67,.15); border-left: 3px solid var(--subs-bad); }
+      #SubtitlesConfigPage .subs-button-row + .subs-outcome { text-align: center; }
       #SubtitlesConfigPage .subs-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
       @media (max-width: 720px) {
         #SubtitlesConfigPage .subs-tier { grid-template-columns: 1fr; }
@@ -588,6 +604,92 @@
 
         function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
+        // ---- In-progress feedback: busy(button, label) disables the button and the other actions in its group, marks the
+        // group busy, shows a spinner and the label, and returns done(ok, message), which puts the button back and shows
+        // the outcome next to it: a success for a while, a problem until the next action there. An outcome has places to
+        // go, the first still on the page wins; they are placed again whenever a list is drawn again ----
+        var outcomes = [];
+
+        function groupOf(b) { return b.closest('.subs-actions, .subs-key, .subs-button-row, .subs-bar, .subs-more, .subs-editor-bar, #DgAdmin, tr') || b; }
+
+        // Where a button's outcome goes: [element or selector, position]; results and keys are drawn again, so by selector
+        function placesOf(b) {
+          var id = b.getAttribute('data-id');
+          if (id != null && b.closest('#Results')) {
+            var q = '"' + CSS.escape(id) + '"';
+            return (b.closest('tr.subs-detail') ? [['tr.subs-detail[id="det-' + CSS.escape(id) + '"]:not([hidden]) > td', 'afterbegin']] : [])
+              .concat([['tr.subs-row[data-row=' + q + '] td[data-label="Details"]', 'beforeend'], ['#Results', 'beforebegin']]);
+          }
+          var svc = b.closest('.subs-service[data-service]');
+          if (svc && b.closest('.subs-key') && !b.closest('.subs-key[id]')) { return [['.subs-service[data-service="' + svc.getAttribute('data-service') + '"] .subs-result', 'beforeend']]; }
+          if (b.closest('#Editor')) { return [['#Editor:not([hidden]) .subs-editor-bar', 'afterend'], ['#Editor', 'afterend']]; }
+          return [[groupOf(b), 'afterend']];
+        }
+
+        function placeOutcomes() {
+          Array.prototype.forEach.call(page.querySelectorAll('.subs-outcome'), function (n) { n.remove(); });
+          outcomes.forEach(function (o) {
+            for (var i = 0; i < o.places.length; i++) {
+              var t = o.places[i][0];
+              var el = typeof t === 'string' ? page.querySelector(t) : t;
+              if (!el || !el.isConnected) { continue; }
+              var n = document.createElement('div');
+              n.className = 'subs-outcome' + (o.ok ? '' : ' subs-outcome-bad');
+              n.textContent = o.msg;
+              el.insertAdjacentElement(o.places[i][1], n);
+              return;
+            }
+          });
+        }
+
+        // Shows an outcome (also on its own, for a problem found before anything is sent) and announces it
+        function note(places, ok, msg) {
+          var key = places[0][0];
+          outcomes = outcomes.filter(function (o) { return o.key !== key; });
+          if (msg) {
+            var o = { key: key, places: places, ok: ok, msg: msg };
+            outcomes.push(o);
+            if (ok) { setTimeout(function () { var i = outcomes.indexOf(o); if (i >= 0) { outcomes.splice(i, 1); placeOutcomes(); } }, 6000 + 60 * msg.length); }
+            announce(msg);
+          }
+          placeOutcomes();
+        }
+
+        function busy(b, label, places) {
+          places = places || placesOf(b);
+          var g = groupOf(b);
+          note(places, true, '');
+          var others = [];
+          Array.prototype.forEach.call(g.querySelectorAll('button'), function (x) { if (!x.disabled) { x.disabled = true; others.push(x); } });
+          if (!b.disabled) { b.disabled = true; others.push(b); }
+          g.setAttribute('aria-busy', 'true');
+          var span = b.querySelector('span') || b;
+          var before = span.innerHTML;
+          span.innerHTML = '<span class="subs-spinner" aria-hidden="true"></span>' + (label ? '<span>' + esc(label) + '</span>' : '');
+          b.classList.add('subs-busy');
+          if (label) { announce(label); }
+          var finished = false;
+          return function done(ok, msg) {
+            if (finished) { return; }
+            finished = true;
+            span.innerHTML = before;
+            b.classList.remove('subs-busy');
+            others.forEach(function (x) { x.disabled = false; });
+            g.removeAttribute('aria-busy');
+            note(places, ok, msg);
+          };
+        }
+
+        // After a results action: the list is read again, then the outcome shown (202 means it was queued)
+        function settle(request, done, okMsg) {
+          var reload = function () { return loadResults().then(null, function () {}); };
+          return request.then(function (r) {
+            return reload().then(function () { done(true, r && r.status === 202 ? 'Queued — runs shortly.' : okMsg); });
+          }, function (err) {
+            return problemText(err).then(function (msg) { return reload().then(function () { done(false, msg); }); });
+          });
+        }
+
         function renderTiers(config) {
           page.querySelector('#Tiers').innerHTML = tiers.map(function (t) {
             var v = config[t[0]] || {};
@@ -603,8 +705,6 @@
           }).join('');
         }
 
-        var serviceNames = { builtin: 'Built-in', local: 'Local service', deepgram: 'Deepgram', openai: 'OpenAI' };
-
         function renderKeys(keys) {
           Array.prototype.forEach.call(page.querySelectorAll('.subs-service'), function (box) {
             var id = box.getAttribute('data-service');
@@ -612,7 +712,7 @@
             var optional = id === 'local';
             var noTest = id === 'subdl';
             if (id === 'builtin') {
-              box.querySelector('.subs-key').innerHTML = '<button is="emby-button" type="button" class="raised svc-download" hidden><span>Download now</span></button><button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button><div class="subs-result subs-muted" aria-live="polite"></div>';
+              box.querySelector('.subs-key').innerHTML = '<button is="emby-button" type="button" class="raised svc-download" hidden><span>Download now</span></button><button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button><div class="subs-result subs-muted"></div>';
               if (builtInStatus) { showBuiltInDownload(builtInStatus); }
               return;
             }
@@ -622,8 +722,9 @@
               '<button is="emby-button" type="button" class="raised svc-savekey"><span>Save key</span></button>' +
               (set ? '<button is="emby-button" type="button" class="raised button-alt svc-clearkey"><span>Clear</span></button>' : '') +
               (noTest ? '' : '<button is="emby-button" type="button" class="raised svc-test"><span>Test</span></button>') +
-              '<div class="subs-result subs-muted" aria-live="polite"></div>';
+              '<div class="subs-result subs-muted"></div>';
           });
+          placeOutcomes();
         }
 
         // This month's spending, the limit and the exchange rates behind it
@@ -686,7 +787,8 @@
         // Local services: what answers on this machine's usual ports, and how to run one
         page.querySelector('#FindLocal').addEventListener('click', function () {
           var box = page.querySelector('#LocalFound');
-          box.textContent = 'Looking on this server…';
+          box.textContent = '';
+          var finished = busy(page.querySelector('#FindLocal'), 'Looking…');
           ApiClient.getJSON(ApiClient.getUrl('Subtitles/LocalServices')).then(function (r) {
             var found = r.Found || [];
             var html = found.length
@@ -728,7 +830,8 @@
               };
               if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, manual); } else { manual(); }
             });
-          }, function () { box.textContent = 'The search couldn\'t be run.'; });
+            finished(true, found.length ? found.length + ' found.' : '');
+          }, function (err) { problemText(err).then(function (msg) { finished(false, 'The search couldn\'t be run: ' + msg); }); });
         });
 
         // Deepgram: credit balance, which key reads it, and swapping an Admin transcription key for a limited one
@@ -753,20 +856,26 @@
 
         page.querySelector('#DeepgramBalance').addEventListener('change', dgModeChanged);
         page.querySelector('#DgBillingSave').addEventListener('click', function () {
+          var b = page.querySelector('#DgBillingSave');
           var key = page.querySelector('#DgBillingInput').value.trim();
-          if (!key) { Dashboard.alert('Paste the billing key first.'); return; }
+          if (!key) { note(placesOf(b), false, 'Paste the billing key first.'); return; }
+          var done = busy(b, 'Saving…');
           ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Keys/deepgram-billing'), data: JSON.stringify({ Key: key }), contentType: 'application/json' })
-            .then(function () { page.querySelector('#DgBillingInput').value = ''; Dashboard.alert('Billing key saved. Save the settings to start showing the balance.'); return loadDeepgram(false); },
-              function (err) { problemText(err).then(Dashboard.alert); });
+            .then(function () { page.querySelector('#DgBillingInput').value = ''; return loadDeepgram(false).then(function () { done(true, 'Billing key saved. Save the settings to start showing the balance.'); }); },
+              function (err) { problemText(err).then(function (msg) { done(false, msg); }); });
         });
         page.querySelector('#DgBillingClear').addEventListener('click', function () {
-          ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/deepgram-billing') }).then(function () { return loadDeepgram(false); });
+          var done = busy(page.querySelector('#DgBillingClear'), 'Clearing…');
+          ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/deepgram-billing') })
+            .then(function () { return loadDeepgram(false).then(function () { done(true, 'Billing key cleared.'); }); },
+              function (err) { problemText(err).then(function (msg) { done(false, msg); }); });
         });
         page.querySelector('#DgLimit').addEventListener('click', function () {
           var keep = page.querySelector('#DgKeepAdmin').checked;
+          var done = busy(page.querySelector('#DgLimit'), 'Creating…');
           ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Deepgram/LimitKey'), data: JSON.stringify({ KeepForBalance: keep }), contentType: 'application/json', dataType: 'json' })
             .then(function (r) {
-              Dashboard.alert(r.Message);
+              done(!!r.Ok, r.Message);
               if (r.Ok) {
                 page.querySelector('#DgAdmin').hidden = true;
                 // The server may have changed which key reads the balance; mirror it so Save doesn't write the old value back
@@ -774,7 +883,7 @@
                 if (source) { page.querySelector('#DeepgramBalance').value = source; dgModeChanged(); }
               }
               return loadDeepgram(false);
-            }, function (err) { problemText(err).then(Dashboard.alert); });
+            }, function (err) { problemText(err).then(function (msg) { done(false, msg); }); });
         });
 
         // Whether this server can run the built-in program at all (checked before anything is downloaded)
@@ -870,24 +979,38 @@
           var box = e.target.closest('.subs-service');
           if (!box) { return; }
           var id = box.getAttribute('data-service');
-          var result = box.querySelector('.subs-result');
+          var b = e.target.closest('button');
+          var done;
+          var failed = function (err) { return problemText(err).then(function (msg) { done(false, msg); }); };
           if (e.target.closest('.svc-savekey')) {
             var key = box.querySelector('.svc-key').value.trim();
-            if (!key) { Dashboard.alert('Paste the key first.'); return; }
+            if (!key) { note(placesOf(b), false, 'Paste the key first.'); return; }
+            done = busy(b, 'Saving…');
             ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Keys/' + id), data: JSON.stringify({ Key: key }), contentType: 'application/json' })
-              .then(function () { return loadKeys().then(function () { if (id === 'deepgram') { return loadDeepgram(true); } }); }, function (err) { problemText(err).then(Dashboard.alert); });
+              .then(function () { return loadKeys().then(function () { done(true, 'Key saved.'); if (id === 'deepgram') { return loadDeepgram(true); } }); }, failed);
           } else if (e.target.closest('.svc-clearkey')) {
-            ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/' + id) }).then(loadKeys);
+            done = busy(b, 'Clearing…');
+            ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Keys/' + id) })
+              .then(function () { return loadKeys().then(function () { done(true, 'Key cleared.'); }); }, failed);
           } else if (e.target.closest('.svc-download')) {
-            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/BuiltIn/Download'), data: JSON.stringify({ Model: modelFor('builtin'), AllowBuiltInDownload: page.querySelector('#AllowBuiltInDownload').checked }), contentType: 'application/json', dataType: 'json' })
-              .then(function (st) { showBuiltInDownload(st); return loadBuiltInDownload(); }, function (err) { problemText(err).then(Dashboard.alert); });
+            done = busy(b, 'Starting…');
+            // Answered at once with 202: the download runs in the background, its progress shown above
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/BuiltIn/Download'), data: JSON.stringify({ Model: modelFor('builtin'), AllowBuiltInDownload: page.querySelector('#AllowBuiltInDownload').checked }), contentType: 'application/json' })
+              .then(function (resp) {
+                var queued = resp.status === 202;
+                return resp.json().then(function (st) {
+                  done(true, queued ? 'Queued — runs shortly; its progress shows above.' : 'Download started.');
+                  showBuiltInDownload(st);
+                  return loadBuiltInDownload();
+                });
+              }, failed);
           } else if (e.target.closest('.svc-test')) {
-            result.textContent = 'Testing ' + serviceNames[id] + '…';
+            done = busy(b, 'Testing…');
             ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/SpeechToText/Test'), data: JSON.stringify(testValues(id)), contentType: 'application/json', dataType: 'json' })
               .then(function (r) {
-                result.textContent = (r.Ok ? '✓ ' : r.Downloading ? '… ' : '✗ ') + r.Message;
+                done(!!r.Ok || !!r.Downloading, (r.Ok ? '✓ ' : r.Downloading ? '… ' : '✗ ') + r.Message);
                 if (r.Downloading) { retestAfterDownload = true; loadBuiltInDownload(); } else { loadSpending(); }
-              }, function () { result.textContent = '✗ The test couldn\'t be run.'; });
+              }, function (err) { return problemText(err).then(function (msg) { done(false, '✗ The test couldn\'t be run: ' + msg); }); });
           }
         });
 
@@ -1022,6 +1145,7 @@
           page.querySelector('#ResCount').textContent = results.items.length && results.total > results.items.length ? 'Showing ' + results.items.length + ' of ' + results.total : '';
           if (t && t.All && !results.total) { page.querySelector('#ResCount').textContent = 'Nothing matches.'; }
           refreshWarnings();
+          placeOutcomes();
         }
 
         function loadResults(append) {
@@ -1050,7 +1174,10 @@
           clearTimeout(searchTimer);
           searchTimer = setTimeout(function () { results.items = []; loadResults(false); }, 300);
         });
-        page.querySelector('#ResMore').addEventListener('click', function () { loadResults(true); });
+        page.querySelector('#ResMore').addEventListener('click', function () {
+          var done = busy(page.querySelector('#ResMore'), 'Loading…');
+          loadResults(true).then(function () { done(true); }, function (err) { return problemText(err).then(function (msg) { done(false, msg); }); });
+        });
 
         // Speech-to-text health: a banner only for a systemic problem; every failure is listed under Advanced
         var speechErrors = { items: [], next: null };
@@ -1071,10 +1198,17 @@
                 }).join('') + '</tbody></table>'
               : '<p class="subs-muted">No speech-to-text errors recently.</p>';
             page.querySelector('#SpeechErrorsMore').hidden = h.Next == null;
-          }, function () {});
+            return null;
+          }, function (err) { return { failed: err }; });
         }
 
-        page.querySelector('#SpeechErrorsMore').addEventListener('click', function () { loadSpeechHealth(true); });
+        page.querySelector('#SpeechErrorsMore').addEventListener('click', function () {
+          var done = busy(page.querySelector('#SpeechErrorsMore'), 'Loading…');
+          loadSpeechHealth(true).then(function (r) {
+            if (r && r.failed) { return problemText(r.failed).then(function (msg) { done(false, msg); }); }
+            done(true);
+          });
+        });
 
         // Subtitle editor: lines of one subtitle, edited in the page and saved together (the original is kept for Undo)
         var editor = { id: null, fingerprint: null, cues: [], shown: 150 };
@@ -1124,8 +1258,9 @@
         }
 
         // Opens the editor; with a finding, at its line, the suggested fix filled in (nothing is saved until Save)
-        function openEditor(id, focus) {
-          ApiClient.getJSON(ApiClient.getUrl('Subtitles/Editor/' + id)).then(function (v) {
+        function openEditor(id, focus, done) {
+          done = done || function () {};
+          return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Editor/' + id)).then(function (v) {
             editor = { id: v.Id, fingerprint: v.Fingerprint, cues: v.Cues, shown: 150, focus: -1 };
             page.querySelector('#EdTitle').textContent = v.Name;
             page.querySelector('#EdFile').textContent = v.File + ' · ' + v.Cues.length + ' lines';
@@ -1148,7 +1283,8 @@
             renderEditor();
             var row = editor.focus >= 0 ? page.querySelector('#EdLines tr[data-i="' + editor.focus + '"]') : null;
             (row || page.querySelector('#Editor')).scrollIntoView({ behavior: 'smooth', block: row ? 'center' : 'start' });
-          }, function (err) { problemText(err).then(Dashboard.alert); });
+            done(true);
+          }, function (err) { return problemText(err).then(function (msg) { done(false, msg); }); });
         }
 
         page.querySelector('#EdLines').addEventListener('input', function (e) {
@@ -1168,10 +1304,11 @@
           if (e.target.closest('.ed-delete')) { editor.cues.splice(i, 1); renderEditor(); return; }
           if (e.target.closest('.ed-play')) {
             var c = editor.cues[i], start = Math.max(0, c.Start - 0.3), length = Math.min(30, Math.max(0.5, c.End - c.Start + 0.6));
+            var done = busy(e.target.closest('.ed-play'), '');
             ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Subtitles/Editor/' + editor.id + '/Clip', { start: start.toFixed(3), length: length.toFixed(3) }) })
               .then(function (r) { return r.blob(); })
               .then(function (b) { var url = URL.createObjectURL(b), a = new Audio(url); a.onended = function () { URL.revokeObjectURL(url); }; return a.play(); })
-              .catch(function (err) { problemText(err).then(Dashboard.alert); });
+              .then(function () { done(true); }, function (err) { return problemText(err).then(function (msg) { done(false, msg); }); });
           }
         });
 
@@ -1192,10 +1329,14 @@
         });
         page.querySelector('#EdClose').addEventListener('click', function () { page.querySelector('#Editor').hidden = true; editor = { id: null, fingerprint: null, cues: [], shown: 150 }; });
         page.querySelector('#EdSave').addEventListener('click', function () {
-          if (page.querySelector('#EdLines .ed-bad')) { Dashboard.alert('Fix the times marked in red first (h:mm:ss.mmm).'); return; }
+          var b = page.querySelector('#EdSave');
+          if (page.querySelector('#EdLines .ed-bad')) { note(placesOf(b), false, 'Fix the times marked in red first (h:mm:ss.mmm).'); return; }
+          var done = busy(b, 'Saving…');
           ApiClient.ajax({ type: 'PUT', url: ApiClient.getUrl('Subtitles/Editor/' + editor.id), data: JSON.stringify({ Fingerprint: editor.fingerprint, Cues: editor.cues }), contentType: 'application/json', dataType: 'json' })
-            .then(function () { page.querySelector('#Editor').hidden = true; Dashboard.alert('Saved. Undo in the results brings the original back.'); return loadResults(); },
-              function (err) { problemText(err).then(Dashboard.alert); });
+            .then(function () {
+              page.querySelector('#Editor').hidden = true;
+              return loadResults().then(null, function () {}).then(function () { done(true, 'Saved. Undo in the results brings the original back.'); });
+            }, function (err) { return problemText(err).then(function (msg) { done(false, msg); }); });
         });
 
         function detailRowOf(id) { return page.querySelector('tr.subs-detail[id="det-' + String(id).replace(/[^0-9a-zA-Z_-]/g, '') + '"]'); }
@@ -1213,6 +1354,7 @@
               toggle.setAttribute('aria-expanded', String(!!results.open[tid]));
               toggle.textContent = results.open[tid] ? '▾' : '▸';
               toggle.closest('tr').classList.toggle('subs-open', !!results.open[tid]);
+              placeOutcomes();
             }
             return;
           }
@@ -1221,64 +1363,58 @@
             var mid = more.getAttribute('data-id');
             results.allFindings[mid] = true;
             var owner = results.byId[mid];
-            if (owner) { detailRowOf(mid).firstElementChild.innerHTML = detail(owner.Result, owner.View); }
+            if (owner) { detailRowOf(mid).firstElementChild.innerHTML = detail(owner.Result, owner.View); placeOutcomes(); }
             return;
           }
           var edit = e.target.closest('.res-edit');
-          if (edit) { openEditor(edit.getAttribute('data-id')); return; }
+          if (edit) { openEditor(edit.getAttribute('data-id'), null, busy(edit, 'Opening…')); return; }
           var fd = e.target.closest('.fd-apply, .fd-decline, .fd-edit');
           if (fd) {
             var rid = fd.getAttribute('data-id'), index = parseInt(fd.getAttribute('data-index'), 10), time = fd.getAttribute('data-time');
             if (fd.classList.contains('fd-edit')) {
               var found = results.byId[rid];
-              openEditor(rid, found && found.Result.Findings[index]);
+              openEditor(rid, found && found.Result.Findings[index], busy(fd, 'Opening…'));
               return;
             }
-            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + rid + '/Findings/' + index + '/' + (fd.classList.contains('fd-apply') ? 'Apply' : 'Decline'), { time: time }) })
-              .then(function () { return loadResults(); }, function (err) { return problemText(err).then(function (msg) { Dashboard.alert(msg); return loadResults(); }); });
+            var applying = fd.classList.contains('fd-apply');
+            settle(ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + rid + '/Findings/' + index + '/' + (applying ? 'Apply' : 'Decline'), { time: time }) }),
+              busy(fd, applying ? 'Applying…' : 'Declining…'), applying ? 'Applied.' : 'Declined.');
             return;
           }
           var whole = e.target.closest('.res-whole');
           if (whole) {
-            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + whole.getAttribute('data-id') + '/CheckWholeFile') })
-              .then(function () {
-                Dashboard.alert('Queued: it is compared with a full transcript on the next run of Scheduled Tasks → Shoal → Generate missing subtitles and check whole files (daily at 05:00), or now with Run full transcripts now. That can take a while on the built-in speech-to-text.');
-                page.querySelector('#GenerateNow').hidden = false;
-                return loadResults();
-              }, function (err) { return problemText(err).then(function (msg) { Dashboard.alert(msg); return loadResults(); }); });
+            var wholeDone = busy(whole, 'Queuing…');
+            settle(ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + whole.getAttribute('data-id') + '/CheckWholeFile') })
+              .then(function (r) { page.querySelector('#GenerateNow').hidden = false; return r; }), wholeDone,
+              'Queued: it is compared with a full transcript on the next run of Scheduled Tasks → Shoal → Generate missing subtitles and check whole files (daily at 05:00), or now with Run full transcripts now. That can take a while on the built-in speech-to-text.');
             return;
           }
           var rerun = e.target.closest('.res-rerun');
           if (rerun) {
             var label = rerun.textContent;
-            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + rerun.getAttribute('data-id') + '/Rerun') })
-              .then(function () {
-                announce(label + ': queued for the next check.');
-                Dashboard.alert(label + ': queued. It is checked again on the next run of Scheduled Tasks → Shoal → Check and sync subtitles, or now with Check now.');
-                return loadResults();
-              }, function (err) { return problemText(err).then(function (msg) { Dashboard.alert(msg); return loadResults(); }); });
+            settle(ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + rerun.getAttribute('data-id') + '/Rerun') }), busy(rerun, 'Queuing…'),
+              label + ': queued. It is checked again on the next run of Scheduled Tasks → Shoal → Check and sync subtitles, or now with Check now.');
             return;
           }
           var b = e.target.closest('.res-apply, .res-undo, .res-decline, .res-check');
           if (!b) { return; }
           var verb = b.classList.contains('res-apply') ? 'Apply' : b.classList.contains('res-decline') ? 'Decline' : b.classList.contains('res-check') ? 'CheckAgain' : 'Undo';
-          ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + b.getAttribute('data-id') + '/' + verb) })
-            .then(function () { return loadResults(); }, function (err) {
-              return problemText(err).then(function (msg) { Dashboard.alert(msg); return loadResults(); });
-            });
+          var words = { Apply: ['Applying…', 'Applied.'], Decline: ['Declining…', 'Declined.'], CheckAgain: ['Queuing…', 'Queued for the next run.'], Undo: ['Undoing…', 'Undone: the original is back.'] }[verb];
+          settle(ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + b.getAttribute('data-id') + '/' + verb) }), busy(b, words[0]), words[1]);
         });
 
         // Results are refreshed every 10 s while the task runs (for at most an hour), then once more when it ends
         var polling = null;
 
-        function runTask(key, label) {
+        function runTask(key, label, b) {
+          var done = busy(b, 'Starting…');
           ApiClient.getScheduledTasks().then(function (tasks) {
             var task = tasks.filter(function (t) { return t.Key === key; })[0];
-            if (!task) { Dashboard.alert('The ' + label + ' task was not found.'); return; }
+            if (!task) { done(false, 'The ' + label + ' task was not found.'); return; }
             return ApiClient.startScheduledTask(task.Id).then(function () {
               var summary = page.querySelector('#ResultsSummary');
               summary.textContent = label + '… results appear here as they come in.';
-              announce(label + ' started. Results appear as they come in.');
+              done(true, label + ' started. Results appear as they come in.');
               if (polling) { clearInterval(polling); }
               var started = Date.now(), timer;
               var stop = function () { clearInterval(timer); if (polling === timer) { polling = null; } };
@@ -1298,19 +1434,21 @@
                 }, function () { stop(); return loadResults(); });
               }, 10000);
             });
-          });
+          }).catch(function (err) { return problemText(err).then(function (msg) { done(false, msg); }); });
         }
 
         // Restore all originals: a count first, then a confirmation, then batches until done (each batch is capped)
         page.querySelector('#RestoreStart').addEventListener('click', function () {
           var out = page.querySelector('#RestoreProgress');
           out.textContent = '';
+          var done = busy(page.querySelector('#RestoreStart'), 'Counting…');
           ApiClient.getJSON(ApiClient.getUrl('Subtitles/RestoreAll')).then(function (p) {
+            done(true);
             if (!p.ToRestore && !p.ToRemove) { out.textContent = 'Nothing to restore: no file holds this plugin\'s changes.'; return; }
             page.querySelector('#RestorePlan').textContent = 'This puts back the original of ' + p.ToRestore + ' changed subtitle file' + (p.ToRestore === 1 ? '' : 's') +
               ' and removes ' + p.ToRemove + ' subtitle' + (p.ToRemove === 1 ? '' : 's') + ' this plugin added or generated. Files changed since are left alone and listed. Go ahead?';
             page.querySelector('#RestoreConfirm').hidden = false;
-          }, function (err) { problemText(err).then(Dashboard.alert); });
+          }, function (err) { problemText(err).then(function (msg) { done(false, msg); }); });
         });
         page.querySelector('#RestoreCancel').addEventListener('click', function () { page.querySelector('#RestoreConfirm').hidden = true; });
         // What restoring has done so far; the files left alone are listed a page at a time
@@ -1329,9 +1467,10 @@
           if (e.target.closest('.restore-more') && restoreView) { restoreView.limit += skippedShown; showRestore(); }
         });
 
+        // The confirmation stays up, its button busy, until every batch is done
         page.querySelector('#RestoreGo').addEventListener('click', function () {
-          page.querySelector('#RestoreConfirm').hidden = true;
-          var out = page.querySelector('#RestoreProgress');
+          var confirm = page.querySelector('#RestoreConfirm');
+          var done = busy(page.querySelector('#RestoreGo'), 'Restoring…', [[page.querySelector('#RestoreProgress'), 'afterend']]);
           restoreView = { total: { Restored: 0, Removed: 0, AlreadyGone: 0, Skipped: [] }, left: '…', done: false, limit: skippedShown };
           var total = restoreView.total;
           var step = function (after) {
@@ -1346,12 +1485,14 @@
             });
           };
           showRestore();
-          step(null).catch(function (err) { problemText(err).then(function (msg) { out.textContent = msg || 'The restore stopped; what was done so far is kept. Try again to carry on.'; }); });
+          step(null).then(function () { confirm.hidden = true; done(true, 'Restore all originals finished.'); }, function (err) {
+            return problemText(err).then(function (msg) { confirm.hidden = true; done(false, 'The restore stopped: ' + msg + ' What was done so far is kept; try again to carry on.'); });
+          });
         });
 
-        page.querySelector('#RunNow').addEventListener('click', function () { runTask('ShoalSubtitlesSync', 'Checking subtitles'); });
-        page.querySelector('#FindNow').addEventListener('click', function () { runTask('ShoalSubtitlesFind', 'Finding missing subtitles'); });
-        page.querySelector('#GenerateNow').addEventListener('click', function () { runTask('ShoalSubtitlesGenerate', 'Running full transcripts'); });
+        page.querySelector('#RunNow').addEventListener('click', function () { runTask('ShoalSubtitlesSync', 'Checking subtitles', this); });
+        page.querySelector('#FindNow').addEventListener('click', function () { runTask('ShoalSubtitlesFind', 'Finding missing subtitles', this); });
+        page.querySelector('#GenerateNow').addEventListener('click', function () { runTask('ShoalSubtitlesGenerate', 'Running full transcripts', this); });
 
         // Generating needs the Full transcript speech-to-text: switching generation on switches it on too
         ['#GenerateMissing', '#CheckWholeFile'].forEach(function (sel) {
@@ -1450,7 +1591,7 @@
 
         page.querySelector('#SubtitlesConfigForm').addEventListener('submit', function (e) {
           e.preventDefault();
-          Dashboard.showLoadingMsg();
+          var done = busy(page.querySelector('#SubtitlesConfigForm > .subs-button-row button[type="submit"]'), 'Saving…');
           ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             config.Enabled = page.querySelector('#Enabled').checked;
             config.Languages = page.querySelector('#Languages').value.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0 && s.length <= 40; });
@@ -1513,8 +1654,8 @@
                 Model: row.querySelector('.tier-model').value.trim()
               };
             });
-            ApiClient.updatePluginConfiguration(pluginId, config).then(function (r) { Dashboard.processPluginConfigurationUpdateResult(r); loadDeepgram(false); loadLibraries(); });
-          });
+            return ApiClient.updatePluginConfiguration(pluginId, config).then(function (r) { Dashboard.processPluginConfigurationUpdateResult(r); done(true, 'Saved.'); loadDeepgram(false); loadLibraries(); });
+          }).catch(function (err) { return problemText(err).then(function (msg) { done(false, 'Not saved: ' + msg); }); });
           return false;
         });
       })();

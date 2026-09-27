@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Buttons show progress while they work.** Every button that asks the server for something (Save, the key and Test
+  buttons, Find a local service, Download now, Check now and the other run buttons, the actions on each result and
+  each line to review, the editor's Save and ▶, Restore all originals and its confirmation, Show more, and creating a
+  transcription-only Deepgram key) is disabled while it runs, with a small spinner and a label such as "Saving…" or
+  "Applying…" (a still "…" when reduced motion is set). The outcome is shown next to it afterwards instead of in a
+  pop-up: a success for a few seconds, a problem until the next try. Something the server only queues says "Queued —
+  runs shortly". Screen readers hear both.
+
 ## [0.16.2-alpha] - 2026-09-27
 
 ### Fixed
