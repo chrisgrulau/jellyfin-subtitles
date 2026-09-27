@@ -28,6 +28,29 @@ All notable changes to this project are documented here. The format follows
   (the latest job), `POST Subtitles/Results/Bulk/Preview` (counts per action), and
   `POST Subtitles/Results/{id}/Findings/Apply` and `…/Findings/Decline`.
 
+### Changed
+
+- **The whole-file check flags far fewer lines that aren't wrong.** It was tuned on real films and episodes whose
+  subtitles were known to be good: from about 54 findings an hour to about 2, many of those left being real faults
+  (such as digits split by text recognition, "Level 1 4"), while finding as many of a set of deliberate mistakes as
+  before (43 of 59, was 44). The details and numbers are in the design notes.
+  - Numbers and negations count only when added, dropped or changed among words that otherwise match: a clause the
+    subtitle leaves out, a word said twice, "No," on its own, or speech-to-text hearing an invented word as "a
+    billion" no longer flags a line. A negation the line has but wasn't heard is judged by the confidence of the words
+    heard in its place.
+  - A name counts only when a name the subtitle uses elsewhere (or one spelled like it) is heard in the place of
+    another, so speech-to-text's own spellings of invented names aren't flagged.
+  - Missing lines need 4 different words over at least 1 second (was 4 words over 1.5 s): chanting and laughter are
+    left alone, and so is a run of them close together (a song or a radio). Lines with nothing heard need 8 words (was
+    3) and heard lines either side; lines whose words differ need 5 different words, over 60 % of what was heard (was
+    4, over half).
+  - Times, money and codes written differently ("6:00" / "6 a.m.", "$40,000" split by the service, "XR-7" / "XR7"),
+    doubled apostrophes ("don'’t") and dropped g's ("nothin'") are read alike.
+  - The starting confidence threshold for the built-in, local and OpenAI Whisper services is 0.80 (was 0.74).
+- **A tool to calibrate the whole-file check** (`tools/DiscrepancyEval`, not part of the plugin): it transcribes a list
+  of videos once with a local OpenAI-compatible service, compares their subtitles under a grid of settings, makes
+  damaged copies with known mistakes, and reports findings per hour and what was found.
+
 ## [0.16.3-alpha] - 2026-09-27
 
 ### Changed

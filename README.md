@@ -161,14 +161,17 @@ A subtitle that looks doubtful can be compared, line by line, with a full transc
   AI wording audit flagged lines; and any you pick with **Check whole file** in the results (even with the switch off).
   Never generated subtitles (they are the transcript), translations matched by meaning, or subtitles in a language other
   than the audio's (or not among your subtitle languages); **Check whole file** says so when you pick one.
-- **What it finds:** lines heard but missing from the subtitle (at least 4 words over 1.5 seconds with no line shown);
-  lines with nothing heard around them (sound descriptions, music and short interjections are left alone); and lines
-  whose names, numbers or negations ("not", "never", "no" …) differ from what is said, or that leave out most of what
-  is said. Case, punctuation, contractions ("don't" / "do not") and numbers in digits or words ("25" / "twenty-five")
-  don't count as differences, and the subtitle's timing may be off by up to 3 seconds (a correction waiting for review
-  is allowed for). If too little of the subtitle is heard, or too many lines have nothing heard, the transcript is taken
-  to be at fault and nothing is flagged.
-- **Confidence:** words the speech-to-text wasn't sure of don't flag anything: below 0.90 for Deepgram, 0.74 for the
+- **What it finds:** lines heard but missing from the subtitle (at least 4 different words over a second with no line
+  shown; chants, laughter and a run of sung or broadcast lines are left alone); lines of 8 or more words with nothing
+  heard around them while the lines either side were heard; lines where a number or negation ("not", "never" …) is
+  added, dropped or changed among words that otherwise match, or where a character's name is heard in the place of
+  another the subtitle uses; and lines that leave out most of what is said. Case, punctuation, contractions ("don't" /
+  "do not"), numbers in digits or words ("25" / "twenty-five") and times ("6:00" / "6 a.m.") don't count as differences,
+  and the subtitle's timing may be off by up to 3 seconds (a correction waiting for review is allowed for). If too
+  little of the subtitle is heard, or too many lines have nothing heard, the transcript is taken to be at fault and
+  nothing is flagged. The rules were tuned on real films and episodes so that good subtitles get about two findings an
+  hour, many of them real faults such as digits split by text recognition ("Level 1 4").
+- **Confidence:** words the speech-to-text wasn't sure of don't flag anything: below 0.90 for Deepgram, 0.80 for the
   Whisper-based services (the built-in, local and OpenAI). With **Tune confidence thresholds automatically** (off by
   default), each service and model learns a stricter threshold from subtitles already known to be good; it never goes
   below those starting points. With the AI plugin, lines whose wording differs can also be confirmed by it (within the

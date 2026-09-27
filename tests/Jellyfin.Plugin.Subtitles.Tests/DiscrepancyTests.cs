@@ -16,7 +16,7 @@ public sealed class DiscrepancyTests
     [
         (1, "Good morning, everyone."),
         (5, "The train leaves at noon."),
-        (9, "Did you pack the blue suitcase?"),
+        (9, "Did Margaret pack the blue suitcase?"),
         (13, "I left it by the door."),
         (17, "Then we should hurry up."),
         (21, "Tell Katherine to wait outside."),
@@ -144,7 +144,7 @@ public sealed class DiscrepancyTests
     [Fact]
     public void A_line_missing_most_of_what_is_heard_differs_in_words()
     {
-        var heard = Said(Script.Where((_, i) => i != 4)).Concat(Said([(17, "Then we should hurry up because my brother refuses every single delay.")], step: 0.16)).OrderBy(w => w.Start).ToList();
+        var heard = Said(Script.Where((_, i) => i != 4)).Concat(Said([(17, "Then we should hurry up because my older brother refuses every single delay.")], step: 0.16)).OrderBy(w => w.Start).ToList();
         var report = Find(Subtitle(Script), heard);
         var f = Assert.Single(report.Findings);
         Assert.Equal(DiscrepancyFinder.Words, f.Kind);
@@ -165,10 +165,10 @@ public sealed class DiscrepancyTests
     }
 
     [Fact]
-    public void A_line_with_nothing_heard_is_extra_but_sound_descriptions_music_and_interjections_are_not()
+    public void A_line_with_nothing_heard_is_extra_but_sound_descriptions_music_and_short_lines_are_not()
     {
-        var file = Subtitle([.. Script, (45, "This line was never spoken aloud."), (50, "[door slams]"), (55, "♪ la la la la ♪"), (60, "Hey!")]);
-        var report = Find(file, Said(Script));
+        var file = Subtitle([.. Script, (45, "This whole line was never actually spoken aloud by anyone."), (50, "Right, off we go then."), (55, "[door slams]"), (60, "♪ la la la la ♪"), (65, "Hey, where are you going?")]);
+        var report = Find(file, Said([.. Script, (50, "Right, off we go then.")]));
         var f = Assert.Single(report.Findings);
         Assert.Equal(DiscrepancyFinder.Extra, f.Kind);
         Assert.Equal(10, f.Cue);
@@ -255,6 +255,81 @@ public sealed class DiscrepancyTests
         var f = Assert.Single(report.Findings);
         Assert.Equal(1234, f.Cue);
         Assert.Equal(DiscrepancyFinder.Number, f.Kind);
+    }
+
+    [Fact]
+    public void A_clause_left_out_or_a_negation_said_twice_is_not_a_negation_difference()
+    {
+        // The subtitle condenses: a clause with "not" in it, and a stammered "don't", aren't in the line
+        var heard = Said(With(3, "I left it by the door, it was not locked.", With(7, "We can make it, don't, don't worry, in time.")));
+        var file = Subtitle(With(7, "We can make it, don't worry, in time."));
+        Assert.DoesNotContain(Find(file, heard).Findings, f => f.Kind == DiscrepancyFinder.Negation);
+
+        // A "No," on its own is an interjection
+        Assert.Empty(Find(Subtitle(Script), Said(With(4, "No, then we should hurry up."))).Findings);
+
+        // But a "not" dropped from between matching words is flagged
+        var f = Assert.Single(Find(Subtitle(With(3, "I did leave it by the door.")), Said(With(3, "I did not leave it by the door."))).Findings);
+        Assert.Equal(DiscrepancyFinder.Negation, f.Kind);
+    }
+
+    [Fact]
+    public void A_negation_the_line_has_is_judged_by_the_confidence_of_the_words_heard_in_its_place()
+    {
+        var heard = Said(With(3, "I have left it by the door."));
+        heard = [.. heard.Select(w => w.Text == "have" ? w with { Confidence = 0.6 } : w)];
+        var file = Subtitle(With(3, "I haven't left it by the door."));
+        var report = Find(file, heard, minConfidence: 0.8);
+        Assert.Empty(report.Findings);
+        Assert.Equal(1, report.Suppressed);
+        Assert.Equal(DiscrepancyFinder.Negation, Assert.Single(Find(file, [.. heard.Select(w => w with { Confidence = 0.95 })], minConfidence: 0.8).Findings).Kind);
+    }
+
+    [Fact]
+    public void A_number_heard_in_the_place_of_a_word_is_not_a_difference()
+    {
+        // Speech-to-text hears an invented word as a number; "one" alone is as often a pronoun
+        var file = Subtitle(With(3, "I left it by the Vellian door.", With(8, "Nobody saw the old one.")));
+        var heard = Said(With(3, "I left it by the billion door.", With(8, "Nobody saw the old map.")));
+        Assert.Empty(Find(file, heard).Findings);
+    }
+
+    [Fact]
+    public void Numbers_and_times_written_differently_are_not_differences()
+    {
+        var file = Subtitle(With(1, "The train leaves at 6:00 A.M.", With(6, "I have $40,000 in XR-7 tickets.")));
+        var heard = Said(With(1, "The train leaves at 6 a .m.", With(6, "I have $40 ,000 in XR7 tickets.")));
+        Assert.Empty(Find(file, heard).Findings);
+        Assert.Equal(["we", "do", "not", "have", "nothing"], Norms("We don'’t have nothin'."));
+    }
+
+    [Fact]
+    public void A_name_counts_only_when_the_heard_name_is_one_the_subtitle_uses()
+    {
+        // Speech-to-text spells an invented name its own way: not flagged
+        Assert.Empty(Find(Subtitle(With(5, "Tell Kyrell to wait outside.")), Said(With(5, "Tell Carol to wait outside."))).Findings);
+
+        // Another character's name (as the subtitle spells it, or spelled like it) is
+        Assert.Equal(DiscrepancyFinder.Name, Assert.Single(Find(Subtitle(Script), Said(With(5, "Tell Margret to wait outside."))).Findings).Kind);
+    }
+
+    [Fact]
+    public void Chanting_and_a_run_of_sung_lines_are_not_missing_lines()
+    {
+        var chant = Said([.. Script, (41, "Whoop, whoop, whoop, whoop, whoop, whoop!")]);
+        Assert.Empty(Find(Subtitle(Script), chant).Findings);
+
+        var song = Said([.. Script, (42, "The river runs slow when the evening falls"), (47, "And the moon came up over the river"), (52, "Oh my darling, won't you come home")]);
+        Assert.Empty(Find(Subtitle(Script), song).Findings);
+    }
+
+    [Fact]
+    public void A_run_of_lines_with_nothing_heard_is_not_flagged()
+    {
+        // Speech-to-text missed a noisy stretch: two long lines in a row with nothing heard
+        var lines = Script.Concat([(41.0, "Get down, everybody, get down on the floor right now!"), (45.0, "Keep your hands where I can see them, all of you."), (49.0, "Everyone stay calm and nobody gets hurt today.")]).ToArray();
+        var report = Find(Subtitle(lines), Said([.. Script, (49, "Everyone stay calm and nobody gets hurt today.")]));
+        Assert.Empty(report.Findings);
     }
 
     [Fact]

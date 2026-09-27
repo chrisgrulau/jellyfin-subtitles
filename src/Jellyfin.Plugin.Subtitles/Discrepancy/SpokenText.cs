@@ -18,7 +18,8 @@ namespace Jellyfin.Plugin.Subtitles.Discrepancy;
 /// <param name="LastWord">The position of the last source word it came from (a number said in several words).</param>
 /// <param name="Name">Whether it is written with a capital where a sentence doesn't start (a name, most likely).</param>
 /// <param name="Number">Whether it is a number.</param>
-/// <param name="Negation">Whether it is a negation (<c>not</c>, <c>never</c>, <c>no</c> …).</param>
+/// <param name="Negation">Whether it is a negation (<c>not</c>, <c>never</c>, <c>no</c> …; a "no" on its own, followed by
+/// a comma or a stop, is an interjection, not a negation).</param>
 public sealed record SpokenToken(string Norm, string Surface, int Word, int LastWord, bool Name, bool Number, bool Negation);
 
 /// <summary>
@@ -36,6 +37,8 @@ public static partial class SpokenText
     {
         "not", "no", "never", "nothing", "nobody", "none", "neither", "nor", "nowhere",
     };
+
+    private static readonly HashSet<string> Titles = new(StringComparer.OrdinalIgnoreCase) { "Mr.", "Mrs.", "Ms.", "Dr.", "St.", "Prof.", "Sgt.", "Lt.", "Capt.", "Col." };
 
     private static readonly Dictionary<string, string[]> Whole = new(StringComparer.Ordinal)
     {
@@ -158,7 +161,13 @@ public static partial class SpokenText
         var sentenceStart = true;
         for (var w = 0; w < words.Count; w++)
         {
+            // Times: "6:00" (or "6.00") is said "six", "9:30" and "9.30" are the same two numbers; "XR-7" is one word,
+            // whether written with a hyphen or heard without
             var word = (words[w] ?? string.Empty).Replace('’', '\'').Replace('‘', '\'');
+            word = LetterDigitHyphen().Replace(ClockTime().Replace(WholeHour().Replace(word, "$1"), "$1 $2"), string.Empty);
+
+            // A doubled apostrophe ("don'’t", a common encoding slip) is one; a dropped g ("nothin'") is spelled out
+            word = DroppedG().Replace(Apostrophes().Replace(word, "'"), "$1g");
             var parts = WordPattern().Matches(word).Select(m => m.Value).ToList();
             var ends = EndsClause(word);
             for (var p = 0; p < parts.Count; p++)
@@ -186,7 +195,7 @@ public static partial class SpokenText
             sentenceStart = EndsSentence(word) || (parts.Count == 0 && sentenceStart);
         }
 
-        return english ? JoinNumbers(raw) : [.. raw.Select(r => Token(r.Norm, r.Surface, r.Word, r.Word, r.Name))];
+        return english ? JoinNumbers(raw) : [.. raw.Select(r => Token(r.Norm, r.Surface, r.Word, r.Word, r.Name, false))];
     }
 
     /// <summary>
@@ -197,10 +206,10 @@ public static partial class SpokenText
     public static string Normalise(string word)
         => string.Concat(Split((word ?? string.Empty).Replace('’', '\'').Trim('\'', '.', ','), false).Select(p => p.Norm));
 
-    private static SpokenToken Token(string norm, string surface, int word, int last, bool name)
+    private static SpokenToken Token(string norm, string surface, int word, int last, bool name, bool alone)
     {
         var number = IsDigits(norm);
-        return new SpokenToken(norm, surface, word, last, name && !number, number, Negations.Contains(norm));
+        return new SpokenToken(norm, surface, word, last, name && !number, number, Negations.Contains(norm) && !(alone && norm == "no"));
     }
 
     // A word's parts: an English contraction split into its words; digits with separators joined ("1,000" is "1000")
@@ -264,7 +273,7 @@ public static partial class SpokenText
                 continue;
             }
 
-            result.Add(Token(raw[i].Norm, raw[i].Surface, raw[i].Word, raw[i].Word, raw[i].Name));
+            result.Add(Token(raw[i].Norm, raw[i].Surface, raw[i].Word, raw[i].Word, raw[i].Name, raw[i].Ends));
             i++;
         }
 
@@ -372,6 +381,12 @@ public static partial class SpokenText
     private static bool EndsSentence(string word)
     {
         var bare = word.TrimEnd('"', '\'', '”', '’', ')', ']');
+        if (Titles.Contains(bare))
+        {
+            // "Mr. Hale": a title's stop doesn't end the sentence
+            return false;
+        }
+
         return bare.EndsWith('.') || bare.EndsWith('?') || bare.EndsWith('!') || bare.EndsWith('…') || bare.EndsWith(':')
             || bare.EndsWith('。') || bare.EndsWith('？') || bare.EndsWith('！');
     }
@@ -383,7 +398,7 @@ public static partial class SpokenText
     }
 
     // Sound descriptions, music notes and upper-case speaker labels ("JOHN:") aren't spoken
-    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|[♪♫]|^\s*-?\s*[A-Z][A-Z .'\-]{1,24}:", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|[♪♫]|^\s*-?\s*[A-Z][A-Z .&'\-]{1,24}:", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
     private static partial Regex NotSpoken();
 
     [GeneratedRegex(@"[\p{L}\p{M}\p{Nd}]+(?:['.,][\p{L}\p{M}\p{Nd}]+)*'?", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
@@ -391,4 +406,19 @@ public static partial class SpokenText
 
     [GeneratedRegex(@"^\d{1,3}(?:,\d{3})+(?:\.\d+)?$|^\d+(?:\.\d+)?$", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex NumberPattern();
+
+    [GeneratedRegex(@"'{2,}", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex Apostrophes();
+
+    [GeneratedRegex(@"(\p{L}{2,}in)'(?!\p{L})", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex DroppedG();
+
+    [GeneratedRegex(@"\b(\d{1,2})[:.]00\b", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex WholeHour();
+
+    [GeneratedRegex(@"\b(\d{1,2})[:.]([0-5]\d)\b", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex ClockTime();
+
+    [GeneratedRegex(@"(?<=\p{Lu})-(?=\d)", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex LetterDigitHyphen();
 }

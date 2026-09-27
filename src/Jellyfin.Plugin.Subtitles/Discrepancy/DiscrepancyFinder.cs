@@ -24,19 +24,21 @@ public sealed record DiscrepancyOptions
     public string? Language { get; init; }
 
     /// <summary>Gets the shortest heard stretch, in seconds, that counts as a missing line.</summary>
-    public double MissingMinSeconds { get; init; } = 1.5;
+    public double MissingMinSeconds { get; init; } = 1.0;
 
-    /// <summary>Gets the fewest heard words that count as a missing line.</summary>
+    /// <summary>Gets the fewest heard words (different words, with <see cref="Distinct"/>) that count as a missing line.</summary>
     public int MissingMinWords { get; init; } = 4;
 
     /// <summary>Gets the share of a line's heard words missing from it above which its words differ.</summary>
-    public double MissingWordRatio { get; init; } = 0.5;
+    public double MissingWordRatio { get; init; } = 0.6;
 
-    /// <summary>Gets the fewest heard words missing from a line for its words to differ.</summary>
-    public int MissingWordsMin { get; init; } = 4;
+    /// <summary>Gets the fewest heard words (different words, with <see cref="Distinct"/>) missing from a line for its words
+    /// to differ.</summary>
+    public int MissingWordsMin { get; init; } = 5;
 
-    /// <summary>Gets the fewest spoken words a line needs to be flagged as having nothing heard (shorter ones are interjections).</summary>
-    public int MinExtraWords { get; init; } = 3;
+    /// <summary>Gets the fewest spoken words a line needs to be flagged as having nothing heard (speech-to-text often misses
+    /// short, shouted or overlapping lines).</summary>
+    public int MinExtraWords { get; init; } = 8;
 
     /// <summary>Gets the share of the subtitle's words that must be found in the transcript for any comparison to count.</summary>
     public double MinShared { get; init; } = 0.25;
@@ -46,6 +48,27 @@ public sealed record DiscrepancyOptions
 
     /// <summary>Gets the stretches of audio the transcript covers (seconds), or <c>null</c> for the whole video.</summary>
     public IReadOnlyList<(double Start, double End)>? Coverage { get; init; }
+
+    /// <summary>Gets a value indicating whether a number or negation counts only when it is added, dropped or replaced
+    /// between words the line and the transcript share (see <see cref="DiscrepancyFinder"/>), rather than anywhere in the
+    /// line: a clause the subtitle leaves out, or a word said twice, isn't a difference.</summary>
+    public bool Anchored { get; init; } = true;
+
+    /// <summary>Gets a value indicating whether a name counts only when a name is heard in the place of another name and
+    /// the heard name is one the subtitle uses elsewhere, rather than when either word is a name: speech-to-text spells
+    /// invented names its own way ("Kyrell" heard as "Carol"), but a line that names the wrong character names one the
+    /// subtitle knows.</summary>
+    public bool KnownNames { get; init; } = true;
+
+    /// <summary>Gets a value indicating whether heard words are counted once each for <see cref="MissingWordsMin"/> and
+    /// <see cref="MissingMinWords"/>, so chanting, laughter and repeats ("whoop, whoop, whoop …") aren't lines.</summary>
+    public bool Distinct { get; init; } = true;
+
+    /// <summary>Gets a value indicating whether lines with nothing heard and missing lines count only on their own: a line
+    /// with nothing heard only when the spoken lines either side of it were heard (a run of them is speech-to-text missing a
+    /// noisy stretch), and a missing line only with at most one other within a minute either side (a run of them is a song
+    /// or a radio that subtitles leave out).</summary>
+    public bool Isolated { get; init; } = true;
 }
 
 /// <summary>
@@ -129,6 +152,10 @@ public static partial class DiscrepancyFinder
     private const double RunGap = 1.0;
     private const double OffsetWindow = 60;
     private const double LongestLine = 30;
+    private const double ClusterWindow = 60;
+
+    // The fewest spoken words a line with nothing heard needs to count towards blaming the transcript
+    private const int UnheardWords = 3;
 
     /// <summary>
     /// Compares a subtitle with a transcript.
@@ -144,7 +171,7 @@ public static partial class DiscrepancyFinder
         ArgumentNullException.ThrowIfNull(transcript);
         ArgumentNullException.ThrowIfNull(toAudio);
         var o = options ?? new DiscrepancyOptions();
-        var words = TranscriptCues.SpeechWords(transcript);
+        var words = Rejoin(TranscriptCues.SpeechWords(transcript));
         var heard = SpokenText.Tokens([.. words.Select(w => w.Text)], o.Language, SpokenText.CapitalsMarkNames(words.Select(w => w.Text), o.Language));
         var h = new Heard(words, heard);
         var lines = Lines(file, toAudio, o.Language);
@@ -194,7 +221,9 @@ public static partial class DiscrepancyFinder
         }
 
         var extras = new List<LineDiscrepancy>();
+        var known = lines.SelectMany(x => x.Tokens).Where(t => t.Name).Select(t => t.Norm).ToHashSet(StringComparer.Ordinal);
         var speechLines = 0;
+        var unheard = 0;
         for (var l = 0; l < lines.Count; l++)
         {
             var line = lines[l];
@@ -206,7 +235,8 @@ public static partial class DiscrepancyFinder
             speechLines++;
             if (byLine[l].Count == 0)
             {
-                if (line.Words >= o.MinExtraWords)
+                unheard += line.Words >= UnheardWords ? 1 : 0;
+                if (line.Words >= o.MinExtraWords && (!o.Isolated || Isolated(lines, l, byLine, covered)))
                 {
                     extras.Add(new LineDiscrepancy(Extra, line.Index, line.B0, line.B1, string.Empty, null, string.Create(CultureInfo.InvariantCulture, $"Nothing was heard during this line or within {o.Tolerance:0.#} s of it: it may be extra, or belong elsewhere."), null));
                 }
@@ -214,7 +244,7 @@ public static partial class DiscrepancyFinder
                 continue;
             }
 
-            var (finding, flagged, dropped) = Differs(file, lines, l, byLine, h, o);
+            var (finding, flagged, dropped) = Differs(file, lines, l, byLine, h, o, known);
             suppressed += dropped;
             if (finding is not null)
             {
@@ -230,13 +260,14 @@ public static partial class DiscrepancyFinder
             }
         }
 
-        if (extras.Count > Math.Max(3, o.MaxExtraShare * speechLines))
+        if (unheard > Math.Max(3, o.MaxExtraShare * speechLines))
         {
-            return new DiscrepancyReport([], [], 0, shared, string.Create(CultureInfo.InvariantCulture, $"{extras.Count} of {speechLines} lines had nothing heard at their time, which points to the transcript (music, noise, another audio track) rather than the subtitle; nothing flagged."));
+            return new DiscrepancyReport([], [], 0, shared, string.Create(CultureInfo.InvariantCulture, $"{unheard} of {speechLines} lines had nothing heard at their time, which points to the transcript (music, noise, another audio track) rather than the subtitle; nothing flagged."));
         }
 
         findings.AddRange(extras);
-        foreach (var missing in MissingRuns(lines, assigned, h, o))
+        var runs = MissingRuns(lines, assigned, h, o).ToList();
+        foreach (var missing in runs.Where(m => !o.Isolated || runs.Count(x => Math.Abs(x.AudioStart - m.AudioStart) <= ClusterWindow) <= 2))
         {
             if (missing.Confidence is { } c && c < o.MinConfidence)
             {
@@ -558,7 +589,7 @@ public static partial class DiscrepancyFinder
 
     private static double Distance(Line line, double at) => at < line.B0 ? line.B0 - at : at > line.B1 ? at - line.B1 : 0;
 
-    private static (LineDiscrepancy? Finding, HashSet<int> Flagged, int Suppressed) Differs(SubtitleDocument file, List<Line> lines, int l, List<int>[] byLine, Heard h, DiscrepancyOptions o)
+    private static (LineDiscrepancy? Finding, HashSet<int> Flagged, int Suppressed) Differs(SubtitleDocument file, List<Line> lines, int l, List<int>[] byLine, Heard h, DiscrepancyOptions o, HashSet<string> known)
     {
         var line = lines[l];
         var said = line.Tokens;
@@ -566,13 +597,24 @@ public static partial class DiscrepancyFinder
         var near = Enumerable.Range(Math.Max(0, l - 1), Math.Min(lines.Count, l + 2) - Math.Max(0, l - 1)).ToList();
         var nearSaid = near.SelectMany(n => lines[n].Tokens).Select(t => t.Norm).ToHashSet(StringComparer.Ordinal);
         var nearHeard = near.SelectMany(n => byLine[n]).Select(j => h.Tokens[j].Norm).ToHashSet(StringComparer.Ordinal);
-        var (substitutions, inserted) = Compare(said, heardHere, h);
+        var (substitutions, inserted, saidBlock, heardBlock) = Compare(said, heardHere, h);
         var text = file.Cues[line.Index].Text;
         var kinds = new List<(string Kind, string Reason, double? Confidence, string? Suggestion, IReadOnlyList<int> Tokens)>();
+        bool SaidAnchored(int k) => !o.Anchored || saidBlock[k].Anchored;
+        bool HeardAnchored(int j) => !o.Anchored || (heardBlock.TryGetValue(j, out var b) && b.Anchored);
 
-        // Numbers
-        var saidNumbers = said.Where(t => t.Number && !nearHeard.Contains(t.Norm)).ToList();
-        var heardNumbers = heardHere.Where(j => h.Tokens[j].Number && !nearSaid.Contains(h.Tokens[j].Norm)).ToList();
+        // Numbers: added or dropped, or in the place of another number (a number in the place of a word is speech-to-text
+        // hearing "a billion" for an invented word, or a compound such as "high-fives"); "one" alone is as often a pronoun
+        bool SaidNumber(int k) => SaidAnchored(k) && (!o.Anchored || saidBlock[k].OtherSide is 0 || saidBlock[k].OtherNumber);
+        bool HeardNumber(int j) => HeardAnchored(j) && (!o.Anchored || heardBlock[j].OtherSide is 0 || heardBlock[j].OtherNumber);
+        var saidNumbers = said.Where((t, k) => t.Number && !nearHeard.Contains(t.Norm) && SaidNumber(k)).ToList();
+        var heardNumbers = heardHere.Where(j => h.Tokens[j].Number && !nearSaid.Contains(h.Tokens[j].Norm) && HeardNumber(j)).ToList();
+        if (o.Anchored && (saidNumbers.Count == 0 || heardNumbers.Count == 0))
+        {
+            saidNumbers.RemoveAll(t => t.Norm == "1");
+            heardNumbers.RemoveAll(j => h.Tokens[j].Norm == "1");
+        }
+
         if (saidNumbers.Count + heardNumbers.Count > 0)
         {
             string? fix = saidNumbers.Count == 1 && heardNumbers.Count == 1 ? ReplaceWords(text, saidNumbers[0].Surface, h.Surface(heardNumbers[0])) : null;
@@ -582,18 +624,33 @@ public static partial class DiscrepancyFinder
             kinds.Add((Number, reason, heardNumbers.Count > 0 ? heardNumbers.Min(h.Confidence) : h.Mean(heardHere), fix, heardNumbers));
         }
 
-        // Negations (counted, here and with the neighbouring lines)
+        // Negations (counted, here and with the neighbouring lines); anchored, a negation counts only as the one word added,
+        // dropped or replaced in its stretch ("not so" heard for "nutso" is a word split, not a negation)
+        bool SaidNegation(int k) => saidBlock[k].Anchored && saidBlock[k].Own == 1;
+        bool HeardNegation(int j) => !o.Anchored || (HeardAnchored(j) && heardBlock[j].Own == 1);
         int saidNot = said.Count(t => t.Negation), heardNot = heardHere.Count(j => h.Tokens[j].Negation);
-        if (saidNot != heardNot
+        var anchoredDiffer = !o.Anchored
+            || said.Where((t, k) => t.Negation && SaidNegation(k)).Count() != heardHere.Count(j => h.Tokens[j].Negation && HeardNegation(j));
+        if (saidNot != heardNot && anchoredDiffer
             && near.Sum(n => lines[n].Tokens.Count(t => t.Negation)) != near.Sum(n => byLine[n].Count(j => h.Tokens[j].Negation)))
         {
-            var extraNot = inserted.Where(j => h.Tokens[j].Negation).ToList();
+            var extraNot = inserted.Where(j => h.Tokens[j].Negation && HeardNegation(j)).ToList();
             var reason = string.Create(CultureInfo.InvariantCulture, $"The line has {saidNot} negation{(saidNot == 1 ? string.Empty : "s")} (not, never, no …) where {heardNot} {(heardNot == 1 ? "was" : "were")} heard.");
-            kinds.Add((Negation, reason, heardNot > saidNot && extraNot.Count > 0 ? extraNot.Min(h.Confidence) : h.Mean(heardHere), null, extraNot));
+            // Its confidence: the extra negation heard; or, for one the line has that wasn't heard, the least of the words heard
+            // in its place and either side ("have" for "haven't")
+            var unheard = said.Select((t, k) => (t, k)).Where(x => x.t.Negation && SaidNegation(x.k)).SelectMany(x => saidBlock[x.k].Evidence).ToList();
+            var confidence = heardNot > saidNot && extraNot.Count > 0 ? extraNot.Min(h.Confidence)
+                : o.Anchored && unheard.Count > 0 ? unheard.Min(h.Confidence) : h.Mean(heardHere);
+            kinds.Add((Negation, reason, confidence, null, extraNot));
         }
 
-        // Names: a capitalised word heard as something else (not a spelling the neighbours have)
-        var names = substitutions.Where(p => (p.Said.Name || h.Tokens[p.Heard].Name) && !p.Said.Number && !h.Tokens[p.Heard].Number
+        // Names: a capitalised word heard as something else (not a spelling the neighbours have); with known names, one name
+        // in the place of one other, the heard one (or one spelled like it) a name the subtitle has elsewhere
+        var names = substitutions.Where(p => (o.KnownNames
+                ? p.Said.Name && h.Tokens[p.Heard].Name && heardBlock[p.Heard] is { Own: 1, OtherSide: 1 } && !Alike(p.Said.Norm, h.Tokens[p.Heard].Norm)
+                    && known.Any(k => !string.Equals(k, p.Said.Norm, StringComparison.Ordinal) && Alike(k, h.Tokens[p.Heard].Norm))
+                : p.Said.Name || h.Tokens[p.Heard].Name)
+            && !p.Said.Number && !h.Tokens[p.Heard].Number
             && !nearHeard.Contains(p.Said.Norm) && !nearSaid.Contains(h.Tokens[p.Heard].Norm)).ToList();
         if (names.Count > 0)
         {
@@ -604,7 +661,8 @@ public static partial class DiscrepancyFinder
 
         // Words: most of what was heard isn't in the line
         var missing = inserted.Where(j => !nearSaid.Contains(h.Tokens[j].Norm)).ToList();
-        if (missing.Count >= o.MissingWordsMin && missing.Count > o.MissingWordRatio * heardHere.Count)
+        var missingCount = o.Distinct ? missing.Select(j => h.Tokens[j].Norm).Distinct(StringComparer.Ordinal).Count() : missing.Count;
+        if (missingCount >= o.MissingWordsMin && missing.Count > o.MissingWordRatio * heardHere.Count)
         {
             var reason = string.Create(CultureInfo.InvariantCulture, $"{missing.Count} of the {heardHere.Count} words heard aren't in the line.");
             kinds.Add((Words, reason, h.Mean(missing), null, []));
@@ -627,8 +685,11 @@ public static partial class DiscrepancyFinder
     }
 
     // Aligns a line's words with the words heard for it (longest common subsequence): substitutions are the unmatched
-    // words of a stretch paired in order; inserted are heard words not in the line
-    private static (List<(SpokenToken Said, int Heard)> Substitutions, List<int> Inserted) Compare(IReadOnlyList<SpokenToken> said, List<int> heard, Heard h)
+    // words of a stretch paired in order; inserted are heard words not in the line. A word is anchored when it is unmatched
+    // in a short stretch (at most two words on each side) with matched words on both sides; or with a matched word on one
+    // side where words are replaced ("two years" heard as "three years" at the start of a line); or, for "not", after a
+    // matched word (it belongs to the verb before it: "we don't" heard as "we do"). A repeat of the word next to it isn't.
+    private static (List<(SpokenToken Said, int Heard)> Substitutions, List<int> Inserted, Block[] SaidBlock, Dictionary<int, Block> HeardBlock) Compare(IReadOnlyList<SpokenToken> said, List<int> heard, Heard h)
     {
         var n = said.Count;
         var m = heard.Count;
@@ -648,16 +709,40 @@ public static partial class DiscrepancyFinder
 
         var substitutions = new List<(SpokenToken, int)>();
         var inserted = new List<int>();
-        var dels = new List<SpokenToken>();
+        var saidBlock = new Block[n];
+        var heardBlock = new Dictionary<int, Block>();
+        var dels = new List<int>();
         var ins = new List<int>();
-        void Close()
+        string? before = null;
+        var beforeHeard = -1;
+        void Close(string? after, int afterHeard)
         {
             for (var k = 0; k < Math.Min(dels.Count, ins.Count); k++)
             {
-                substitutions.Add((dels[k], ins[k]));
+                substitutions.Add((said[dels[k]], ins[k]));
             }
 
             inserted.AddRange(ins);
+            var small = dels.Count <= 2 && ins.Count <= 2;
+            var replaced = dels.Count > 0 && ins.Count > 0;
+            bool Anchors(string norm) => small
+                && ((before is not null && after is not null) || (replaced && (before is not null || after is not null)) || (norm == "not" && before is not null))
+                && !string.Equals(norm, before, StringComparison.Ordinal) && !string.Equals(norm, after, StringComparison.Ordinal);
+            var heardNumber = ins.Any(j => h.Tokens[j].Number);
+            var saidNumber = dels.Any(k => said[k].Number);
+
+            // What was heard in the place of the line's words: the words instead of them and the matched words either side
+            int[] evidence = [.. ins, .. new[] { beforeHeard, afterHeard }.Where(j => j >= 0)];
+            foreach (var k in dels)
+            {
+                saidBlock[k] = new Block(Anchors(said[k].Norm), dels.Count, ins.Count, heardNumber, evidence);
+            }
+
+            foreach (var j in ins)
+            {
+                heardBlock[j] = new Block(Anchors(h.Tokens[j].Norm), ins.Count, dels.Count, saidNumber, [j]);
+            }
+
             dels.Clear();
             ins.Clear();
         }
@@ -667,7 +752,9 @@ public static partial class DiscrepancyFinder
         {
             if (a < n && b < m && string.Equals(said[a].Norm, h.Tokens[heard[b]].Norm, StringComparison.Ordinal))
             {
-                Close();
+                Close(said[a].Norm, heard[b]);
+                before = said[a].Norm;
+                beforeHeard = heard[b];
                 a++;
                 b++;
             }
@@ -677,12 +764,111 @@ public static partial class DiscrepancyFinder
             }
             else
             {
-                dels.Add(said[a++]);
+                dels.Add(a++);
             }
         }
 
-        Close();
-        return (substitutions, inserted);
+        Close(null, -1);
+        return (substitutions, inserted, saidBlock, heardBlock);
+    }
+
+    // Two spellings of one name: equal, or sounding alike (Soundex: "Leanne" and "Lianne"), or differing in at most a third of
+    // their letters ("Harper" and "Harpy")
+    private static bool Alike(string a, string b)
+    {
+        if (string.Equals(a, b, StringComparison.Ordinal) || string.Equals(Soundex(a), Soundex(b), StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var d = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++)
+        {
+            d[j] = j;
+        }
+
+        for (var i = 1; i <= a.Length; i++)
+        {
+            var diagonal = d[0];
+            d[0] = i;
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var above = d[j];
+                d[j] = Math.Min(Math.Min(d[j] + 1, d[j - 1] + 1), diagonal + (a[i - 1] == b[j - 1] ? 0 : 1));
+                diagonal = above;
+            }
+        }
+
+        return d[b.Length] * 3 <= Math.Max(a.Length, b.Length);
+    }
+
+    private static string Soundex(string word)
+    {
+        const string Codes = "01230120022455012623010202";
+        var letters = word.Where(c => c is >= 'a' and <= 'z').ToArray();
+        if (letters.Length == 0)
+        {
+            return word;
+        }
+
+        var code = new System.Text.StringBuilder().Append(letters[0]);
+        var last = Codes[letters[0] - 'a'];
+        foreach (var c in letters.Skip(1))
+        {
+            var digit = Codes[c - 'a'];
+            if (digit != '0' && digit != last)
+            {
+                code.Append(digit);
+            }
+
+            if (c is not 'h' and not 'w')
+            {
+                last = digit;
+            }
+        }
+
+        return code.ToString().PadRight(4, '0')[..4];
+    }
+
+    // Whether the spoken lines either side of a line (skipping sound descriptions and music) had words heard for them
+    private static bool Isolated(List<Line> lines, int l, List<int>[] byLine, bool[] covered)
+    {
+        bool Heard(int step)
+        {
+            for (var n = l + step; n >= 0 && n < lines.Count; n += step)
+            {
+                if (covered[n] && lines[n].Tokens.Count > 0 && !lines[n].Music)
+                {
+                    return byLine[n].Count > 0;
+                }
+            }
+
+            return true;
+        }
+
+        return Heard(-1) && Heard(1);
+    }
+
+    // Speech-to-text sometimes splits a word at punctuation ("$40" ",000", "a" ".m.", "ma" "'am", "K" "-9"): a piece that starts
+    // with a separator is joined to the word before it
+    private static List<TranscribedWord> Rejoin(IReadOnlyList<TranscribedWord> words)
+    {
+        var result = new List<TranscribedWord>(words.Count);
+        foreach (var w in words)
+        {
+            var text = w.Text.Trim();
+            if (result.Count > 0 && text.Length > 1 && text[0] is ',' or '.' or '\'' or '’' or '-' && char.IsLetterOrDigit(text[1]) && !char.IsWhiteSpace(result[^1].Text[^1]))
+            {
+                var before = result[^1];
+                var confidence = before.Confidence is { } a && w.Confidence is { } b ? Math.Min(a, b) : before.Confidence ?? w.Confidence;
+                result[^1] = new TranscribedWord(before.Text.TrimEnd() + text, before.Start, Math.Max(before.End, w.End), confidence);
+                continue;
+            }
+
+            result.Add(w);
+        }
+
+        return result;
     }
 
     private static IEnumerable<LineDiscrepancy> MissingRuns(List<Line> lines, int[] assigned, Heard h, DiscrepancyOptions o)
@@ -697,7 +883,8 @@ public static partial class DiscrepancyFinder
                 var start = h.Words[first].Start;
                 var end = h.Words[last].End;
                 var count = last - first + 1;
-                if (count >= o.MissingMinWords && end - start >= o.MissingMinSeconds && !lines.Any(l => l.Tokens.Count > 0 && l.B0 < end && l.B1 > start))
+                var distinct = run.Select(j => h.Tokens[j].Norm).Distinct(StringComparer.Ordinal).Count();
+                if ((o.Distinct ? distinct : count) >= o.MissingMinWords && end - start >= o.MissingMinSeconds && !lines.Any(l => l.Tokens.Count > 0 && l.B0 < end && l.B1 > start))
                 {
                     var next = lines.Where(l => l.B0 >= end).Select(l => l.B0).DefaultIfEmpty(double.MaxValue).Min();
                     var shown = Math.Max(end, Math.Min(start + 1.0, next - 0.08));
@@ -740,6 +927,10 @@ public static partial class DiscrepancyFinder
         var v = values.Order().ToList();
         return v.Count == 0 ? 0 : v.Count % 2 == 1 ? v[v.Count / 2] : (v[(v.Count / 2) - 1] + v[v.Count / 2]) / 2;
     }
+
+    // An unmatched word's stretch: whether it is anchored, how many words each side has in it, whether any on the other
+    // side is a number, and the heard words it rests on
+    private readonly record struct Block(bool Anchored, int Own, int OtherSide, bool OtherNumber, int[] Evidence);
 
     // A subtitle line on the audio's clock
     private sealed class Line(int index, double a0, double a1, IReadOnlyList<SpokenToken> tokens, int words, bool music)

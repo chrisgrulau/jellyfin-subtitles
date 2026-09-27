@@ -35,7 +35,7 @@ public sealed class CalibrationTests : IDisposable
     public void Each_service_starts_at_its_documented_floor()
     {
         Assert.Equal(0.90, ConfidenceCalibration.FloorFor("deepgram"));
-        Assert.Equal(0.741, ConfidenceCalibration.FloorFor("builtin"), 3);
+        Assert.Equal(0.80, ConfidenceCalibration.FloorFor("builtin"), 3);
         Assert.Equal(ConfidenceCalibration.WhisperFloor, ConfidenceCalibration.FloorFor("local"));
         Assert.Equal(ConfidenceCalibration.WhisperFloor, ConfidenceCalibration.FloorFor("openai"));
         Assert.Equal(0.90, ConfidenceCalibration.FloorFor("someday-service"));
