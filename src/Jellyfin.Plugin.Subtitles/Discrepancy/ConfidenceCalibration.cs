@@ -26,8 +26,8 @@ public sealed record CalibrationCounts
 /// <summary>
 /// Confidence thresholds for flagging differences, per speech-to-text service and model, since confidence isn't
 /// comparable across models. Each starts at a documented floor: Deepgram word confidence 0.90; Whisper-family services
-/// (built-in, local, OpenAI) a word probability of e<sup>−0.3</sup> ≈ 0.74, the equivalent of Whisper's usual average
-/// log-probability guard of −0.3. With <b>automatic tuning</b> switched on, a service's threshold is learned from the
+/// (built-in, local, OpenAI) a word probability of 0.80, set by calibrating the whole-file check on real subtitles (at
+/// Whisper's usual average log-probability guard of −0.3, e<sup>−0.3</sup> ≈ 0.74, it flagged more mishearings). With <b>automatic tuning</b> switched on, a service's threshold is learned from the
 /// subtitles already known to be good (in sync by speech-to-text, with nothing flagged): the lowest threshold at which
 /// at most <see cref="TargetFlagged"/> of their matched words would be flagged, once at least <see cref="MinSamples"/>
 /// matched words with a confidence have been seen. The learned threshold can only be stricter than the floor, never
@@ -57,8 +57,9 @@ public sealed class ConfidenceCalibration
     /// <summary>Counts above this are halved, so recent subtitles weigh more.</summary>
     public const long HalveAbove = 5_000_000;
 
-    /// <summary>The floor for Whisper-family services: e^−0.3, Whisper's average log-probability guard as a probability.</summary>
-    public static readonly double WhisperFloor = Math.Round(Math.Exp(-0.3), 3);
+    /// <summary>The floor for Whisper-family services: a word probability of 0.80 (calibrated on real subtitles; see the
+    /// design notes' whole-file check).</summary>
+    public const double WhisperFloor = 0.80;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 

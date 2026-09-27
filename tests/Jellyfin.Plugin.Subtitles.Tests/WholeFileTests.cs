@@ -243,7 +243,7 @@ public sealed class WholeFileTests : IDisposable
     [Fact]
     public async Task Findings_are_applied_or_declined_one_at_a_time_and_undone()
     {
-        var file = DiscrepancyTests.Script.Append((50, "This line was never spoken aloud.")).ToArray();
+        var file = DiscrepancyTests.Script.Append((50, "This whole line was never actually spoken aloud by anyone.")).ToArray();
         var job = File_("Film", file);
         var original = File.ReadAllBytes(job.SubtitlePath);
         var heard = DiscrepancyTests.Said([.. Changed(6, "I have four tickets here."), (41, "Wait, where did my other shoe go now?")]);
@@ -282,7 +282,7 @@ public sealed class WholeFileTests : IDisposable
     [Fact]
     public async Task Apply_takes_every_suggestion_and_leaves_lines_with_nothing_heard_for_review()
     {
-        var file = DiscrepancyTests.Script.Append((50, "This line was never spoken aloud.")).ToArray();
+        var file = DiscrepancyTests.Script.Append((50, "This whole line was never actually spoken aloud by anyone.")).ToArray();
         var job = File_("Film", file);
         var heard = DiscrepancyTests.Said([.. Changed(6, "I have four tickets here."), (41, "Wait, where did my other shoe go now?")]);
         var result = (await Check(job, new Hears(heard)))!;

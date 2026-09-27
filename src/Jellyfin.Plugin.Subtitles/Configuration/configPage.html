@@ -535,7 +535,7 @@
                 <input id="TuneConfidence" type="checkbox" is="emby-checkbox" />
                 <span>Tune confidence thresholds automatically</span>
               </label>
-              <div class="fieldDescription checkboxFieldDescription">Off by default. The whole-file check ignores words heard with less confidence than a starting point per service (Deepgram 0.90; the built-in, local and OpenAI Whisper services 0.74, Whisper's usual −0.3 average log-probability). With this on, each service and model learns a stricter threshold from subtitles already known to be good (found in sync by speech-to-text, nothing flagged): the lowest at which at most 2 % of their matched words would have been flagged, once 1,000 words have been seen. It only ever raises the threshold, so fewer, surer lines are flagged; it never goes below the starting point.</div>
+              <div class="fieldDescription checkboxFieldDescription">Off by default. The whole-file check ignores words heard with less confidence than a starting point per service (Deepgram 0.90; the built-in, local and OpenAI Whisper services 0.80). With this on, each service and model learns a stricter threshold from subtitles already known to be good (found in sync by speech-to-text, nothing flagged): the lowest at which at most 2 % of their matched words would have been flagged, once 1,000 words have been seen. It only ever raises the threshold, so fewer, surer lines are flagged; it never goes below the starting point.</div>
             </div>
             <div class="checkboxContainer checkboxContainer-withDescription">
               <label class="emby-checkbox-label">

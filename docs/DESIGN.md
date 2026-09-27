@@ -213,31 +213,76 @@ for review, never applied on their own.
   words left between lines' matches go to a line they are heard during (0.5 s padding), keeping order; a line with no
   matches takes the unclaimed words within ±3 s nearer to it than to its neighbours.
 - **Normalising** (`SpokenText`): markup, sound descriptions in brackets, music notes and upper-case speaker labels
-  removed; case and punctuation ignored; English contractions split (`don't` → `do not`, `can't` → `can not`, `'s` →
-  `is` on both sides); numbers in words become digits (`twenty-five` 25, `one hundred and five` 105, `nineteen ninety`
-  1990, `a thousand` 1000; a comma ends a number, so "two, three" stays two), digit separators dropped. Names are
-  capitalised words where a sentence doesn't start (not "I"); not in German, or in text all in one case.
+  (`JOEY:`, `PHOEBE & JOEY:`) removed; case and punctuation ignored; English contractions split (`don't` → `do not`,
+  `can't` → `can not`, `'s` → `is` on both sides), a doubled apostrophe (`don'’t`) read as one and a dropped g
+  (`nothin'`) spelled out; numbers in words become digits (`twenty-five` 25, `one hundred and five` 105, `nineteen
+  ninety` 1990, `a thousand` 1000; a comma ends a number, so "two, three" stays two), digit separators dropped; times
+  alike however written (`6:00` and `6.00` are 6, `9:30` and `9.30` are 9 and 30); a code joined to its number (`XR-7`
+  is `XR7`). A "no" on its own (followed by a comma or stop: "No, thank you") is an interjection, not a negation. Names
+  are capitalised words where a sentence doesn't start (not "I"; a title's stop, `Mr.`, doesn't end one); not in
+  German, or in text all in one case. Heard words the service splits at punctuation (`$40` `,000`, `a` `.m.`, `K`
+  `-9`) are joined again first.
+- **Anchoring** (`Anchored`, on): a line's words and those heard for it are compared in order (longest common
+  subsequence); a stretch of unmatched words is anchored when it has at most two words on each side and matched words
+  on both sides, or on one side where words are replaced ("two years" heard as "three years" at the start of a line),
+  or, for `not`, a matched word before it ("we don't" heard as "we do"). A repeat of the word next to it isn't anchored.
+  A clause the subtitle leaves out, a word said twice ("I haven't, I haven't") or speech-to-text splitting a word
+  ("nutso" heard as "not so") then isn't a difference.
 - **Findings** (one per line; kinds, most important first):
   - `negation`: the line and what is heard for it have different numbers of `not`/`no`/`never`/`nothing`/`nobody`/
-    `none`/`neither`/`nor`/`nowhere`, and so do the line with its neighbours.
+    `none`/`neither`/`nor`/`nowhere`, and so do the line with its neighbours; anchored, only negations that are the one
+    word added, dropped or replaced in their stretch are counted.
   - `number`: a number in the line not heard for it or its neighbours, or heard but not in the line or its neighbours
-    (a line break in another place isn't a difference). With one on each side, the fix replaces it in place.
+    (a line break in another place isn't a difference); anchored, only a number added or dropped, or in the place of
+    another number (a number heard for a word is speech-to-text hearing "a billion" for an invented word), and "one"
+    only in the place of a number (alone it is as often a pronoun). With one on each side, the fix replaces it in place.
   - `name`: a word heard in the place of another (in the aligned line) where either is a name, and neither appears on
-    the other side nearby. With one, the fix replaces it in place.
-  - `words`: at least 4 heard words, over half of those heard for the line, aren't in it or its neighbours.
-  - `missing-line`: heard speech (split at pauses over 1 s) of at least 4 words and 1.5 s that no line is shown during;
-    the fix adds it, from its first word to its last (at least 1 s, ending before the next line).
-  - `extra`: a line of at least 3 spoken words with nothing heard within ±3 s; music (♪, ♫, `#`) and sound descriptions
-    are never flagged. The fix removes it.
+    the other side nearby; with `KnownNames` (on), one name in the place of one other, the heard name (or one spelled
+    like it: the same Soundex, or at most a third of the letters different) being a name the subtitle writes elsewhere
+    and not the line's own. Speech-to-text spells invented names its own way ("Kyrell" heard as "Carol"); a line naming the
+    wrong character names one the subtitle knows. With one, the fix replaces it in place.
+  - `words`: at least 5 different heard words, over 60 % of those heard for the line, aren't in it or its neighbours.
+  - `missing-line`: heard speech (split at pauses over 1 s) of at least 4 different words and 1 s that no line is shown
+    during; with `Isolated` (on), not when more than two are heard within a minute of each other (a song or a radio the
+    subtitle leaves out). The fix adds it, from its first word to its last (at least 1 s, ending before the next line).
+  - `extra`: a line of at least 8 spoken words with nothing heard within ±3 s; with `Isolated`, only when the spoken
+    lines either side of it were heard (a run of them is speech-to-text missing a noisy stretch). Music (♪, ♫, `#`) and
+    sound descriptions are never flagged. The fix removes it.
   - Otherwise the fix is the heard words as a line (a capital first, wrapped at 42 characters).
-- **Guards:** with at least 20 subtitle words and fewer than 25 % of them heard, or with lines with nothing heard more
-  than a quarter of the spoken lines (at least 4), the transcript is taken to be at fault (another version or language,
-  music, the wrong audio track) and nothing is flagged; the result says so. At most 50 findings are kept (the counts
-  cover them all).
+  - Counting different words (`Distinct`, on) keeps chanting, laughter and repeats ("whoop, whoop, whoop …") from being
+    lines or differences.
+- **Guards:** with at least 20 subtitle words and fewer than 25 % of them heard, or with lines of 3 or more words with
+  nothing heard more than a quarter of the spoken lines (at least 4; whether or not they would be flagged), the
+  transcript is taken to be at fault (another version or language, music, the wrong audio track) and nothing is
+  flagged; the result says so. At most 50 findings are kept (the counts cover them all).
 - **Confidence:** a finding resting on heard words below the service's threshold is dropped (the result says how many):
-  the heard number or name, the heard negation, or the mean of the words behind a missing line or missing words.
-  Services that give no confidence (OpenAI's whisper-1) aren't second-guessed. Thresholds: see
+  the heard number or name, the heard negation, for a negation the line has but wasn't heard the least of the words
+  heard in its place and either side ("have" for "haven't"), or the mean of the words behind a missing line or missing
+  words. Services that give no confidence (OpenAI's whisper-1) aren't second-guessed. Thresholds: see
   [Decisions and confidence](#decisions-and-confidence).
+- **Calibration on real videos:** the thresholds and rules above were set by comparing subtitles with full transcripts
+  of their videos from a local Whisper-family service (a small model), with the evaluation tool in `tools/DiscrepancyEval`
+  (it takes a list of videos and subtitles, caches transcripts, runs a grid of options and reports findings per kind
+  per hour and recall on damaged copies). The sample: 19 subtitles taken to be good (17 episodes the audio check had
+  found in sync, 2 films; comedies, dramas, action and animation, from the 1990s to the 2020s), 14.0 hours; 3 of them
+  paired with another episode of the same show; and 3 damaged copies (3.1 hours) with 59 known changes: 15 lines
+  deleted, 15 numbers changed, 9 negations dropped, 12 names swapped for another character's and 8 long lines added in
+  silent gaps.
+  - Findings per hour on the good subtitles: **53.7 before, 1.9 after** (negation 14.3 → 0.5, number 6.8 → 0.6, name
+    16.9 → 0.1, words 1.3 → 0, missing line 2.1 → 0.1, nothing heard 12.3 → 0.6). Before, most were speech-to-text
+    mishearing invented names, subtitles leaving out repeats or clauses, "No"/"Oh" confusions, number formats
+    ("$40,000" heard as "$40" ",000", "XR-7" / "XR7", "6:00" / "6 a.m."), chanting and song lyrics, and short lines
+    speech-to-text missed. Of the 26 left after, 8 are real faults in the subtitles (digits split by text recognition,
+    such as "Level 1 4", and a garbled line), 1 a real difference (a broadcaster's announcement), 3 can't be told
+    without listening, and 14 are false: short lines missed in noise or overlapping speech, negations misheard ("had"
+    for "hadn't"), a song, a place name — about 1 an hour.
+  - Found on the damaged copies (same kind at the same place): 44 of 59 before, 43 after (negations 7 of 9 both; numbers
+    14 → 13 of 15; names 6 → 3 of 12, as speech-to-text rarely spells an invented name the subtitle's way; deleted
+    lines 9 → 13 of 15, from the shorter 1 s minimum; added lines 8 → 7 of 8).
+  - Each wrong-episode pairing tripped the shared-words guard (under 10 % heard) before and after.
+  - Tried and not taken: a tolerance of 2 or 4 s (the same results as 3 s), a confidence floor of 0.85 or 0.90 (fewer
+    numbers found), lines with nothing heard at 4–6 words (three to eight times as many false findings) or 10 (added lines
+    missed), missing lines of 6 words over 2.5 s (most deleted lines missed).
 - **AI confirmation (optional):** with the AI plugin, `UseAi`, `AuditWording` and AI checks left in the run, the lines
   flagged for their wording (up to 30; not missing lines or lines with nothing heard) are offered to the wording
   auditor (`subtitles.audit`) with what was heard for each, as one question. Lines it doesn't flag are dropped; no
@@ -296,8 +341,10 @@ for review, never applied on their own.
   send such cases to review instead). The setting is shown disabled ("coming later").
 - Confidence is not comparable across models, so thresholds are per service and model (`ConfidenceCalibration`).
   Starting points (floors): Deepgram word confidence 0.90; Whisper-family services (built-in, local, OpenAI), whose words
-  carry a probability, e^−0.3 ≈ 0.74, the word-level equivalent of Whisper's average log-probability guard of −0.3. The
-  whole-file check drops findings resting on words below the threshold.
+  carry a probability, 0.80 (it was e^−0.3 ≈ 0.74, the word-level equivalent of Whisper's average log-probability guard
+  of −0.3, until the [calibration](#whole-file-check) showed 0.80 cuts the findings on good subtitles from 2.7 to
+  1.9 an hour, mostly misheard negations and numbers, without missing more of the known changes). The whole-file
+  check drops findings resting on words below the threshold.
 - Automatic calibration (`TuneConfidence`, off by default; the page explains it): every subtitle found `InSync` or
   `Corrected` by speech-to-text, with no wording-audit findings and text that decoded cleanly, is compared with its sync
   snippets by the same finder (only lines inside the snippets), and each heard word matched to a line adds to a
