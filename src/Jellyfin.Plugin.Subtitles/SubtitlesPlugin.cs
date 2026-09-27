@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
@@ -46,7 +47,11 @@ public class SubtitlesPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
             c.MaxSubtitlesPerRun = Math.Clamp(c.MaxSubtitlesPerRun, 1, 5000);
             c.MaxFindsPerRun = Math.Clamp(c.MaxFindsPerRun, 1, 1000);
             c.MaxDownloadsPerDay = Math.Clamp(c.MaxDownloadsPerDay, 0, 10000);
-            var languages = LanguageSettings.EffectiveLanguages(c.Languages);
+            c.NewItemsDelayMinutes = Math.Clamp(c.NewItemsDelayMinutes, 1, 1440);
+            var excluded = (c.ExcludedLibraries ?? []).Select(Pipeline.LibraryScope.NormaliseId).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+            c.ExcludedLibraries = [.. excluded];
+            // Empty means each library's own subtitle languages (see LanguageSettings.Choose)
+            var languages = LanguageSettings.Recognised(c.Languages);
             c.Languages.Clear();
             foreach (var l in languages)
             {

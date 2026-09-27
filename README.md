@@ -89,6 +89,16 @@ when none can be found** or **Check whole file for doubtful subtitles**, or pick
 makes subtitles from a full transcript for videos the search found nothing for, and compares doubtful subtitles with a
 full transcript; see below.
 
+New videos don't wait for the night: a few minutes after films or episodes are added (10 by default, counted from the
+last one, so a whole season is handled together), their subtitles are checked and missing ones searched for, within the
+same limits (**Handle new videos soon after they're added**, on by default). A subtitle file that appears beside a
+video is checked the same way. Generating subtitles stays nightly.
+
+All three tasks work on every film and show library unless you untick some under **Libraries** on the settings page
+(for example anime or children's libraries). The subtitle languages are those under **Subtitle languages**; left empty,
+each library uses its own subtitle download languages from Jellyfin's library settings (then the server's preferred
+metadata language, then English), and the page shows what is in effect for each library.
+
 ## Generated subtitles
 
 When the search found nothing that fits a video in one of your languages, and **Generate subtitles when none can be
@@ -228,8 +238,11 @@ has no effect yet.
 
 ## Upgrading and uninstalling
 
-Upgrades keep settings, results and originals. Before uninstalling, use **Undo** on any change you want reversed: once
-the plugin is gone, its originals are no longer linked to their files. Left behind: the plugin's data folder (keys,
+Upgrades keep settings, results and originals. Before uninstalling, use **Restore all originals…** (under the results on
+the plugin page) to reverse everything the plugin did, or **Undo** on single changes: once the plugin is gone, its
+originals are no longer linked to their files. Restore all puts back the original of every file it changed and removes
+every subtitle it added or generated; files changed since by you or another program are left alone and listed. Then
+untick **Enabled**, save, and uninstall. Left behind: the plugin's data folder (keys,
 results, originals) and `<jellyfin data>/shoal-subtitles/` (the built-in speech-to-text). Jellyfin's own "Download
 missing subtitles" task uses the same OpenSubtitles allowance, so you may want only one of them searching.
 

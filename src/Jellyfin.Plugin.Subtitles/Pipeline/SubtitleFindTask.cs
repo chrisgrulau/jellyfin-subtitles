@@ -11,6 +11,7 @@ using Jellyfin.Plugin.Subtitles.Pricing;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Subtitles;
@@ -39,6 +40,8 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     private readonly SubtitleFinder _finder;
     private readonly SubtitleGenerator _generator;
     private readonly SubtitleActivity? _activity;
+    private readonly RunGate _gate;
+    private readonly IServerConfigurationManager _server;
     private readonly ILogger<SubtitleFindTask> _logger;
 
     /// <summary>
@@ -55,10 +58,14 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     /// <param name="spending">Prices, spend ledger and exchange rates.</param>
     /// <param name="finder">The finder.</param>
     /// <param name="generator">Generated subtitles (a found subtitle replaces one).</param>
+    /// <param name="gate">Keeps this task and other work on subtitle files apart.</param>
+    /// <param name="server">Jellyfin's configuration (for the languages' last fallback).</param>
     /// <param name="logger">Logger.</param>
     /// <param name="activity">Jellyfin's Activity log, for a search a provider stopped.</param>
-    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, SubtitleGenerator generator, ILogger<SubtitleFindTask> logger, SubtitleActivity? activity = null)
+    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, SubtitleGenerator generator, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleFindTask> logger, SubtitleActivity? activity = null)
     {
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
+        _server = server ?? throw new ArgumentNullException(nameof(server));
         _activity = activity;
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
@@ -96,9 +103,10 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
+        using var hold = await _gate.EnterSharedAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await RunAsync(progress, cancellationToken).ConfigureAwait(false);
+            await RunAsync(null, null, progress, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -107,7 +115,27 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         }
     }
 
-    private async Task RunAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    /// <summary>
+    /// Searches for the missing subtitles of videos just added (see <see cref="NewItemsHost"/>), within the same limits as
+    /// the nightly search (videos per run, downloads per day, spending). The caller holds the gate alone.
+    /// </summary>
+    /// <param name="added">The videos added.</param>
+    /// <param name="checks">The day's allowance of AI checks for new videos.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    internal async Task RunForAsync(IReadOnlyList<Guid> added, Ai.AiChecks checks, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RunAsync(added, checks, new Progress<double>(), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _finder.FlushResults();
+        }
+    }
+
+    private async Task RunAsync(IReadOnlyList<Guid>? only, Ai.AiChecks? checks, IProgress<double> progress, CancellationToken cancellationToken)
     {
         var config = SubtitlesPlugin.Instance?.Configuration;
         if (config is null || !config.Enabled || !config.FindMissing)
@@ -137,7 +165,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         }
 
         var speech = run.Speech(config, config.SyncSnippets, "subtitles.find", out var problem);
-        var policies = RunStart.PoliciesFor(config) with { Auditor = null };
+        var policies = RunStart.PoliciesFor(config, checks) with { Auditor = null };
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
@@ -151,7 +179,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         var combined = subdlKey is null ? null : new CombinedSource([jellyfin, new SubDlSource(subdlHttp, subdlKey, IdsOf)]);
         ICandidateSource source = combined ?? (ICandidateSource)jellyfin;
         // Specials (season 0) last: subtitle sites rarely have them, and they'd use up the run
-        var jobs = new LibraryVideos(_library, _media).Missing(LanguageSettings.EffectiveLanguages(config.Languages), config.CountImageSubtitles)
+        var jobs = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config, _server), only).Missing(config.CountImageSubtitles)
             .Where(_finder.NeedsSearch)
             .OrderBy(j => j.Video.Season == 0)
             .Take(Math.Max(1, config.MaxFindsPerRun))

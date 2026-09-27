@@ -199,9 +199,25 @@ public sealed class SubtitleGenerator
     /// <returns>The videos, in order.</returns>
     public IReadOnlyList<FindJob> Choose(IEnumerable<FindJob> jobs, IReadOnlyList<string> wanted, string setup, int max)
     {
+        ArgumentNullException.ThrowIfNull(wanted);
+        return Choose(jobs, _ => wanted, setup, max);
+    }
+
+    /// <summary>
+    /// The videos to generate subtitles for tonight, with the languages wanted for each video's library (see
+    /// <see cref="Choose(IEnumerable{FindJob}, IReadOnlyList{string}, string, int)"/>).
+    /// </summary>
+    /// <param name="jobs">Videos missing a subtitle in a wanted language.</param>
+    /// <param name="wantedFor">The wanted languages for a video, in order.</param>
+    /// <param name="setup">The service and model now.</param>
+    /// <param name="max">The most to take (0 to <see cref="MaxPerNight"/>).</param>
+    /// <returns>The videos, in order.</returns>
+    public IReadOnlyList<FindJob> Choose(IEnumerable<FindJob> jobs, Func<FindJob, IReadOnlyList<string>> wantedFor, string setup, int max)
+    {
         ArgumentNullException.ThrowIfNull(jobs);
+        ArgumentNullException.ThrowIfNull(wantedFor);
         var take = Math.Clamp(max, 0, MaxPerNight);
-        return take == 0 ? [] : [.. jobs.Where(j => NeedsGeneration(j, wanted, setup))
+        return take == 0 ? [] : [.. jobs.Where(j => NeedsGeneration(j, wantedFor(j), setup))
             .OrderBy(j => _results.Get(SubtitleFinder.IdFor(j.VideoPath, j.Language))?.Time ?? DateTimeOffset.MaxValue)
             .ThenBy(j => j.VideoPath, StringComparer.Ordinal)
             .ThenBy(j => j.Language, StringComparer.Ordinal)
@@ -334,7 +350,7 @@ public sealed class SubtitleGenerator
     /// passed since the run began (a video already started finishes, within its own time limit); a service limit or
     /// sign-in failure stops the run; anything else fails only that video (recorded, tried again later).
     /// </summary>
-    /// <param name="jobs">The videos (see <see cref="Choose"/>).</param>
+    /// <param name="jobs">The videos (see <see cref="Choose(IEnumerable{FindJob}, IReadOnlyList{string}, string, int)"/>).</param>
     /// <param name="audioFor">Each video's audio.</param>
     /// <param name="speech">The "Full transcript" speech-to-text service.</param>
     /// <param name="setup">The service and model (see <see cref="SetupOf"/>).</param>
@@ -350,7 +366,7 @@ public sealed class SubtitleGenerator
     /// Generates subtitles for the chosen videos in turn, with a time budget counted from when the night's run began (it
     /// is shared with the whole-file checks).
     /// </summary>
-    /// <param name="jobs">The videos (see <see cref="Choose"/>).</param>
+    /// <param name="jobs">The videos (see <see cref="Choose(IEnumerable{FindJob}, IReadOnlyList{string}, string, int)"/>).</param>
     /// <param name="audioFor">Each video's audio.</param>
     /// <param name="speech">The "Full transcript" speech-to-text service.</param>
     /// <param name="setup">The service and model (see <see cref="SetupOf"/>).</param>

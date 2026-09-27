@@ -5,6 +5,41 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Restore all originals** (FEAT-06), for use before uninstalling: under the results, **Restore all originals…** first
+  says how many files would get their original back and how many added or generated subtitles would be removed, then
+  asks to confirm. Each file is handled as **Undo** would: a file changed since (by you or another program) is left
+  alone, as is one whose original is no longer kept or a changed file that has since been deleted; they are listed with
+  the reason at the end. It runs in batches of 200 with a running count, originals first (so a subtitle the plugin
+  added and then corrected can still be removed), is refused while a scheduled task or new-video run is going, and
+  restored files aren't changed again on their own.
+- **New videos are handled soon after they're added** (FEAT-03): **Handle new videos soon after they're added** (on by
+  default) and **Wait after the last video is added** (10 minutes by default, 1 to 1440). Films and episodes Jellyfin
+  adds are queued (each once, however often Jellyfin reports them); once nothing has been added for the wait, so a
+  season being filed is handled in one go, their subtitle files are checked and missing subtitles searched for, as the
+  nightly tasks would. A new subtitle file beside a video (Jellyfin reports the video as changed) is checked the same
+  way; for a video that only changed, only files not seen before are checked and nothing is searched for.
+  - The nightly rules and limits apply: nothing happens until the settings page has been saved once, libraries,
+    languages, files checked and videos searched per run, downloads per day and spending limits. The day's new-video
+    runs share one run's allowance of AI checks.
+  - Generating subtitles stays nightly; a new video nothing was found for is a candidate for the next night's run.
+  - Never at the same time as a scheduled task: the scheduled tasks wait for a new-video run to finish, and new videos
+    wait (trying again after another wait) while a scheduled task runs. At most 500 videos are queued at once; the rest
+    are left to the nightly tasks.
+  - On by default, including on upgrade: it only brings forward work the nightly tasks would do, within the same
+    limits.
+- **Each library's subtitle languages are the default** (FEAT-06): with **Subtitle languages** left empty, a library's
+  videos use that library's subtitle download languages (Jellyfin's library settings), or else the server's preferred
+  metadata language (Jellyfin has no server-wide subtitle language), or else English. The plugin's own setting, when it
+  names any language, still applies everywhere. **Libraries** on the settings page shows the languages in effect for each
+  library and where they come from. The setting can now be saved empty (it used to be filled in as `eng`); installs that
+  saved it keep their languages until it is cleared.
+- **Library picker** (FEAT-03): **Libraries** on the settings page lists the server's film, show and mixed libraries,
+  each with a tick. An unticked library is left alone: its videos aren't checked, searched for or generated for (every
+  walk of the library, and so every task, honours it). All are ticked by default; the setting stores the libraries
+  left out (by id), so a library added later is worked on until you untick it.
+
 ## [0.14.0-alpha] - 2026-09-27
 
 ### Added

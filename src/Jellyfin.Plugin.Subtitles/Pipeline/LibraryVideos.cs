@@ -15,8 +15,10 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <summary>
 /// The library's films and episodes, walked once in one way for every task: the subtitle files to check, the embedded
 /// tracks to check and the subtitles to find. Only videos whose file exists, with a running time and at least one audio
-/// stream, are listed. "Has a subtitle in this language" is decided by <see cref="FindRules.Counts(bool, bool, bool, bool)"/>
-/// alone: a subtitle this plugin generated doesn't count, so the search for a real one goes on.
+/// stream, in a library the plugin works on (see <see cref="LibraryScope"/>), are listed; a walk can also be limited to
+/// a few videos (new ones). "Has a subtitle in this language" is decided by
+/// <see cref="FindRules.Counts(bool, bool, bool, bool)"/> alone: a subtitle this plugin generated doesn't count, so the
+/// search for a real one goes on.
 /// </summary>
 internal sealed class LibraryVideos
 {
@@ -24,33 +26,38 @@ internal sealed class LibraryVideos
 
     private readonly ILibraryManager _library;
     private readonly IMediaSourceManager _media;
+    private readonly LibraryScope _scope;
+    private readonly IReadOnlyCollection<Guid>? _only;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LibraryVideos"/> class.
     /// </summary>
     /// <param name="library">Library manager.</param>
     /// <param name="media">Media source manager (streams, including external subtitles).</param>
-    public LibraryVideos(ILibraryManager library, IMediaSourceManager media)
+    /// <param name="scope">The libraries worked on.</param>
+    /// <param name="only">Only these videos (new ones), or <c>null</c> for the whole library.</param>
+    public LibraryVideos(ILibraryManager library, IMediaSourceManager media, LibraryScope scope, IReadOnlyCollection<Guid>? only = null)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
+        _scope = scope ?? throw new ArgumentNullException(nameof(scope));
+        _only = only;
     }
 
     /// <summary>
-    /// Text subtitle files beside the videos, in the chosen languages. Generated subtitles aren't listed: they are
-    /// speech-to-text already, so checking their timing against speech-to-text would prove nothing.
+    /// Text subtitle files beside the videos, in the languages wanted for each video's library. Generated subtitles
+    /// aren't listed: they are speech-to-text already, so checking their timing against speech-to-text would prove
+    /// nothing.
     /// </summary>
-    /// <param name="languages">The chosen languages, as two-letter codes.</param>
     /// <returns>The files to check.</returns>
-    public IEnumerable<SubtitleJob> SubtitleFiles(IReadOnlySet<string> languages)
+    public IEnumerable<SubtitleJob> SubtitleFiles()
     {
-        ArgumentNullException.ThrowIfNull(languages);
         foreach (var v in Walk())
         {
             foreach (var sub in v.Streams.Where(s => s.Type == MediaStreamType.Subtitle && s.IsExternal && !string.IsNullOrEmpty(s.Path)))
             {
                 var ext = Path.GetExtension(sub.Path).ToUpperInvariant();
-                if (!TextExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)) || Languages.ToTwoLetter(sub.Language) is not { } lang || !languages.Contains(lang)
+                if (!TextExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)) || Languages.ToTwoLetter(sub.Language) is not { } lang || !v.Wanted.Contains(lang)
                     || SubtitleGenerator.IsGenerated(sub.Path))
                 {
                     continue;
@@ -63,21 +70,19 @@ internal sealed class LibraryVideos
     }
 
     /// <summary>
-    /// Embedded text tracks in the chosen languages, for videos with no subtitle file of that language beside them (one
-    /// that counts, see <see cref="FindRules.Counts(bool, bool, bool, bool)"/>).
+    /// Embedded text tracks in the languages wanted for each video's library, for videos with no subtitle file of that
+    /// language beside them (one that counts, see <see cref="FindRules.Counts(bool, bool, bool, bool)"/>).
     /// </summary>
-    /// <param name="languages">The chosen languages, as two-letter codes.</param>
     /// <param name="countImages">Whether picture-based subtitles count as having one.</param>
     /// <returns>The tracks to check.</returns>
-    public IEnumerable<EmbeddedJob> EmbeddedTracks(IReadOnlySet<string> languages, bool countImages)
+    public IEnumerable<EmbeddedJob> EmbeddedTracks(bool countImages)
     {
-        ArgumentNullException.ThrowIfNull(languages);
         foreach (var v in Walk())
         {
             var beside = LanguagesWithSubtitles(v.Streams.Where(s => s.IsExternal), countImages);
             foreach (var sub in v.Streams.Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal && !s.IsForced && s.IsTextSubtitleStream))
             {
-                if (Languages.ToTwoLetter(sub.Language) is not { } lang || !languages.Contains(lang) || beside.Contains(lang)
+                if (Languages.ToTwoLetter(sub.Language) is not { } lang || !v.Wanted.Contains(lang) || beside.Contains(lang)
                     || !FfmpegSubtitleExtractor.TextCodecs.Contains(sub.Codec ?? string.Empty, StringComparer.OrdinalIgnoreCase))
                 {
                     continue;
@@ -90,19 +95,17 @@ internal sealed class LibraryVideos
     }
 
     /// <summary>
-    /// Videos with no subtitle (beside them or inside) that counts in a chosen language (a generated one doesn't), with the
-    /// language of the audio stream that goes with it.
+    /// Videos with no subtitle (beside them or inside) that counts in a language wanted for their library (a generated one
+    /// doesn't), with the language of the audio stream that goes with it.
     /// </summary>
-    /// <param name="languages">The chosen languages, as configured (three-letter codes).</param>
     /// <param name="countImages">Whether picture-based subtitles count as having one.</param>
     /// <returns>The searches to make.</returns>
-    public IEnumerable<FindJob> Missing(IReadOnlyList<string> languages, bool countImages)
+    public IEnumerable<FindJob> Missing(bool countImages)
     {
-        ArgumentNullException.ThrowIfNull(languages);
         foreach (var v in Walk())
         {
             var have = LanguagesWithSubtitles(v.Streams, countImages);
-            foreach (var language in languages)
+            foreach (var language in v.Languages)
             {
                 if (Languages.ToTwoLetter(language) is { } two && !have.Contains(two))
                 {
@@ -118,17 +121,22 @@ internal sealed class LibraryVideos
         => streams.Where(s => s.Type == MediaStreamType.Subtitle && FindRules.Counts(s.IsForced, s.IsTextSubtitleStream, countImages, s.IsExternal && SubtitleGenerator.IsGenerated(s.Path)))
             .Select(s => Languages.ToTwoLetter(s.Language)).OfType<string>().ToHashSet(StringComparer.Ordinal);
 
+    // The films and episodes: the whole library, or the videos asked for (those still in the library)
+    private IEnumerable<BaseItem> Items()
+        => _only is null
+            ? _library.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
+                IsVirtualItem = false,
+                Recursive = true,
+            })
+            : _only.Distinct().Select(id => _library.GetItemById(id)).Where(i => i is MediaBrowser.Controller.Entities.Movies.Movie or MediaBrowser.Controller.Entities.TV.Episode && !i.IsVirtualItem).OfType<BaseItem>();
+
     private IEnumerable<LibraryVideo> Walk()
     {
-        var items = _library.GetItemList(new InternalItemsQuery
+        foreach (var item in Items())
         {
-            IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
-            IsVirtualItem = false,
-            Recursive = true,
-        });
-        foreach (var item in items)
-        {
-            if (item is not Video video || string.IsNullOrEmpty(video.Path) || video.RunTimeTicks is not > 0 || !File.Exists(video.Path))
+            if (item is not Video video || string.IsNullOrEmpty(video.Path) || video.RunTimeTicks is not > 0 || !_scope.Includes(video.Path) || !File.Exists(video.Path))
             {
                 continue;
             }
@@ -140,10 +148,11 @@ internal sealed class LibraryVideos
                 continue;
             }
 
-            yield return new LibraryVideo(item, video, streams, audio, TimeSpan.FromTicks(video.RunTimeTicks!.Value));
+            var languages = _scope.LanguagesForPath(video.Path).Codes;
+            yield return new LibraryVideo(item, video, streams, audio, TimeSpan.FromTicks(video.RunTimeTicks!.Value), languages, languages.Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal));
         }
     }
 
-    // One video, as walked
-    private sealed record LibraryVideo(BaseItem Item, Video Video, IReadOnlyList<MediaStream> Streams, IReadOnlyList<(string? Language, bool IsDefault)> Audio, TimeSpan Duration);
+    // One video, as walked, with the languages wanted for its library (three-letter, in order; and two-letter)
+    private sealed record LibraryVideo(BaseItem Item, Video Video, IReadOnlyList<MediaStream> Streams, IReadOnlyList<(string? Language, bool IsDefault)> Audio, TimeSpan Duration, IReadOnlyList<string> Languages, HashSet<string> Wanted);
 }

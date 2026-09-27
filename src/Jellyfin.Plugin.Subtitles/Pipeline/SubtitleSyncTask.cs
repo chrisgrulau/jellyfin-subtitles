@@ -10,6 +10,7 @@ using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Pricing;
 using Jellyfin.Plugin.Subtitles.SpeechToText;
 using Jellyfin.Plugin.Subtitles.SpeechToText.BuiltIn;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Model.Tasks;
@@ -33,6 +34,8 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     private readonly Spending _spending;
     private readonly EmbeddedChecker _embedded;
     private readonly SubtitleProcessor _processor;
+    private readonly RunGate _gate;
+    private readonly IServerConfigurationManager _server;
     private readonly ILogger<SubtitleSyncTask> _logger;
 
     /// <summary>
@@ -47,9 +50,13 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     /// <param name="spending">Prices, spend ledger and exchange rates.</param>
     /// <param name="embedded">Checks subtitle tracks inside videos (when switched on).</param>
     /// <param name="processor">Processes one subtitle.</param>
+    /// <param name="gate">Keeps this task and other work on subtitle files apart.</param>
+    /// <param name="server">Jellyfin's configuration (for the languages' last fallback).</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, EmbeddedChecker embedded, SubtitleProcessor processor, ILogger<SubtitleSyncTask> logger)
+    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, EmbeddedChecker embedded, SubtitleProcessor processor, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleSyncTask> logger)
     {
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
+        _server = server ?? throw new ArgumentNullException(nameof(server));
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _media = media ?? throw new ArgumentNullException(nameof(media));
         _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
@@ -84,9 +91,10 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
+        using var hold = await _gate.EnterSharedAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await RunAsync(progress, cancellationToken).ConfigureAwait(false);
+            await RunAsync(null, null, progress, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -95,7 +103,27 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         }
     }
 
-    private async Task RunAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    /// <summary>
+    /// Checks the subtitles of a few videos soon after they were added (see <see cref="NewItemsHost"/>): all subtitle
+    /// files of videos added, and files not seen before beside videos that changed. The caller holds the gate alone.
+    /// </summary>
+    /// <param name="batch">The videos.</param>
+    /// <param name="checks">The day's allowance of AI checks for new videos.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    internal async Task RunForAsync(NewItemBatch batch, Ai.AiChecks checks, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RunAsync(batch, checks, new Progress<double>(), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _processor.FlushResults();
+        }
+    }
+
+    private async Task RunAsync(NewItemBatch? batch, Ai.AiChecks? checks, IProgress<double> progress, CancellationToken cancellationToken)
     {
         var config = SubtitlesPlugin.Instance?.Configuration;
         if (config is null || !config.Enabled)
@@ -112,12 +140,11 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
 
         var ffmpeg = run.Ffmpeg;
         var speech = run.Speech(config, config.SyncSnippets, "subtitles.sync", out var problem);
-        var policies = RunStart.PoliciesFor(config);
+        var policies = RunStart.PoliciesFor(config, checks);
         if (speech is null && problem is not null)
         {
             LogNoSpeech(_logger, problem);
         }
-        var wanted = LanguageSettings.EffectiveLanguages(config.Languages).Select(Languages.ToTwoLetter).OfType<string>().ToHashSet(StringComparer.Ordinal);
         foreach (var unknown in LanguageSettings.UnknownLanguages(config.Languages))
         {
             LogUnknownLanguage(_logger, unknown);
@@ -137,15 +164,14 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             return;
         }
 
-        // Results for subtitle files that were deleted are no longer needed
-        var pruned = _processor.PruneGone();
-        if (pruned > 0)
+        // Results for subtitle files that were deleted are no longer needed (checked by the nightly run only)
+        if (batch is null && _processor.PruneGone() is > 0 and var pruned)
         {
             LogPruned(_logger, pruned);
         }
 
-        var videos = new LibraryVideos(_library, _media);
-        var jobs = videos.SubtitleFiles(wanted).ToList();
+        var videos = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config, _server), batch?.All);
+        var jobs = videos.SubtitleFiles().Where(j => batch is null || batch.ChecksFile(j.ItemId, _processor.Knows(j.SubtitlePath))).ToList();
         var todo = new List<SubtitleJob>();
         foreach (var job in jobs)
         {
@@ -190,14 +216,14 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             progress.Report(100.0 * (i + 1) / todo.Count);
         }
 
-        if (policies.Auditor is not null && speech is not null && config.MaxAuditsOfEarlierPerRun > 0)
+        if (batch is null && policies.Auditor is not null && speech is not null && config.MaxAuditsOfEarlierPerRun > 0)
         {
             await AuditEarlierAsync(jobs, ffmpeg, speech, policies.Auditor, Math.Min(config.MaxAuditsOfEarlierPerRun, 200), cancellationToken).ConfigureAwait(false);
         }
 
         if (config.CheckEmbeddedSubtitles)
         {
-            await CheckEmbeddedAsync(config, videos, wanted, ffmpeg, speech, policies, cancellationToken).ConfigureAwait(false);
+            await CheckEmbeddedAsync(config, videos, batch, ffmpeg, speech, policies, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -231,9 +257,10 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     }
 
     // Text subtitle tracks inside videos, a few per run (each is copied out by reading the whole video)
-    private async Task CheckEmbeddedAsync(PluginConfiguration config, LibraryVideos videos, HashSet<string> wanted, string ffmpeg, ISpeechToText? speech, Policies policies, CancellationToken cancellationToken)
+    private async Task CheckEmbeddedAsync(PluginConfiguration config, LibraryVideos videos, NewItemBatch? batch, string ffmpeg, ISpeechToText? speech, Policies policies, CancellationToken cancellationToken)
     {
-        var todo = videos.EmbeddedTracks(wanted, config.CountImageSubtitles).Where(_embedded.NeedsCheck).Take(Math.Clamp(config.MaxEmbeddedPerRun, 1, 200)).ToList();
+        // For new videos, only the tracks of videos added (a video that only changed has had its tracks checked)
+        var todo = videos.EmbeddedTracks(config.CountImageSubtitles).Where(j => batch is null || batch.Added.Contains(j.ItemId)).Where(_embedded.NeedsCheck).Take(Math.Clamp(config.MaxEmbeddedPerRun, 1, 200)).ToList();
         LogEmbeddedStarting(_logger, todo.Count);
         foreach (var job in todo)
         {
