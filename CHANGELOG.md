@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0-alpha] - 2026-09-27
+
 ### Added
 
 - **One budget page with Shoal AI:** when Shoal AI is installed and allows it ("Allow Subtitles to use this budget for
