@@ -375,6 +375,13 @@ page shows progress without a background job, and a batch never runs alongside a
   recorded: `ResultStatus.Deferred`, nothing changed, checked again on the next run (after new files, so deferred ones
   never crowd them out); the search (`find-`) and embedded tracks likewise. A decided line-start verdict stands, with
   the failure noted.
+- **Waiting for speech-to-text** (`SpeechReadiness`): while no service can be used (none set up; the chosen one and
+  every stand-in passed over in the run; or each in a systemic problem whose last failure was under a day ago), a
+  deferred check on an unchanged file (`WaitsForSpeech`: same fingerprint, no rerun asked) is skipped without redoing
+  the line-start stage, and a deferred search is skipped without downloading ("waiting for speech-to-text"); neither
+  counts against the run's files or searches. A systemic problem stops holding them back a day after its last
+  failure, so they are tried at least daily. A new search can't know beforehand whether it will need speech-to-text,
+  so only searches already deferred wait.
 - **Rerun**: `POST Subtitles/Results/{id}/Rerun` sets `RerunWith` to the service first chosen, for a subtitle file's own
   check (plain id) that fell back or failed, and only while that service is usable now (`SpeechFallback.Usable`: key and
   paid use allowed; address; allowed and installed). The next check run takes those first and builds that service

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.Common.Costs;
 using Jellyfin.Plugin.Common.Resilience;
 using Jellyfin.Plugin.Subtitles.Audio;
+using Jellyfin.Plugin.Subtitles.Candidates;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Formats;
 using Jellyfin.Plugin.Subtitles.Pipeline;
@@ -565,5 +566,66 @@ public sealed class SpeechResilienceTests : IDisposable
 
         Assert.InRange(log.Recent(0, 1).Total, SpeechErrorLog.MaxEntries, SpeechErrorLog.MaxEntries + (SpeechErrorLog.MaxEntries / 10));
         Assert.InRange(new SpeechErrorLog(_dir, clock).Recent(0, 1).Total, SpeechErrorLog.MaxEntries, SpeechErrorLog.MaxEntries + (SpeechErrorLog.MaxEntries / 10));
+    }
+
+    private static ProviderHealth Troubled(string provider, DateTimeOffset last) => new(provider, provider, true, "down", 5, 0, 5, 0, last);
+
+    [Fact]
+    public async Task Speech_is_ready_while_some_service_is_not_passed_over_or_in_trouble()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.False(SpeechReadiness.Ready(null, [], now));
+        Assert.True(SpeechReadiness.Ready(new Flaky("deepgram"), [], now));
+        Assert.False(SpeechReadiness.Ready(new Flaky("deepgram"), [Troubled("deepgram", now.AddHours(-1))], now));
+
+        // A day after its last failure a systemic problem no longer holds waiting work back, so recovery is noticed
+        Assert.True(SpeechReadiness.Ready(new Flaky("deepgram"), [Troubled("deepgram", now.AddHours(-25))], now));
+
+        // With a chain, one healthy stand-in is enough; once every service is passed over in the run, none is ready
+        var chain = Chained(new Flaky("deepgram", Many(9, FailureClass.Authentication)), new Flaky("local", Many(9, FailureClass.Authentication)));
+        Assert.True(SpeechReadiness.Ready(chain, [Troubled("deepgram", now)], now));
+        Assert.False(SpeechReadiness.Ready(chain, [Troubled("deepgram", now), Troubled("local", now)], now));
+        await Assert.ThrowsAsync<SpeechToTextException>(() => chain.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken));
+        Assert.False(SpeechReadiness.Ready(chain, [], now));
+    }
+
+    [Fact]
+    public async Task A_deferred_check_on_an_unchanged_file_waits_for_speech_without_redoing_line_starts()
+    {
+        var path = Path.Combine(_dir, "Invented Film (2019).en.srt");
+        File.WriteAllBytes(path, SubtitleWriter.ToBytes(PipelineTests.Story()));
+        var processor = new SubtitleProcessor(new ResultStore(Path.Combine(_dir, "results.json")), new SubtitleFiles(Path.Combine(_dir, "originals")));
+        var job = new SubtitleJob(Guid.NewGuid(), "Invented Film", Path.Combine(_dir, "Invented Film (2019).mkv"), path, "eng", TimeSpan.FromMinutes(25), 0);
+        var audio = new PipelineTests.Shifted(PipelineTests.Story(), 0);
+        var deferred = await processor.ProcessAsync(job, audio, new Flaky("deepgram", Many(9, FailureClass.NoConnection)), new Policies(ChangePolicy.Review, ChangePolicy.Review, new CleanupSettings()), TestContext.Current.CancellationToken);
+        Assert.Equal(ResultStatus.Deferred, deferred.Status);
+        var fingerprint = SubtitleFiles.Fingerprint(await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
+
+        Assert.True(processor.WaitsForSpeech(path, fingerprint));
+        Assert.False(processor.WaitsForSpeech(path, "another fingerprint"));
+
+        // Asked to run again with the chosen service: not held back
+        processor.RequestRerun(deferred.Id);
+        Assert.False(processor.WaitsForSpeech(path, fingerprint));
+    }
+
+    [Fact]
+    public void A_deferred_search_waits_without_downloading_and_stays_deferred()
+    {
+        var store = new ResultStore(Path.Combine(_dir, "results.json"));
+        var finder = new SubtitleFinder(store, new DownloadLedger(Path.Combine(_dir, "downloads.json")));
+        var video = Path.Combine(_dir, "Invented Film (2020).mkv");
+        var job = new FindJob(Guid.NewGuid(), "Invented Film", video, new VideoFacts { FileName = "Invented Film (2020).mkv", Duration = TimeSpan.FromMinutes(25) }, "eng", TimeSpan.FromMinutes(25), 0);
+        Assert.False(finder.IsDeferred(job));
+        store.Put(new SubtitleResult { Id = SubtitleFinder.IdFor(video, "eng"), SubtitlePath = video + ".eng", VideoPath = video, Status = ResultStatus.Deferred, Explanation = "Couldn't check yet.", Time = DateTimeOffset.UtcNow });
+
+        Assert.True(finder.IsDeferred(job));
+        Assert.True(finder.NeedsSearch(job));
+        finder.NoteWaiting(job);
+
+        var r = store.Get(SubtitleFinder.IdFor(video, "eng"))!;
+        Assert.Equal(ResultStatus.Deferred, r.Status);
+        Assert.Contains("waiting for speech-to-text", r.Explanation, StringComparison.Ordinal);
+        Assert.Contains("nothing was downloaded", r.Explanation, StringComparison.Ordinal);
     }
 }

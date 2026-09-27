@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Common.Resilience;
@@ -216,6 +217,13 @@ internal sealed class FallbackSpeechToText : ISpeechToText
             ServiceBroken = chosenFailure.ServiceBroken,
         };
     }
+
+    /// <summary>
+    /// The services not passed over in this run: the chosen one and its stand-ins (stand-ins named by id).
+    /// </summary>
+    /// <returns>Their ids.</returns>
+    internal IReadOnlyList<string> Available()
+        => [.. new[] { _chosen.Id }.Concat(_standIns.Select(s => s.Id).Where(id => id.Length > 0)).Distinct(StringComparer.Ordinal).Where(id => PassedOver(id) is null)];
 
     private SpeechToTextException? PassedOver(string id)
     {

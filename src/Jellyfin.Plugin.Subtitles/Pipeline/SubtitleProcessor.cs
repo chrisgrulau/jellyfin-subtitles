@@ -1000,6 +1000,18 @@ public sealed class SubtitleProcessor
     public bool IsDeferred(string subtitlePath) => _results.Get(ResultStore.IdFor(subtitlePath))?.Status == ResultStatus.Deferred;
 
     /// <summary>
+    /// Whether a subtitle's last check was deferred for want of speech-to-text on this very file (same fingerprint): its
+    /// free line-start stage has already run and would only say the same again, so it waits until speech-to-text can be
+    /// used.
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <param name="fingerprint">Its fingerprint now.</param>
+    /// <returns><c>true</c> if only speech-to-text can take it further.</returns>
+    public bool WaitsForSpeech(string subtitlePath, string fingerprint)
+        => _results.Get(ResultStore.IdFor(subtitlePath)) is { Status: ResultStatus.Deferred, RerunWith: null } r
+            && string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal);
+
+    /// <summary>
     /// Asks for a subtitle to be checked again on the next run with the speech-to-text service that was chosen when its
     /// check fell back to a free one (or went on without speech-to-text). Nothing else about the result changes until
     /// then, so Undo still works.

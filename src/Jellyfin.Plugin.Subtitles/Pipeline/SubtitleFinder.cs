@@ -142,6 +142,31 @@ public sealed class SubtitleFinder
     }
 
     /// <summary>
+    /// Whether a video's last search was deferred for want of speech-to-text (candidates couldn't be judged).
+    /// </summary>
+    /// <param name="job">The video and language.</param>
+    /// <returns><c>true</c> if deferred.</returns>
+    public bool IsDeferred(FindJob job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        return _results.Get(IdFor(job.VideoPath, job.Language))?.Status == ResultStatus.Deferred;
+    }
+
+    /// <summary>
+    /// Notes that a deferred search is still waiting for speech-to-text (it stays deferred; nothing is downloaded).
+    /// </summary>
+    /// <param name="job">The video and language.</param>
+    public void NoteWaiting(FindJob job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        const string Waiting = "Couldn't check yet: waiting for speech-to-text (none can be used now), so nothing was downloaded. Searched again once it can be.";
+        if (_results.Get(IdFor(job.VideoPath, job.Language)) is { Status: ResultStatus.Deferred } r && r.Explanation != Waiting)
+        {
+            Save(r with { Explanation = Waiting });
+        }
+    }
+
+    /// <summary>
     /// Searches, checks and (if something fits) adds a subtitle.
     /// </summary>
     /// <param name="job">The video and language.</param>

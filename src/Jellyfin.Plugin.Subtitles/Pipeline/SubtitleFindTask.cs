@@ -182,16 +182,42 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         var combined = subdlKey is null ? null : new CombinedSource([jellyfin, new SubDlSource(subdlHttp, subdlKey, IdsOf)]);
         ICandidateSource source = combined ?? (ICandidateSource)jellyfin;
         // Specials (season 0) last: subtitle sites rarely have them, and they'd use up the run
+        // A search deferred for want of speech-to-text waits, without downloading or counting against the run, while no
+        // speech-to-text service can be used (see SpeechReadiness)
+        var speechReady = SpeechReadiness.Ready(speech, _errors?.Health() ?? [], DateTimeOffset.UtcNow);
+        var waiting = new List<FindJob>();
         var jobs = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config, _server), only).Missing(config.CountImageSubtitles)
             .Where(_finder.NeedsSearch)
+            .Where(j =>
+            {
+                if (speechReady || !_finder.IsDeferred(j))
+                {
+                    return true;
+                }
+
+                waiting.Add(j);
+                return false;
+            })
             .OrderBy(j => j.Video.Season == 0)
             .Take(Math.Max(1, config.MaxFindsPerRun))
             .ToList();
         LogStarting(_logger, jobs.Count, speech?.Id ?? "none");
+        foreach (var w in waiting)
+        {
+            _finder.NoteWaiting(w);
+        }
         for (var i = 0; i < jobs.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var job = jobs[i];
+
+            // Speech-to-text may have gone down during the run (every service passed over): a deferred search waits
+            if (_finder.IsDeferred(job) && !SpeechReadiness.Ready(speech, _errors?.Health() ?? [], DateTimeOffset.UtcNow))
+            {
+                _finder.NoteWaiting(job);
+                continue;
+            }
+
             try
             {
                 var result = await _finder.FindAsync(job, source, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, policies, config.MaxDownloadsPerDay, cancellationToken).ConfigureAwait(false);

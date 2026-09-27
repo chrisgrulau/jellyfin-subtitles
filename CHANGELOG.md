@@ -22,7 +22,10 @@ All notable changes to this project are documented here. The format follows
   the next run, first in line (`POST Subtitles/Results/{id}/Rerun`).
 - **Couldn't check yet**: when speech-to-text was needed (the line-start stage couldn't decide) and no service could be
   used, no verdict is recorded and nothing is changed; the check (or search, or embedded track) is tried again on the
-  next run, after new files.
+  next run, after new files. While no speech-to-text service can be used (none set up, all failed in this run, or each
+  in a systemic problem for under a day), a deferred check on an unchanged file is skipped without redoing its free
+  line-start work, and a deferred search is skipped without downloading ("waiting for speech-to-text"); neither counts
+  against the run's limits.
 - **Built-in repair**: a built-in program that can't start, or crashes twice in a row, has its files checked against the
   compiled-in checksums; damaged or unrunnable files are removed and downloaded again in the background, and the page
   says it needs repairing with **Download again** until then. Intact files mean the server can't run it. A normal

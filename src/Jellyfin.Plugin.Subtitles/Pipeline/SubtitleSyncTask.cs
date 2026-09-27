@@ -176,6 +176,8 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         var videos = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config, _server), batch?.All);
         var jobs = videos.SubtitleFiles().Where(j => batch is null || batch.ChecksFile(j.ItemId, _processor.Knows(j.SubtitlePath))).ToList();
         var todo = new List<SubtitleJob>();
+        bool? speechReady = null;
+        var waiting = 0;
 
         // Checks asked to run again with the speech-to-text service first chosen go first (someone is waiting); checks that
         // couldn't be done for want of speech-to-text go last, so they never crowd out new files
@@ -185,6 +187,13 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             try
             {
                 var fingerprint = await SubtitleFiles.FingerprintFileAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false);
+                if (_processor.WaitsForSpeech(job.SubtitlePath, fingerprint) && !(speechReady ??= SpeechReadiness.Ready(speech, _errors?.Health() ?? [], DateTimeOffset.UtcNow)))
+                {
+                    // Deferred for want of speech-to-text, file unchanged, and still none usable: not checked, not counted
+                    waiting++;
+                    continue;
+                }
+
                 if (_processor.NeedsCheck(job.SubtitlePath, fingerprint, speech?.Id ?? string.Empty))
                 {
                     todo.Add(job);
@@ -202,6 +211,10 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         }
 
         LogStarting(_logger, todo.Count, jobs.Count, speech?.Id ?? "none");
+        if (waiting > 0)
+        {
+            LogWaiting(_logger, waiting);
+        }
         for (var i = 0; i < todo.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -304,6 +317,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             }
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: {Count} subtitle files wait for speech-to-text (none can be used now)")]
+    private static partial void LogWaiting(ILogger logger, int count);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: checking {Count} subtitle tracks inside videos")]
     private static partial void LogEmbeddedStarting(ILogger logger, int count);
