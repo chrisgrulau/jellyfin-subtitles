@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.17.0-alpha] - 2026-09-27
+
 ### Added
 
 - **Act on many results at once.** Each result has a tick box, and the header's box selects every result shown; once

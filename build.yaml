@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.16.3.0"
+version: "0.17.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,4 +14,5 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.16.3-alpha: every button that calls the server shows progress while it works, and its outcome next to it.
+  0.17.0-alpha: act on many results at once (tick boxes, select all matching, Apply/Decline/Undo/Check again in the
+  background with progress); the whole-file check tuned on real videos: far fewer lines flagged that aren't wrong.
