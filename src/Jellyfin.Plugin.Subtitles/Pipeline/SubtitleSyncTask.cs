@@ -32,6 +32,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
     private readonly Spending _spending;
+    private readonly SpeechErrorLog? _errors;
     private readonly EmbeddedChecker _embedded;
     private readonly SubtitleProcessor _processor;
     private readonly RunGate _gate;
@@ -53,7 +54,8 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     /// <param name="gate">Keeps this task and other work on subtitle files apart.</param>
     /// <param name="server">Jellyfin's configuration (for the languages' last fallback).</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, EmbeddedChecker embedded, SubtitleProcessor processor, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleSyncTask> logger)
+    /// <param name="errors">Where speech-to-text calls and failures are counted.</param>
+    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, EmbeddedChecker embedded, SubtitleProcessor processor, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleSyncTask> logger, SpeechErrorLog? errors = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _server = server ?? throw new ArgumentNullException(nameof(server));
@@ -64,6 +66,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
+        _errors = errors;
         _embedded = embedded ?? throw new ArgumentNullException(nameof(embedded));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -131,7 +134,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             return;
         }
 
-        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken).ConfigureAwait(false);
+        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken, errors: _errors).ConfigureAwait(false);
         if (run is null)
         {
             LogNoFfmpeg(_logger);
@@ -173,12 +176,24 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         var videos = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config, _server), batch?.All);
         var jobs = videos.SubtitleFiles().Where(j => batch is null || batch.ChecksFile(j.ItemId, _processor.Knows(j.SubtitlePath))).ToList();
         var todo = new List<SubtitleJob>();
-        foreach (var job in jobs)
+        bool? speechReady = null;
+        var waiting = 0;
+
+        // Checks asked to run again with the speech-to-text service first chosen go first (someone is waiting); checks that
+        // couldn't be done for want of speech-to-text go last, so they never crowd out new files
+        foreach (var job in jobs.OrderBy(j => _processor.RerunWith(j.SubtitlePath) is not null ? 0 : _processor.IsDeferred(j.SubtitlePath) ? 2 : 1))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var fingerprint = await SubtitleFiles.FingerprintFileAsync(job.SubtitlePath, cancellationToken).ConfigureAwait(false);
+                if (_processor.WaitsForSpeech(job.SubtitlePath, fingerprint) && !(speechReady ??= SpeechReadiness.Ready(speech, _errors?.Health() ?? [], DateTimeOffset.UtcNow)))
+                {
+                    // Deferred for want of speech-to-text, file unchanged, and still none usable: not checked, not counted
+                    waiting++;
+                    continue;
+                }
+
                 if (_processor.NeedsCheck(job.SubtitlePath, fingerprint, speech?.Id ?? string.Empty))
                 {
                     todo.Add(job);
@@ -196,13 +211,28 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         }
 
         LogStarting(_logger, todo.Count, jobs.Count, speech?.Id ?? "none");
+        if (waiting > 0)
+        {
+            LogWaiting(_logger, waiting);
+        }
         for (var i = 0; i < todo.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var job = todo[i];
             try
             {
-                var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, policies, cancellationToken).ConfigureAwait(false);
+                var jobSpeech = speech;
+                if (_processor.RerunWith(job.SubtitlePath) is { } rerun && rerun != speech?.Id)
+                {
+                    jobSpeech = run.SpeechWith(config, config.SyncSnippets, rerun, "subtitles.sync", out var rerunProblem);
+                    if (jobSpeech is null)
+                    {
+                        LogNoSpeech(_logger, rerunProblem ?? rerun);
+                        jobSpeech = speech;
+                    }
+                }
+
+                var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), jobSpeech, policies, cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
             }
 #pragma warning disable CA1031 // One odd file (a subtitle from the internet can hold anything) mustn't stop the nightly run: it is recorded as failed
@@ -287,6 +317,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             }
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: {Count} subtitle files wait for speech-to-text (none can be used now)")]
+    private static partial void LogWaiting(ILogger logger, int count);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: checking {Count} subtitle tracks inside videos")]
     private static partial void LogEmbeddedStarting(ILogger logger, int count);

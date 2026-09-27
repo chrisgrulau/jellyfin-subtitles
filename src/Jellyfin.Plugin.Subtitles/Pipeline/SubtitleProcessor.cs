@@ -82,6 +82,17 @@ public sealed class SubtitleProcessor
     }
 
     /// <summary>
+    /// Every result, in the order the page lists them: everything waiting for review first, however old, then the most
+    /// recent.
+    /// </summary>
+    /// <returns>The results.</returns>
+    public IReadOnlyList<SubtitleResult> Ordered()
+    {
+        var all = _results.All();
+        return [.. all.Where(r => r.PendingReview), .. all.Where(r => !r.PendingReview)];
+    }
+
+    /// <summary>
     /// Writes results still waiting to be saved (at the end of a run).
     /// </summary>
     public void FlushResults() => _results.Flush();
@@ -126,6 +137,12 @@ public sealed class SubtitleProcessor
     /// <returns>Whether to check it.</returns>
     public bool NeedsCheck(string subtitlePath, string fingerprint, string? speechSetup)
     {
+        // Asked to run again with the chosen speech-to-text service, or couldn't be checked for want of speech-to-text
+        if (_results.Get(ResultStore.IdFor(subtitlePath)) is { } asked && (asked.RerunWith is not null || asked.Status == ResultStatus.Deferred))
+        {
+            return true;
+        }
+
         if (speechSetup is not null && _results.Get(ResultStore.IdFor(subtitlePath)) is { Status: ResultStatus.Unreliable or ResultStatus.WrongLanguage } unclear
             && string.Equals(unclear.Fingerprint, fingerprint, StringComparison.Ordinal)
             && !string.Equals(unclear.SpeechSetup, speechSetup, StringComparison.Ordinal))
@@ -235,7 +252,25 @@ public sealed class SubtitleProcessor
         var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
+        if (outcome.Deferred)
+        {
+            // No verdict without speech-to-text: nothing is changed, and the next run tries again
+            return Save(result with
+            {
+                Status = ResultStatus.Deferred,
+                Stage = outcome.Stage,
+                SpeechSetup = speech?.Id ?? string.Empty,
+                SpeechFallback = outcome.SpeechFallback,
+                Explanation = outcome.Note ?? "Couldn't check yet: speech-to-text unavailable.",
+            });
+        }
+
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;
+        if (outcome.SpeechFallback is { To: not null } stoodIn)
+        {
+            explanation += " " + stoodIn.Reason;
+        }
+
         // A timing decided from lines the AI matched by meaning always waits for review (SUB-28), until there is field data
         var status = outcome.WrongLanguageSuspected ? ResultStatus.WrongLanguage : model.Status switch
         {
@@ -245,7 +280,9 @@ public sealed class SubtitleProcessor
         };
         result = result with
         {
-            SpeechSetup = speech?.Id ?? string.Empty,
+            // A stand-in's transcripts: its setup is recorded, so an unclear result is checked again with the chosen service
+            SpeechSetup = outcome.SpeechFallback?.To ?? speech?.Id ?? string.Empty,
+            SpeechFallback = outcome.SpeechFallback,
             Status = status,
             Scale = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Scale : 1,
             Offset = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Offset : 0,
@@ -945,6 +982,64 @@ public sealed class SubtitleProcessor
         }
 
         _results.Remove(id);
+    }
+
+    /// <summary>
+    /// The speech-to-text service a subtitle is to be checked again with on this run (asked for with
+    /// <see cref="RequestRerun"/>), or <c>null</c>.
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <returns>The service id, or <c>null</c>.</returns>
+    public string? RerunWith(string subtitlePath) => _results.Get(ResultStore.IdFor(subtitlePath))?.RerunWith;
+
+    /// <summary>
+    /// Whether a subtitle's last check couldn't be done for want of speech-to-text (checked again after the others).
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <returns><c>true</c> if it was deferred.</returns>
+    public bool IsDeferred(string subtitlePath) => _results.Get(ResultStore.IdFor(subtitlePath))?.Status == ResultStatus.Deferred;
+
+    /// <summary>
+    /// Whether a subtitle's last check was deferred for want of speech-to-text on this very file (same fingerprint): its
+    /// free line-start stage has already run and would only say the same again, so it waits until speech-to-text can be
+    /// used.
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <param name="fingerprint">Its fingerprint now.</param>
+    /// <returns><c>true</c> if only speech-to-text can take it further.</returns>
+    public bool WaitsForSpeech(string subtitlePath, string fingerprint)
+        => _results.Get(ResultStore.IdFor(subtitlePath)) is { Status: ResultStatus.Deferred, RerunWith: null } r
+            && string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Asks for a subtitle to be checked again on the next run with the speech-to-text service that was chosen when its
+    /// check fell back to a free one (or went on without speech-to-text). Nothing else about the result changes until
+    /// then, so Undo still works.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    /// <exception cref="InvalidOperationException">No such result, or it didn't fall back.</exception>
+    public SubtitleResult RequestRerun(string id)
+    {
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        if (!CanRerun(r))
+        {
+            throw new InvalidOperationException("This check didn't fall back from another speech-to-text service, so there is nothing to run again.");
+        }
+
+        return r.RerunWith is not null ? r : Save(r with { RerunWith = r.SpeechFallback!.From });
+    }
+
+    /// <summary>
+    /// Whether a result can be checked again with the speech-to-text service first chosen: a subtitle file's own check
+    /// (not a search, generated or embedded result) whose chosen service failed.
+    /// </summary>
+    /// <param name="r">The result.</param>
+    /// <returns><c>true</c> if "Rerun with …" applies.</returns>
+    public static bool CanRerun(SubtitleResult r)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        return r.SpeechFallback is not null && !r.Id.Contains('-', StringComparison.Ordinal) && File.Exists(r.SubtitlePath);
     }
 
     /// <summary>

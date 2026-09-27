@@ -87,6 +87,20 @@ public sealed class SubtitleActivity
         return WriteOnceAsync("stopped|" + why, new ActivityNote("Shoal Subtitles stopped searching for today", Short(why), why, LogLevel.Warning));
     }
 
+    /// <summary>
+    /// Writes that a speech-to-text service has a systemic problem (at most once a day per service; transitory failures
+    /// never get here).
+    /// </summary>
+    /// <param name="health">The service's health.</param>
+    /// <returns>Whether it was written.</returns>
+    public Task<bool> NotifySpeechProblemAsync(SpeechToText.ProviderHealth health)
+    {
+        ArgumentNullException.ThrowIfNull(health);
+        return health.Systemic && health.Problem is { } problem
+            ? WriteOnceAsync("speech|" + health.Provider, new ActivityNote("Shoal Subtitles: speech-to-text keeps failing", Short(problem), problem + " Checks fall back to a free service on this server where one is set up; see Recent speech errors on the plugin page.", LogLevel.Warning))
+            : Task.FromResult(false);
+    }
+
     private static string Short(string text) => text.Length > 250 ? text[..250] + "…" : text;
 
     private async Task<bool> WriteOnceAsync(string key, ActivityNote note)

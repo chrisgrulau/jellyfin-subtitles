@@ -79,6 +79,7 @@ public sealed class EmbeddedChecker
         ArgumentNullException.ThrowIfNull(job);
         // A failure is tried again only after a while: each try reads the whole video
         return _results.Get(IdFor(job.VideoPath, job.StreamIndex)) is not { } r
+            || r.Status == ResultStatus.Deferred
             || (r.Status != ResultStatus.Added && r.Status != ResultStatus.Undone
                 && (!string.Equals(r.Fingerprint, job.Fingerprint, StringComparison.Ordinal)
                     || (r.Status == ResultStatus.Failed ? _clock.GetUtcNow() - r.Time >= SubtitleFinder.SearchAgainAfter : r.Version < SubtitleProcessor.CurrentVersion)));
@@ -123,10 +124,15 @@ public sealed class EmbeddedChecker
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;
+        if (outcome.Deferred)
+        {
+            return Save(result with { Status = ResultStatus.Deferred, Stage = outcome.Stage, SpeechFallback = outcome.SpeechFallback, Explanation = "The " + track + ": " + outcome.Note });
+        }
+
         if (outcome.WrongLanguageSuspected || model.Status != SyncStatus.Corrected)
         {
             var status = outcome.WrongLanguageSuspected ? ResultStatus.WrongLanguage : model.Status == SyncStatus.InSync ? ResultStatus.InSync : ResultStatus.Unreliable;
-            return Save(result with { Status = status, Stage = outcome.Stage, Confidence = model.Confidence, Explanation = "The " + track + ": " + explanation });
+            return Save(result with { Status = status, Stage = outcome.Stage, Confidence = model.Confidence, SpeechFallback = outcome.SpeechFallback, Explanation = "The " + track + ": " + explanation });
         }
 
         // Out of time: a corrected copy beside the video (the video is never changed); nothing existing is replaced
@@ -148,6 +154,7 @@ public sealed class EmbeddedChecker
             Offset = model.Offset,
             Stage = outcome.Stage,
             Confidence = model.Confidence,
+            SpeechFallback = outcome.SpeechFallback,
             Cleaned = applied.GroupBy(c => c.Kind.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal),
             Explanation = string.Create(CultureInfo.InvariantCulture, $"The {track} was out of time by {model.Offset:+0.00;-0.00} s")
                 + (Math.Abs(model.Scale - 1) > 1e-9 ? string.Create(CultureInfo.InvariantCulture, $" with a frame-rate change (×{model.Scale:0.00000})") : string.Empty)

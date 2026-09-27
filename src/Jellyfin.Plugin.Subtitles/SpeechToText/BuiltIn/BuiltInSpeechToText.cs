@@ -25,6 +25,7 @@ public sealed class BuiltInSpeechToText : ISpeechToText
     private readonly string _workFolder;
     private readonly string _platform;
     private readonly string _model;
+    private readonly Action? _repair;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BuiltInSpeechToText"/> class.
@@ -33,8 +34,10 @@ public sealed class BuiltInSpeechToText : ISpeechToText
     /// <param name="workFolder">Folder for temporary audio and output.</param>
     /// <param name="platform">Platform (see <see cref="BuiltInSource.CurrentPlatform"/>).</param>
     /// <param name="model">Model setting value (<c>base</c> or <c>small</c>).</param>
-    public BuiltInSpeechToText(BuiltInInstaller installer, string workFolder, string platform, string model)
+    /// <param name="repair">Starts downloading a damaged install again in the background (one at a time), if given.</param>
+    public BuiltInSpeechToText(BuiltInInstaller installer, string workFolder, string platform, string model, Action? repair = null)
     {
+        _repair = repair;
         _installer = installer ?? throw new ArgumentNullException(nameof(installer));
         ArgumentException.ThrowIfNullOrWhiteSpace(workFolder);
         ArgumentException.ThrowIfNullOrWhiteSpace(platform);
@@ -78,7 +81,7 @@ public sealed class BuiltInSpeechToText : ISpeechToText
             var wav = Path.Combine(work, "audio.wav");
             await File.WriteAllBytesAsync(wav, WavEncoder.Encode(samples), cancellationToken).ConfigureAwait(false);
             var output = Path.Combine(work, "result");
-            var messages = await RunAsync(program, Arguments(model, wav, output, language), audioSeconds, cancellationToken).ConfigureAwait(false);
+            var messages = await RunCheckedAsync(program, Arguments(model, wav, output, language), audioSeconds, cancellationToken).ConfigureAwait(false);
 
             // whisper.cpp can end with success without writing anything (e.g. audio it couldn't read)
             var json = output + ".json";
@@ -136,8 +139,26 @@ public sealed class BuiltInSpeechToText : ISpeechToText
         ];
     }
 
-    // Runs the program; returns the end of what it wrote to stderr (its own messages; never media content)
-    private static async Task<string> RunAsync(string program, string[] arguments, double audioSeconds, CancellationToken cancellationToken)
+    /// <summary>
+    /// Whether an exit code means the program crashed (a signal such as an illegal instruction, an abort or a
+    /// segmentation fault; on Windows an access violation or illegal instruction) rather than failing on this audio.
+    /// </summary>
+    /// <param name="exitCode">The exit code.</param>
+    /// <returns><c>true</c> for a crash.</returns>
+    internal static bool IsCrash(int exitCode) => exitCode is 132 or 134 or 135 or 136 or 139 or -1073741819 or -1073741795;
+
+    /// <summary>
+    /// Whether an exit code means the system stopped the program (killed, typically for want of memory): a failure for
+    /// this audio, which the health of the service counts if it keeps happening.
+    /// </summary>
+    /// <param name="exitCode">The exit code.</param>
+    /// <returns><c>true</c> if it was killed.</returns>
+    internal static bool WasKilled(int exitCode) => exitCode is 137 or -9;
+
+    // Runs the program; returns the end of what it wrote to stderr (its own messages; never media content). A program that
+    // can't start, or keeps crashing, has its files checked once against the compiled-in checksums: damaged files are
+    // downloaded again in the background; intact ones mean this server can't run it.
+    private async Task<string> RunCheckedAsync(string program, string[] arguments, double audioSeconds, CancellationToken cancellationToken)
     {
         ExternalProcessResult<object>? run;
         try
@@ -146,18 +167,66 @@ public sealed class BuiltInSpeechToText : ISpeechToText
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
         {
-            throw new SpeechToTextException("The built-in speech-to-text couldn't be started: " + ex.Message, ex) { Failure = FailureClass.BadRequest };
+            throw await BrokenAsync("couldn't be started (" + ex.Message + ")", ex, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
             throw new SpeechToTextException("The built-in speech-to-text took too long and was stopped.") { Failure = FailureClass.Transient };
         }
 
-        if (run!.ExitCode != 0)
+        var exit = run!.ExitCode;
+        if (exit == 0)
         {
-            throw new SpeechToTextException(string.Create(CultureInfo.InvariantCulture, $"The built-in speech-to-text failed (exit code {run.ExitCode}): {run.Errors}")) { Failure = FailureClass.Transient };
+            _installer.CountCrash(false);
+            return run.Errors;
         }
 
-        return run.Errors;
+        if (WasKilled(exit))
+        {
+            _installer.CountCrash(false);
+            throw new SpeechToTextException(string.Create(CultureInfo.InvariantCulture, $"The built-in speech-to-text was stopped by the system (exit code {exit}; out of memory?).")) { Failure = FailureClass.Transient };
+        }
+
+        if (IsCrash(exit))
+        {
+            if (_installer.CountCrash(true) >= 2)
+            {
+                _installer.CountCrash(false);
+                throw await BrokenAsync(string.Create(CultureInfo.InvariantCulture, $"keeps crashing (exit code {exit})"), null, cancellationToken).ConfigureAwait(false);
+            }
+
+            throw new SpeechToTextException(string.Create(CultureInfo.InvariantCulture, $"The built-in speech-to-text crashed (exit code {exit}).")) { Failure = FailureClass.Transient };
+        }
+
+        // An ordinary failure on this audio: not a problem with the install
+        _installer.CountCrash(false);
+        throw new SpeechToTextException(string.Create(CultureInfo.InvariantCulture, $"The built-in speech-to-text failed (exit code {exit}): {run.Errors}")) { Failure = FailureClass.Transient };
+    }
+
+    private async Task<SpeechToTextException> BrokenAsync(string what, Exception? cause, CancellationToken cancellationToken)
+    {
+        string message;
+        if (!await _installer.VerifyAsync(_platform, _model, cancellationToken).ConfigureAwait(false))
+        {
+            await _installer.MarkForRepairAsync(_platform, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _repair?.Invoke();
+            }
+            catch (InvalidOperationException)
+            {
+                // Can't download here; the settings page says it needs repairing
+            }
+
+            message = "The built-in speech-to-text " + what + ". Its files didn't match their checksums, so they are being downloaded again.";
+        }
+        else
+        {
+            message = "The built-in speech-to-text " + what + ". Its files are intact, so this server may not be able to run it (CPU support or system libraries).";
+        }
+
+        return cause is null
+            ? new SpeechToTextException(message) { Failure = FailureClass.Transient, ServiceBroken = true }
+            : new SpeechToTextException(message, cause) { Failure = FailureClass.Transient, ServiceBroken = true };
     }
 }

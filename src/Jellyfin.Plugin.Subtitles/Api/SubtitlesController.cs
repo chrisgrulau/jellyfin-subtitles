@@ -46,6 +46,10 @@ public class SubtitlesController : ControllerBase
     private readonly IMediaEncoder _encoder;
     private readonly RunGate _gate;
     private readonly ILibraryMonitor _monitor;
+    private readonly SpeechErrorLog _errors;
+
+    // What videos are, from the library, remembered across requests (controllers are made per request)
+    private static readonly VideoIdentityCache Identities = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitlesController"/> class.
@@ -61,8 +65,10 @@ public class SubtitlesController : ControllerBase
     /// <param name="encoder">Jellyfin's media encoder (for ffmpeg).</param>
     /// <param name="gate">Keeps restoring all originals apart from the scheduled tasks.</param>
     /// <param name="monitor">Jellyfin's library monitor (told about restored and removed subtitles).</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, RunGate gate, ILibraryMonitor monitor)
+    /// <param name="errors">Speech-to-text calls and failures.</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, RunGate gate, ILibraryMonitor monitor, SpeechErrorLog errors)
     {
+        _errors = errors ?? throw new ArgumentNullException(nameof(errors));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _monitor = monitor ?? throw new ArgumentNullException(nameof(monitor));
         _library = library ?? throw new ArgumentNullException(nameof(library));
@@ -133,6 +139,108 @@ public class SubtitlesController : ControllerBase
     [HttpGet("Results")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<IReadOnlyList<SubtitleResult>> Results([FromQuery] int limit = 200) => Ok(_processor.Recent(limit));
+
+    /// <summary>
+    /// One page of results as the settings page shows them, waiting for review first, then newest: each with its view
+    /// (the video's short identity from the library, a friendly sentence, change chips and nerd stats), filtered and
+    /// searched on the server.
+    /// </summary>
+    /// <param name="offset">How many matching results to skip.</param>
+    /// <param name="limit">How many to return (1 to 100; default 15).</param>
+    /// <param name="filter">Empty for everything; <c>waiting</c>, <c>wholefile</c>, <c>queued</c>, <c>fellback</c>, or a status name.</param>
+    /// <param name="q">Text to find in the name or the files' paths.</param>
+    /// <returns>The page.</returns>
+    [HttpGet("Results/Page")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<ResultsPage> ResultsPageOf([FromQuery] int offset = 0, [FromQuery] int limit = ResultQuery.DefaultPage, [FromQuery] string? filter = null, [FromQuery] string? q = null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var usable = UsableNow();
+        return ResultQuery.Page(_processor.Ordered(), filter, q?.Length > 200 ? q[..200] : q, offset, limit, r => ResultPresenter.Present(r, IdentityOf(r), now, TimeZoneInfo.Local, SubtitleProcessor.CanRerun(r) && usable(r.SpeechFallback!.From)));
+    }
+
+    // Which speech-to-text services can be used now (a key set and paid use allowed, the local address set, the built-in
+    // one allowed and installed): "Rerun with …" is offered only for those
+    private Func<string, bool> UsableNow()
+    {
+        var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
+        var paidAllowed = SpendingLimit.AllowsPaidUsage(Pricing.Spending.LimitsOf(config).Overall);
+        var builtInInstalled = SpeechSelection.BuiltInModelInstalled(_builtIn) is not null;
+        return provider => SpeechFallback.Usable(provider, _keys.Get(provider) is not null, paidAllowed, config.LocalServiceUrl, config.AllowBuiltInDownload, builtInInstalled);
+    }
+
+    // What the result's video is, from the library (by item, else by the video's path), remembered for a while; null
+    // when it isn't in the library, so the presenter reads the file name instead
+    private VideoIdentity? IdentityOf(SubtitleResult r)
+    {
+        var key = r.ItemId != Guid.Empty ? r.ItemId.ToString("N") : r.VideoPath;
+        if (key is null)
+        {
+            return null;
+        }
+
+        return Identities.Get(key, () =>
+        {
+            var item = r.ItemId != Guid.Empty ? _library.GetItemById(r.ItemId) : null;
+            if (item is null && r.VideoPath is { } videoPath)
+            {
+                item = _library.FindByPath(videoPath, false);
+            }
+
+            return item switch
+            {
+                MediaBrowser.Controller.Entities.TV.Episode e when !string.IsNullOrWhiteSpace(e.SeriesName) && e.IndexNumber is not null
+                    => new VideoIdentity(e.SeriesName, e.ParentIndexNumber, e.IndexNumber, e.Name, null, null),
+                MediaBrowser.Controller.Entities.Video v when !string.IsNullOrWhiteSpace(v.Name) => new VideoIdentity(null, null, null, null, v.Name, v.ProductionYear),
+                _ => null,
+            };
+        });
+    }
+
+    /// <summary>
+    /// Queues a subtitle whose check fell back from the chosen speech-to-text service (or went on without one) to be
+    /// checked again with the chosen service on the next run (answers at once).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Rerun")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> Rerun([FromRoute] string id)
+    {
+        try
+        {
+            if (_processor.Get(id)?.SpeechFallback?.From is { } from && !UsableNow()(from))
+            {
+                return Conflict(SpeechHealth.NameOf(from) + " can't be used now (its key, address or download isn't set up), so the check can't be run again with it.");
+            }
+
+            return _processor.RequestRerun(id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// How the speech-to-text services have been doing: systemic problems (for a banner), each service's health, and a
+    /// page of the latest failures (for "Recent speech errors").
+    /// </summary>
+    /// <param name="offset">How many failures to skip.</param>
+    /// <param name="limit">How many to return (1 to 100; default 10).</param>
+    /// <returns>The health and failures.</returns>
+    [HttpGet("SpeechHealth")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<SpeechHealthView> SpeechHealthOf([FromQuery] int offset = 0, [FromQuery] int limit = 10)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var health = _errors.Health();
+        var (items, total) = _errors.Recent(offset, limit);
+        var rows = items.Select(f => new SpeechFailureRow(f, SpeechHealth.NameOf(f.Provider), RelativeTime.Format(f.Time, now, TimeZoneInfo.Local))).ToList();
+        var next = Math.Max(0, offset) + rows.Count;
+        return new SpeechHealthView([.. health.Where(h => h.Systemic)], health, rows, total, next < total ? next : null);
+    }
 
     /// <summary>
     /// Applies a correction that is waiting for review.
@@ -589,7 +697,8 @@ public class SubtitlesController : ControllerBase
             _builtIn.Platform is not null && _builtIn.Problem is null,
             _builtIn.Platform is null
                 ? "The built-in speech-to-text has no build for this server's system. Use a local speech-to-text service or a cloud service instead."
-                : _builtIn.Problem);
+                : _builtIn.Problem,
+            _builtIn.Installer.NeedsRepair);
 
     /// <summary>
     /// Where the built-in speech-to-text's download stands (SUB-25): <c>idle</c>, <c>downloading</c>, <c>verifying</c>,
@@ -802,7 +911,9 @@ public sealed record TestResult(bool Ok, string Message, bool Downloading = fals
 /// </summary>
 /// <param name="Available">Whether it can be downloaded and run.</param>
 /// <param name="Problem">Why not, in plain language.</param>
-public sealed record BuiltInStatus(bool Available, string? Problem);
+/// <param name="NeedsRepair">Whether its files were found damaged after it failed to start, and haven't been downloaded
+/// again yet (the page offers Download again).</param>
+public sealed record BuiltInStatus(bool Available, string? Problem, bool NeedsRepair = false);
 
 /// <summary>
 /// This month's spending on paid services.
@@ -862,3 +973,21 @@ public sealed record LimitKeyRequest
 /// <param name="Languages">The subtitle languages in effect for its videos (three-letter codes, in order).</param>
 /// <param name="LanguagesFrom">Where they come from.</param>
 public sealed record LibrarySummary(string Id, string Name, bool Included, IReadOnlyList<string> Languages, LanguageSource LanguagesFrom);
+
+/// <summary>
+/// One speech-to-text failure as the settings page lists it.
+/// </summary>
+/// <param name="Failure">The failure.</param>
+/// <param name="Name">The service's name for people.</param>
+/// <param name="When">When, relative.</param>
+public sealed record SpeechFailureRow(SpeechFailure Failure, string Name, string When);
+
+/// <summary>
+/// Result of <see cref="SubtitlesController.SpeechHealthOf"/>.
+/// </summary>
+/// <param name="Problems">Services with a systemic problem (shown as a banner).</param>
+/// <param name="Providers">Every service's health.</param>
+/// <param name="Recent">A page of the latest failures, newest first.</param>
+/// <param name="Total">How many failures are kept.</param>
+/// <param name="Next">The offset of the next page, or <c>null</c> at the end.</param>
+public sealed record SpeechHealthView(IReadOnlyList<ProviderHealth> Problems, IReadOnlyList<ProviderHealth> Providers, IReadOnlyList<SpeechFailureRow> Recent, int Total, int? Next);

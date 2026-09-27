@@ -69,6 +69,18 @@ Providers:
 | **Local service** | A local speech-to-text service (Whisper), with a guided one-line setup on the plugin page | Free; fast with a GPU |
 | **Cloud** (Deepgram, OpenAI …) | Paste an API key | Per minute of audio |
 
+When a service fails: a call that fails for a passing reason (no connection, a timeout, a server error, a short rate
+limit) is tried again up to 5 times, about 2, 4, 8 and 16 seconds apart; a refused key, a rejected request or a used-up
+allowance isn't. If it still fails, a check falls back to a free service on the server: the local service, then the
+built-in one (only if allowed and already downloaded); never to a paid service (**If the chosen service fails, fall back
+to a free local one**, on by default). A failing local service falls back to built-in and a failing built-in one to the
+local service. The result says so and offers **Rerun with …** the service you chose, when that service can be used. If
+nothing is left and the free line-start stage couldn't decide on its own, no verdict is recorded: the result reads
+"Couldn't check yet" and it is checked again on the next run. A built-in program that can't start, or keeps crashing,
+has its files checked against their checksums and is downloaded again if they're damaged. Every failure is listed under
+**Advanced → Recent speech errors**; only a problem that keeps happening (5 failures in a day, half the calls failing, or
+failures on 3 runs in a row; cleared after 3 successes in a row) shows as a banner and in Jellyfin's Activity log.
+
 ## How it works today
 
 A daily task (**Scheduled Tasks → Shoal → Check and sync subtitles**, or **Check now** on the plugin page) checks the
@@ -192,7 +204,15 @@ A subtitle that looks doubtful can be compared, line by line, with a full transc
 
 ## Settings
 
-**Dashboard → Plugins → Subtitles.** Basic settings cover the key decisions in plain language; an **Advanced settings**
+**Dashboard → Plugins → Subtitles.** The results come first: each row shows the video as "Series S01E05" (the episode
+title beneath) or "Title (Year)", the outcome, the changes as small icons with counts (⏱ timing shift, ↔ line timing
+tidied, 🔈 sound descriptions removed, ✂ lines removed, 💬 wording changed, ➕ lines to add, 🔤 text that didn't decode
+cleanly, ⏳ queued; hover for words, dashed when waiting for review), one sentence about what happened and when. ▸
+opens the row's details: the files, what changed, lines to review and the numbers behind it ("Nerd stats"). The list
+shows 15 at a time (**Show more**), filtered and searched on the server; on a phone the rows become cards.
+
+The settings are grouped in sections that open and close (General, Finding and checking, Clean-up, Speech-to-text,
+Spending limit). Basic settings cover the key decisions in plain language; an **Advanced settings**
 section holds finer controls (costs, how much is checked per run, clean-up details, AI checks) with warnings where a
 change could make results worse. "Let agreement between sources settle disagreements" is shown there as coming later; it
 has no effect yet.
@@ -224,7 +244,9 @@ has no effect yet.
 `results.json` (a result per subtitle: paths, video names, what was changed; kept while the file exists),
 `originals/` (the original of every file it changed, for Undo), `spend.json` and `rates.json` (spending),
 `downloads.json` (the day's download count), `transcripts/` (full transcripts, compressed, at most 200 MB) and
-`calibration.json` (counts per speech-to-text model for tuning confidence). The built-in speech-to-text lives in `<jellyfin data>/shoal-subtitles/`.
+`calibration.json` (counts per speech-to-text model for tuning confidence), `speech-errors.jsonl` (the last 500
+speech-to-text failures of the last 30 days: time, service, kind and a short message with keys removed) and
+`speech-calls.json` (calls per service per hour and per run, for telling a lasting problem from a passing one). The built-in speech-to-text lives in `<jellyfin data>/shoal-subtitles/`.
 
 **Sent:**
 

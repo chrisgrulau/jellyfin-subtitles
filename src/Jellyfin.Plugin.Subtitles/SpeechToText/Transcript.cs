@@ -31,6 +31,15 @@ public sealed record Transcript(IReadOnlyList<TranscribedWord> Words, string? La
     /// punctuation, or without times.
     /// </summary>
     public IReadOnlyList<TranscribedSegment> Segments { get; init; } = [];
+
+    /// <summary>
+    /// Gets the service that was chosen but failed, when this transcript came from a free service used in its place
+    /// (see <see cref="FallbackSpeechToText"/>); <c>null</c> otherwise.
+    /// </summary>
+    public string? FallbackFrom { get; init; }
+
+    /// <summary>Gets why the chosen service wasn't used, in one sentence, when <see cref="FallbackFrom"/> is set.</summary>
+    public string? FallbackReason { get; init; }
 }
 
 /// <summary>
@@ -96,4 +105,16 @@ public sealed class SpeechToTextException : Exception
 
     /// <summary>Gets the HTTP status the provider answered with, if the failure was an HTTP error.</summary>
     public System.Net.HttpStatusCode? StatusCode { get; init; }
+
+    /// <summary>Gets how long the provider asked us to wait before trying again, if it said.</summary>
+    public TimeSpan? RetryAfter { get; init; }
+
+    /// <summary>Gets how many attempts were made before giving up (1 when it wasn't retried).</summary>
+    public int Attempts { get; init; } = 1;
+
+    /// <summary>
+    /// Gets a value indicating whether the service itself is out of order (the built-in program couldn't be started, or
+    /// its files are being repaired), rather than this one call failing: it isn't asked again for the rest of the run.
+    /// </summary>
+    public bool ServiceBroken { get; init; }
 }

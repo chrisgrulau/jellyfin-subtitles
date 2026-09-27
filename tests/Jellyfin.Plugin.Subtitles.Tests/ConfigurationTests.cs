@@ -76,9 +76,8 @@ public class ConfigurationTests
     {
         var page = Page();
         Assert.Contains("role=\"status\" aria-live=\"polite\"", page, StringComparison.Ordinal);
-        Assert.Contains("split(/[\\\\/]/)", page, StringComparison.Ordinal);
         Assert.Contains("navigator.clipboard.writeText(text).then(done, manual); } else { manual(); }", page, StringComparison.Ordinal);
-        Assert.Contains("<div class=\"subs-scroll\"><table id=\"Results\"", page, StringComparison.Ordinal);
+        Assert.Contains("<table id=\"Results\" class=\"subs-results\">", page, StringComparison.Ordinal);
 
         // Key-save failures show the server's own message, not a guess
         Assert.DoesNotContain("Dashboard.alert(\"That doesn't look like an API key.\")", page, StringComparison.Ordinal);
@@ -126,7 +125,30 @@ public class ConfigurationTests
         Assert.Contains("<option value=\"wholefile\">Differs from what is said (whole file)</option>", page, StringComparison.Ordinal);
         Assert.Contains("'/CheckWholeFile'", page, StringComparison.Ordinal);
         Assert.Contains("'/Findings/' + index + '/'", page, StringComparison.Ordinal);
-        Assert.Contains("openEditor(rid, owner && owner.Findings[index]);", page, StringComparison.Ordinal);
+        Assert.Contains("openEditor(rid, found && found.Result.Findings[index]);", page, StringComparison.Ordinal);
+    }
+
+    // The decluttered results and the speech-to-text fallback: paged on the server, chips with words for assistive
+    // technology, details behind a toggle, a banner only for systemic problems, the fallback switch saved
+    [Fact]
+    public void The_page_pages_results_and_shows_speech_problems()
+    {
+        var page = Page();
+        Assert.Contains("ApiClient.getUrl('Subtitles/Results/Page', {", page, StringComparison.Ordinal);
+        Assert.Contains("id=\"ResMore\"", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"img\" title=\"' + esc(c.Tooltip) + '\" aria-label=\"' + esc(c.Tooltip) + '\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-expanded=\"' + open + '\" aria-controls=\"' + esc(did) + '\"", page, StringComparison.Ordinal);
+        Assert.Contains("'<dt>' + esc(s.Name) + '</dt><dd>' + esc(s.Value) + '</dd>'", page, StringComparison.Ordinal);
+        Assert.Contains("title=\"' + esc(exactTime(iso)) + '\"", page, StringComparison.Ordinal);
+        Assert.Contains("ApiClient.getUrl('Subtitles/SpeechHealth'", page, StringComparison.Ordinal);
+        Assert.Contains("id=\"SpeechBanner\" class=\"subs-banner\" role=\"alert\" hidden", page, StringComparison.Ordinal);
+        Assert.Contains("'/Rerun'", page, StringComparison.Ordinal);
+        Assert.Contains("Deferred: \"Couldn't check yet\"", page, StringComparison.Ordinal);
+        Assert.Contains("config.FallBackToFree = page.querySelector('#FallBackToFree').checked;", page, StringComparison.Ordinal);
+        Assert.Contains("page.querySelector('#FallBackToFree').checked = config.FallBackToFree !== false;", page, StringComparison.Ordinal);
+        Assert.Contains("If the chosen service fails, fall back to a free local one", page, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 720px)", page, StringComparison.Ordinal);
+        Assert.Contains("<details class=\"subs-section\" open>", page, StringComparison.Ordinal);
     }
 
     [Fact]

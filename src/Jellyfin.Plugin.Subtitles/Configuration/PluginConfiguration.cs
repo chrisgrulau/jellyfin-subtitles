@@ -158,6 +158,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AllowBuiltInDownload { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether a check falls back to a free service on this server (the local service, or
+    /// the built-in one once installed) when the chosen speech-to-text service fails after its retries. Never to a paid
+    /// service. On by default.
+    /// </summary>
+    public bool FallBackToFree { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets a value indicating whether subtitles are searched for films and episodes that have none in a chosen
     /// language (and added once they fit the audio).
     /// </summary>

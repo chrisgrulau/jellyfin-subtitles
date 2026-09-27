@@ -252,6 +252,7 @@ internal sealed class SpeechBridgeService : IDisposable
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
     private readonly Spending _spending;
+    private readonly SpeechErrorLog? _errors;
     private readonly IMediaEncoder _encoder;
     private readonly IHttpClientFactory _http;
 
@@ -263,11 +264,13 @@ internal sealed class SpeechBridgeService : IDisposable
     /// <param name="spending">Prices, ledger and rates.</param>
     /// <param name="encoder">Jellyfin's media encoder (for ffmpeg).</param>
     /// <param name="http">HTTP clients.</param>
-    public SpeechBridgeService(SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, IMediaEncoder encoder, IHttpClientFactory http)
+    /// <param name="errors">Where speech-to-text calls and failures are counted.</param>
+    public SpeechBridgeService(SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, IMediaEncoder encoder, IHttpClientFactory http, SpeechErrorLog? errors = null)
     {
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
+        _errors = errors;
         _encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
         _http = http ?? throw new ArgumentNullException(nameof(http));
     }
@@ -298,7 +301,7 @@ internal sealed class SpeechBridgeService : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken).ConfigureAwait(false);
+            using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken, errors: _errors).ConfigureAwait(false);
             if (run is null)
             {
                 return SpeechBridge.Reply(false, "Jellyfin's ffmpeg wasn't found.", "not-set-up");

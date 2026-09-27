@@ -32,6 +32,8 @@ public sealed class BuiltInInstaller : IDisposable
     private readonly BuiltInSource _source;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly Lock _crashLock = new();
+    private int _crashes;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BuiltInInstaller"/> class.
@@ -110,6 +112,7 @@ public sealed class BuiltInInstaller : IDisposable
             }
 
             RemoveOldVersions();
+            NeedsRepair = false;
             if (reporting)
             {
                 Progress.Complete();
@@ -125,6 +128,86 @@ public sealed class BuiltInInstaller : IDisposable
         finally
         {
             _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the install was found damaged after the program failed to start (see
+    /// <see cref="MarkForRepairAsync"/>) and hasn't been downloaded again yet.
+    /// </summary>
+    public bool NeedsRepair { get; private set; }
+
+    /// <summary>
+    /// Checks the installed program and model against the checksums compiled into the plugin, and that the program may
+    /// be run, without downloading anything (after the program failed to start or kept crashing).
+    /// </summary>
+    /// <param name="platform">Platform.</param>
+    /// <param name="model">Model setting value.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> if everything is there and intact.</returns>
+    public async Task<bool> VerifyAsync(string platform, string model, CancellationToken cancellationToken)
+    {
+        if (_source.Program(platform) is not { } program || _source.Model(model) is not { } modelFile)
+        {
+            return false;
+        }
+
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var programDir = Path.Combine(_folder, _source.Version, platform);
+            var executable = Path.Combine(programDir, OperatingSystem.IsWindows() ? "whisper-cli.exe" : "whisper-cli");
+            return await IsIntactAsync(programDir, program, cancellationToken).ConfigureAwait(false)
+                && await MatchesAsync(Path.Combine(_folder, "models", modelFile.Name), modelFile, cancellationToken).ConfigureAwait(false)
+                && (OperatingSystem.IsWindows() || File.GetUnixFileMode(executable).HasFlag(UnixFileMode.UserExecute));
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Removes a damaged program install so the next <see cref="EnsureAsync"/> downloads it again, and notes that it
+    /// needs repairing until then.
+    /// </summary>
+    /// <param name="platform">Platform.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task.</returns>
+    public async Task MarkForRepairAsync(string platform, CancellationToken cancellationToken)
+    {
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            NeedsRepair = true;
+            var programDir = Path.Combine(_folder, _source.Version, platform);
+            if (Directory.Exists(programDir))
+            {
+                Directory.Delete(programDir, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // EnsureAsync replaces whatever doesn't match anyway
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Counts a run that crashed (a signal such as an illegal instruction or a segmentation fault), or clears the count
+    /// after a run that didn't.
+    /// </summary>
+    /// <param name="crashed">Whether the run crashed.</param>
+    /// <returns>How many runs in a row have crashed.</returns>
+    internal int CountCrash(bool crashed)
+    {
+        lock (_crashLock)
+        {
+            _crashes = crashed ? _crashes + 1 : 0;
+            return _crashes;
         }
     }
 
