@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.1-alpha] - 2026-09-27
+
 ### Changed
 
 - **Settings pages use the full width; buttons are centred.** The settings sections, fields and lists now use the whole
