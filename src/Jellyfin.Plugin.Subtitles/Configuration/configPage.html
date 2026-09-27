@@ -117,7 +117,8 @@
         #SubtitlesConfigPage .subs-spinner:not(:only-child) { display: none; }
         #SubtitlesConfigPage .subs-spinner:only-child::before { content: '…'; }
       }
-      #SubtitlesConfigPage .subs-btn:disabled { opacity: .6; cursor: not-allowed; }
+      #SubtitlesConfigPage .subs-btn:disabled, #SubtitlesConfigPage .subs-btn[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
+      #SubtitlesConfigPage .subs-btn.subs-primary[aria-disabled="true"] { background: var(--subs-soft); border-color: var(--subs-line); color: inherit; }
       #SubtitlesConfigPage .subs-busy, #SubtitlesConfigPage .subs-btn.subs-busy:disabled { cursor: progress; }
       #SubtitlesConfigPage .subs-busy:disabled { opacity: .85; }
       #SubtitlesConfigPage .subs-outcome { margin: .3em 0; font-size: .9em; white-space: normal; }
@@ -1157,7 +1158,9 @@
           var stats = '<h4 class="subs-dh">Nerd stats</h4><dl class="subs-stats">' + (v.NerdStats || []).map(function (s) {
             return '<dt>' + esc(s.Name) + '</dt><dd>' + esc(s.Value) + '</dd>';
           }).join('') + '</dl>';
-          var examples = (r.Examples || []).length ? '<h4 class="subs-dh">What changed</h4><ul class="subs-examples">' + r.Examples.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>' : '';
+          // The server's list, as it reads with what waits for review now
+          var lines = v.Examples || r.Examples || [];
+          var examples = lines.length ? '<h4 class="subs-dh">What changed</h4><ul class="subs-examples">' + lines.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>' : '';
           return moreActions(r, v) + findingList(r) + examples + stats;
         }
 
@@ -1241,6 +1244,12 @@
         var sel = { all: false, ids: {}, except: {}, counts: null, timer: null, ticket: 0 };
         var bulk = { job: null, poll: null, watching: false, limit: skippedShown, open: null, confirm: null };
         var bulkWords = { Apply: ['Apply', 'Applying'], Decline: ['Decline', 'Declining'], Undo: ['Undo', 'Undoing'], CheckAgain: ['Check again', 'Queuing'] };
+        // Why an action can't run for the selection, from the preview's counts (shown as its tooltip and read out)
+        var bulkNone = { Apply: 'Nothing selected is waiting for review', Decline: 'Nothing selected is waiting for review', Undo: 'Nothing selected can be undone', CheckAgain: 'Nothing selected can be checked again' };
+
+        function bulkWhyNot(a, k, running) {
+          return running ? 'Another bulk action is running; wait for it to finish' : k == null ? 'Counting what the selection holds…' : k ? null : bulkNone[a];
+        }
 
         function isSelected(id) { return sel.all ? !sel.except[id] : !!sel.ids[id]; }
 
@@ -1279,7 +1288,20 @@
             if (b.classList.contains('subs-busy')) { return; }
             var k = c ? c[a] : null;
             b.textContent = bulkWords[a][0] + (k == null ? '' : ' (' + k + ')');
-            b.disabled = running || !k;
+            // Left focusable (aria-disabled) so the reason shows as a tooltip and is read out; a disabled Apply loses its
+            // primary colour so it doesn't look clickable
+            if (!b.hasAttribute('data-title')) { b.setAttribute('data-title', b.title); }
+            var why = bulkWhyNot(a, k, running);
+            b.disabled = false;
+            if (why) {
+              b.setAttribute('aria-disabled', 'true');
+              b.title = why;
+              b.setAttribute('aria-description', why);
+            } else {
+              b.removeAttribute('aria-disabled');
+              b.title = b.getAttribute('data-title');
+              b.removeAttribute('aria-description');
+            }
           });
           var banner = page.querySelector('#BulkAllBanner');
           if (sel.all) {
@@ -1387,7 +1409,7 @@
           if (e.target.closest('#BulkSelectAll')) { sel.all = true; sel.ids = {}; sel.except = {}; sel.counts = null; refreshCounts(); return; }
           if (e.target.closest('#BulkClear')) { clearSelection(); renderBulk(); return; }
           var b = e.target.closest('.bulk-act');
-          if (!b || b.disabled) { return; }
+          if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true') { return; }
           var action = b.getAttribute('data-action');
           if (action === 'Undo') {
             var n = sel.counts ? sel.counts.Undo : selectedCount();

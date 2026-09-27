@@ -60,6 +60,7 @@ public sealed record NerdStat(string Name, string Value);
 /// <param name="CanRerun">Whether "Rerun with …" applies.</param>
 /// <param name="RerunLabel">The button's label (<c>Rerun with Deepgram</c>), when it applies or was asked for.</param>
 /// <param name="RerunQueued">Whether a rerun is already queued.</param>
+/// <param name="Examples">The "What changed" lines, as they read with what waits for review now (see <see cref="ReviewText.Current"/>).</param>
 public sealed record ResultView(
     string Headline,
     string? Subline,
@@ -72,7 +73,8 @@ public sealed record ResultView(
     string When,
     bool CanRerun,
     string? RerunLabel,
-    bool RerunQueued);
+    bool RerunQueued,
+    IReadOnlyList<string> Examples);
 
 /// <summary>
 /// Relative times for lists: "just now", "5 minutes ago", "3 hours ago" (within a day), "yesterday" and "2 days ago" (by
@@ -203,7 +205,8 @@ public static partial class ResultPresenter
             RelativeTime.Format(r.Time, now, zone),
             canRerun,
             rerunFrom is not null && (canRerun || r.RerunWith is not null) ? RerunLabel(rerunFrom) : null,
-            r.RerunWith is not null);
+            r.RerunWith is not null,
+            ReviewText.Current(r).Examples);
     }
 
     /// <summary>
@@ -487,7 +490,7 @@ public static partial class ResultPresenter
         Add("Source", r.Origin);
         Add("Subtitle file", r.SubtitlePath);
         Add("Video file", r.VideoPath);
-        Add("Explanation", r.Explanation);
+        Add("Explanation", ReviewText.Current(r).Explanation);
         Add("Pipeline version", r.Version > 0 ? r.Version.ToString(CultureInfo.InvariantCulture) : null);
         return stats;
     }

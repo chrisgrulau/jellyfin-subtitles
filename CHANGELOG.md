@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A result no longer says changes wait for review once they were applied or declined.** Applying held-back clean-up
+  or suggested wording (all at once, one line at a time or all suggestions) left the "What changed" list saying "Waiting
+  for review: …" and the explanation saying "Apply uses the suggested wording". Now applied clean-up loses the prefix,
+  applied suggestions are marked "Applied: …", declined ones are dropped, and the explanation says whether the suggested
+  wording was applied or declined. Results saved before this read right too, without checking them again.
+- **Bulk actions that don't apply to the selection say why.** A greyed-out Apply, Decline, Undo or Check again now has
+  a tooltip (also read out) such as "Nothing selected is waiting for review", and a disabled Apply loses its primary
+  colour so it doesn't look clickable.
+
 ## [0.18.0-alpha] - 2026-09-28
 
 ### Added
