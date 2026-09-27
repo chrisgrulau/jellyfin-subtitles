@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.3-alpha] - 2026-09-27
+
 ### Changed
 
 - **Buttons show progress while they work.** Every button that asks the server for something (Save, the key and Test
