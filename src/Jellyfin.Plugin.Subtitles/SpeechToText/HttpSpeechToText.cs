@@ -64,7 +64,7 @@ public abstract class HttpSpeechToText : ISpeechToText
         }
         catch (ProviderException ex)
         {
-            throw new SpeechToTextException(ProviderWording.Said(ProviderWording.NameOf(Id), ex), ex) { Failure = ex.Failure, StatusCode = ex.StatusCode };
+            throw new SpeechToTextException(ProviderWording.Said(ProviderWording.NameOf(Id), ex), ex) { Failure = ex.Failure, StatusCode = ex.StatusCode, RetryAfter = ex.RetryAfter };
         }
 
         try

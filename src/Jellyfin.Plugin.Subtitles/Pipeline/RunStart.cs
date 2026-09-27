@@ -23,9 +23,11 @@ internal sealed class RunStart : IDisposable
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost? _builtIn;
     private readonly Spending _spending;
+    private readonly SpeechErrorLog? _errors;
 
-    private RunStart(string ffmpeg, HttpClient http, SpeechToTextKeys keys, BuiltInHost? builtIn, Spending spending)
+    private RunStart(string ffmpeg, HttpClient http, SpeechToTextKeys keys, BuiltInHost? builtIn, Spending spending, SpeechErrorLog? errors)
     {
+        _errors = errors;
         Ffmpeg = ffmpeg;
         Http = http;
         _keys = keys;
@@ -39,6 +41,9 @@ internal sealed class RunStart : IDisposable
     /// <summary>Gets the run's HTTP client.</summary>
     public HttpClient Http { get; }
 
+    /// <summary>Gets a short id for this run (speech-to-text failures on consecutive runs count as systemic).</summary>
+    public string RunId { get; } = Guid.NewGuid().ToString("N")[..12];
+
     /// <summary>
     /// Starts a run: finds ffmpeg, makes the HTTP client and refreshes the exchange rates when due.
     /// </summary>
@@ -50,8 +55,9 @@ internal sealed class RunStart : IDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="httpTimeout">The HTTP timeout, or <c>null</c> for <see cref="HttpTimeout"/> (full transcripts send ten
     /// minutes of audio per call, which a local service on a CPU can take longer than that to transcribe).</param>
+    /// <param name="errors">Where speech-to-text calls and failures are counted, if anywhere.</param>
     /// <returns>The run's start, or <c>null</c> when Jellyfin's ffmpeg wasn't found (nothing can be checked).</returns>
-    public static async Task<RunStart?> BeginAsync(IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost? builtIn, Spending spending, CancellationToken cancellationToken, TimeSpan? httpTimeout = null)
+    public static async Task<RunStart?> BeginAsync(IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost? builtIn, Spending spending, CancellationToken cancellationToken, TimeSpan? httpTimeout = null, SpeechErrorLog? errors = null)
     {
         ArgumentNullException.ThrowIfNull(encoder);
         ArgumentNullException.ThrowIfNull(http);
@@ -67,7 +73,7 @@ internal sealed class RunStart : IDisposable
         {
             client.Timeout = httpTimeout ?? HttpTimeout;
             await spending.CurrentRatesAsync(client, cancellationToken).ConfigureAwait(false);
-            return new RunStart(ffmpeg, client, keys, builtIn, spending);
+            return new RunStart(ffmpeg, client, keys, builtIn, spending, errors);
         }
         catch
         {
@@ -108,7 +114,29 @@ internal sealed class RunStart : IDisposable
     /// <param name="forSubtitles">Whether the transcript becomes subtitles (full transcripts).</param>
     /// <returns>The service, or <c>null</c>.</returns>
     public ISpeechToText? Speech(PluginConfiguration config, TranscriptionTier? tier, string purpose, out string? problem, bool forSubtitles = false)
-        => SpeechSelection.SpeechFor(config, tier, _keys, Http, _builtIn, _spending, purpose, out problem, forSubtitles);
+        => SpeechSelection.SpeechFor(config, tier, _keys, Http, _builtIn, _spending, purpose, out problem, forSubtitles, _errors, RunId);
+
+    /// <summary>
+    /// The speech-to-text service to run a check again with (<see cref="SubtitleResult.RerunWith"/>): the named service,
+    /// with the tier's model when the tier names the same service, else the service's default, metered and with the same
+    /// retries and fallback as any other check.
+    /// </summary>
+    /// <param name="config">Plugin settings.</param>
+    /// <param name="tier">The use the check belongs to.</param>
+    /// <param name="provider">The service to use.</param>
+    /// <param name="purpose">What the calls are for.</param>
+    /// <param name="problem">Why it can't be used, if it can't.</param>
+    /// <returns>The service, or <c>null</c>.</returns>
+    public ISpeechToText? SpeechWith(PluginConfiguration config, TranscriptionTier? tier, string provider, string purpose, out string? problem)
+    {
+        var chosen = new TranscriptionTier
+        {
+            Enabled = true,
+            Provider = provider,
+            Model = tier is not null && string.Equals(tier.Provider, provider, StringComparison.Ordinal) ? tier.Model : string.Empty,
+        };
+        return Speech(config, chosen, purpose, out problem);
+    }
 
     /// <inheritdoc />
     public void Dispose() => Http.Dispose();

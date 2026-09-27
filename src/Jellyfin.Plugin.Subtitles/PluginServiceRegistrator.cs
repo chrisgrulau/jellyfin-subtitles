@@ -45,6 +45,15 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                 System.TimeProvider.System,
                 () => SubtitlesPlugin.Instance?.Configuration.WriteToActivityLog != false);
         });
+        // Speech-to-text failures are kept (a few hundred, a month at most) to tell a systemic problem from a passing one;
+        // only a systemic one reaches the Activity log (at most once a day per service)
+        serviceCollection.AddSingleton(sp =>
+        {
+            var log = new SpeechErrorLog(DataFolder(sp));
+            var activity = sp.GetRequiredService<SubtitleActivity>();
+            log.Systemic = h => _ = activity.NotifySpeechProblemAsync(h);
+            return log;
+        });
         serviceCollection.AddSingleton(sp =>
         {
             var store = new ResultStore(Path.Combine(DataFolder(sp), "results.json"));

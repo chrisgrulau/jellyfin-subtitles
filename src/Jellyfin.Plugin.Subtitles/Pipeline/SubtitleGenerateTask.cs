@@ -35,6 +35,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
     private readonly Spending _spending;
+    private readonly SpeechErrorLog? _errors;
     private readonly SubtitleGenerator _generator;
     private readonly WholeFileChecker _checker;
     private readonly RunGate _gate;
@@ -57,7 +58,8 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     /// <param name="gate">Keeps this task and other work on subtitle files apart.</param>
     /// <param name="server">Jellyfin's configuration (for the languages' last fallback).</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleGenerateTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleGenerator generator, WholeFileChecker checker, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleGenerateTask> logger)
+    /// <param name="errors">Where speech-to-text calls and failures are counted.</param>
+    public SubtitleGenerateTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleGenerator generator, WholeFileChecker checker, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleGenerateTask> logger, SpeechErrorLog? errors = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _server = server ?? throw new ArgumentNullException(nameof(server));
@@ -69,6 +71,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
+        _errors = errors;
         _generator = generator ?? throw new ArgumentNullException(nameof(generator));
         _checker = checker ?? throw new ArgumentNullException(nameof(checker));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -139,7 +142,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
             return;
         }
 
-        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken, ChunkTimeout).ConfigureAwait(false);
+        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken, ChunkTimeout, _errors).ConfigureAwait(false);
         if (run is null)
         {
             LogSkipped(_logger, "Jellyfin's ffmpeg wasn't found");

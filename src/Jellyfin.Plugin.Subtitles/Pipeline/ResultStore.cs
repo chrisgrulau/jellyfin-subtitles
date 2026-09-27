@@ -103,6 +103,15 @@ public sealed record WholeFileCheck
 }
 
 /// <summary>
+/// The chosen speech-to-text service failed during a check: what stood in for it, if anything, and why.
+/// </summary>
+/// <param name="From">The chosen service's id (<c>deepgram</c> …).</param>
+/// <param name="To">The free service used instead, or <c>null</c> when none could stand in (the check went on without
+/// speech-to-text).</param>
+/// <param name="Reason">What happened, in one sentence.</param>
+public sealed record SpeechFallbackNote(string From, string? To, string Reason);
+
+/// <summary>
 /// The latest result for one subtitle file.
 /// </summary>
 public sealed record SubtitleResult
@@ -181,6 +190,15 @@ public sealed record SubtitleResult
 
     /// <summary>Gets a value indicating whether the whole file is to be compared with a full transcript on the next run (asked for from the results).</summary>
     public bool WholeFileRequested { get; init; }
+
+    /// <summary>Gets what happened when the chosen speech-to-text service failed during the check, if it did.</summary>
+    public SpeechFallbackNote? SpeechFallback { get; init; }
+
+    /// <summary>
+    /// Gets the speech-to-text service to check this subtitle again with on the next run (asked for with "Rerun with …"
+    /// after the chosen service failed), or <c>null</c>.
+    /// </summary>
+    public string? RerunWith { get; init; }
 
     /// <summary>Gets a value indicating whether anything waits for review (a timing correction, clean-up, suggested wording or a line the whole-file check flagged).</summary>
     public bool PendingReview => Status == ResultStatus.Proposed || CleanupPending.Count > 0 || Findings.Any(f => f.Suggestion is not null || f.From is not null);
@@ -262,7 +280,7 @@ public sealed class ResultStore : IDisposable
     public static bool MustKeep(SubtitleResult r, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(r);
-        return r.Changed || r.PendingReview || r.WholeFileRequested || r.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Generated or ResultStatus.NoSpeech
+        return r.Changed || r.PendingReview || r.WholeFileRequested || r.RerunWith is not null || r.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Generated or ResultStatus.NoSpeech
             || (r.Status is ResultStatus.NotFound or ResultStatus.Failed && r.Id.StartsWith("find-", StringComparison.Ordinal) && now - r.Time < SubtitleFinder.SearchAgainAfter);
     }
 
@@ -276,7 +294,7 @@ public sealed class ResultStore : IDisposable
     public static bool SaveAtOnce(SubtitleResult result, SubtitleResult? previous)
     {
         ArgumentNullException.ThrowIfNull(result);
-        return result.Changed || previous?.Changed == true || result.PendingReview || previous?.PendingReview == true || result.WholeFileRequested != (previous?.WholeFileRequested ?? false)
+        return result.Changed || previous?.Changed == true || result.PendingReview || previous?.PendingReview == true || result.WholeFileRequested != (previous?.WholeFileRequested ?? false) || !string.Equals(result.RerunWith, previous?.RerunWith, StringComparison.Ordinal)
             || result.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Declined or ResultStatus.Generated or ResultStatus.Replaced;
     }
 

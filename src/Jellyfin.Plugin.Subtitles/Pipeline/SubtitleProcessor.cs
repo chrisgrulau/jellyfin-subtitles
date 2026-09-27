@@ -126,6 +126,12 @@ public sealed class SubtitleProcessor
     /// <returns>Whether to check it.</returns>
     public bool NeedsCheck(string subtitlePath, string fingerprint, string? speechSetup)
     {
+        // Asked to run again with the chosen speech-to-text service, whatever else
+        if (_results.Get(ResultStore.IdFor(subtitlePath))?.RerunWith is not null)
+        {
+            return true;
+        }
+
         if (speechSetup is not null && _results.Get(ResultStore.IdFor(subtitlePath)) is { Status: ResultStatus.Unreliable or ResultStatus.WrongLanguage } unclear
             && string.Equals(unclear.Fingerprint, fingerprint, StringComparison.Ordinal)
             && !string.Equals(unclear.SpeechSetup, speechSetup, StringComparison.Ordinal))
@@ -236,6 +242,11 @@ public sealed class SubtitleProcessor
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;
+        if (outcome.SpeechFallback is { To: not null } stoodIn)
+        {
+            explanation += " " + stoodIn.Reason;
+        }
+
         // A timing decided from lines the AI matched by meaning always waits for review (SUB-28), until there is field data
         var status = outcome.WrongLanguageSuspected ? ResultStatus.WrongLanguage : model.Status switch
         {
@@ -245,7 +256,9 @@ public sealed class SubtitleProcessor
         };
         result = result with
         {
-            SpeechSetup = speech?.Id ?? string.Empty,
+            // A stand-in's transcripts: its setup is recorded, so an unclear result is checked again with the chosen service
+            SpeechSetup = outcome.SpeechFallback?.To ?? speech?.Id ?? string.Empty,
+            SpeechFallback = outcome.SpeechFallback,
             Status = status,
             Scale = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Scale : 1,
             Offset = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Offset : 0,
@@ -945,6 +958,45 @@ public sealed class SubtitleProcessor
         }
 
         _results.Remove(id);
+    }
+
+    /// <summary>
+    /// The speech-to-text service a subtitle is to be checked again with on this run (asked for with
+    /// <see cref="RequestRerun"/>), or <c>null</c>.
+    /// </summary>
+    /// <param name="subtitlePath">The subtitle file.</param>
+    /// <returns>The service id, or <c>null</c>.</returns>
+    public string? RerunWith(string subtitlePath) => _results.Get(ResultStore.IdFor(subtitlePath))?.RerunWith;
+
+    /// <summary>
+    /// Asks for a subtitle to be checked again on the next run with the speech-to-text service that was chosen when its
+    /// check fell back to a free one (or went on without speech-to-text). Nothing else about the result changes until
+    /// then, so Undo still works.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    /// <exception cref="InvalidOperationException">No such result, or it didn't fall back.</exception>
+    public SubtitleResult RequestRerun(string id)
+    {
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        if (!CanRerun(r))
+        {
+            throw new InvalidOperationException("This check didn't fall back from another speech-to-text service, so there is nothing to run again.");
+        }
+
+        return r.RerunWith is not null ? r : Save(r with { RerunWith = r.SpeechFallback!.From });
+    }
+
+    /// <summary>
+    /// Whether a result can be checked again with the speech-to-text service first chosen: a subtitle file's own check
+    /// (not a search, generated or embedded result) whose chosen service failed.
+    /// </summary>
+    /// <param name="r">The result.</param>
+    /// <returns><c>true</c> if "Rerun with …" applies.</returns>
+    public static bool CanRerun(SubtitleResult r)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        return r.SpeechFallback is not null && !r.Id.Contains('-', StringComparison.Ordinal) && File.Exists(r.SubtitlePath);
     }
 
     /// <summary>

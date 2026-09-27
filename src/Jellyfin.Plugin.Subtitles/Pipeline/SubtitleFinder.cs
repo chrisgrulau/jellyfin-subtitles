@@ -275,6 +275,7 @@ public sealed class SubtitleFinder
             Offset = model.Status == SyncStatus.Corrected ? model.Offset : 0,
             Stage = b.Outcome.Stage,
             Confidence = model.Confidence,
+            SpeechFallback = b.Outcome.SpeechFallback,
             Origin = string.Create(CultureInfo.InvariantCulture, $"{b.Candidate.Candidate.Source}: {b.Candidate.Candidate.ReleaseName} (score {b.Candidate.Score:0.00})"),
             Cleaned = applied.GroupBy(c => c.Kind.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal),
             Examples = b.Outcome.Pairs,

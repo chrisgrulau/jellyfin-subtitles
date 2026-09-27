@@ -37,6 +37,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
     private readonly Spending _spending;
+    private readonly SpeechErrorLog? _errors;
     private readonly SubtitleFinder _finder;
     private readonly SubtitleGenerator _generator;
     private readonly SubtitleActivity? _activity;
@@ -62,7 +63,8 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     /// <param name="server">Jellyfin's configuration (for the languages' last fallback).</param>
     /// <param name="logger">Logger.</param>
     /// <param name="activity">Jellyfin's Activity log, for a search a provider stopped.</param>
-    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, SubtitleGenerator generator, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleFindTask> logger, SubtitleActivity? activity = null)
+    /// <param name="errors">Where speech-to-text calls and failures are counted.</param>
+    public SubtitleFindTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ISubtitleManager subtitles, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleFinder finder, SubtitleGenerator generator, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleFindTask> logger, SubtitleActivity? activity = null, SpeechErrorLog? errors = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _server = server ?? throw new ArgumentNullException(nameof(server));
@@ -76,6 +78,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
+        _errors = errors;
         _finder = finder ?? throw new ArgumentNullException(nameof(finder));
         _generator = generator ?? throw new ArgumentNullException(nameof(generator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -143,7 +146,7 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             return;
         }
 
-        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken).ConfigureAwait(false);
+        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken, errors: _errors).ConfigureAwait(false);
         if (run is null)
         {
             LogNoFfmpeg(_logger);

@@ -32,6 +32,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     private readonly SpeechToTextKeys _keys;
     private readonly BuiltInHost _builtIn;
     private readonly Spending _spending;
+    private readonly SpeechErrorLog? _errors;
     private readonly EmbeddedChecker _embedded;
     private readonly SubtitleProcessor _processor;
     private readonly RunGate _gate;
@@ -53,7 +54,8 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
     /// <param name="gate">Keeps this task and other work on subtitle files apart.</param>
     /// <param name="server">Jellyfin's configuration (for the languages' last fallback).</param>
     /// <param name="logger">Logger.</param>
-    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, EmbeddedChecker embedded, SubtitleProcessor processor, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleSyncTask> logger)
+    /// <param name="errors">Where speech-to-text calls and failures are counted.</param>
+    public SubtitleSyncTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, EmbeddedChecker embedded, SubtitleProcessor processor, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleSyncTask> logger, SpeechErrorLog? errors = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _server = server ?? throw new ArgumentNullException(nameof(server));
@@ -64,6 +66,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _builtIn = builtIn ?? throw new ArgumentNullException(nameof(builtIn));
         _spending = spending ?? throw new ArgumentNullException(nameof(spending));
+        _errors = errors;
         _embedded = embedded ?? throw new ArgumentNullException(nameof(embedded));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -131,7 +134,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             return;
         }
 
-        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken).ConfigureAwait(false);
+        using var run = await RunStart.BeginAsync(_encoder, _http, _keys, _builtIn, _spending, cancellationToken, errors: _errors).ConfigureAwait(false);
         if (run is null)
         {
             LogNoFfmpeg(_logger);
@@ -173,7 +176,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         var videos = new LibraryVideos(_library, _media, JellyfinLibraries.Scope(_library, config, _server), batch?.All);
         var jobs = videos.SubtitleFiles().Where(j => batch is null || batch.ChecksFile(j.ItemId, _processor.Knows(j.SubtitlePath))).ToList();
         var todo = new List<SubtitleJob>();
-        foreach (var job in jobs)
+
+        // Checks asked to run again with the speech-to-text service first chosen go first (someone is waiting)
+        foreach (var job in jobs.OrderByDescending(j => _processor.RerunWith(j.SubtitlePath) is not null))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
@@ -202,7 +207,18 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
             var job = todo[i];
             try
             {
-                var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), speech, policies, cancellationToken).ConfigureAwait(false);
+                var jobSpeech = speech;
+                if (_processor.RerunWith(job.SubtitlePath) is { } rerun && rerun != speech?.Id)
+                {
+                    jobSpeech = run.SpeechWith(config, config.SyncSnippets, rerun, "subtitles.sync", out var rerunProblem);
+                    if (jobSpeech is null)
+                    {
+                        LogNoSpeech(_logger, rerunProblem ?? rerun);
+                        jobSpeech = speech;
+                    }
+                }
+
+                var result = await _processor.ProcessAsync(job, new FfmpegAudioSource(ffmpeg, job.VideoPath, job.AudioStream), jobSpeech, policies, cancellationToken).ConfigureAwait(false);
                 LogResult(_logger, job.Name, result.Status, result.Explanation);
             }
 #pragma warning disable CA1031 // One odd file (a subtitle from the internet can hold anything) mustn't stop the nightly run: it is recorded as failed
