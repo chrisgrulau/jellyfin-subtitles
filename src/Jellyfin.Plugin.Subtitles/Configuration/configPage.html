@@ -88,6 +88,24 @@
       #SubtitlesConfigPage .subs-setup pre { white-space: pre-wrap; word-break: break-all; background: var(--subs-soft); padding: .6em .8em; border-radius: 4px; margin: .4em 0; }
       #SubtitlesConfigPage .subs-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
       #SubtitlesConfigPage .subs-copytext { display: block; width: 100%; box-sizing: border-box; margin: .5em 0; font-family: monospace; background: var(--subs-soft); color: inherit; border: 1px solid var(--subs-line); border-radius: 3px; }
+      /* Full width: Jellyfin caps every form (and .readOnlyContent) at 54em from 50em up; this page uses the whole content area.
+         Help text keeps a comfortable reading width; inputs, lists and tables stretch. */
+      #SubtitlesConfigPage .content-primary { max-width: none; box-sizing: border-box; }
+      #SubtitlesConfigPage form, #SubtitlesConfigPage .readOnlyContent { max-width: none; }
+      #SubtitlesConfigPage p, #SubtitlesConfigPage .fieldDescription { max-width: 80ch; }
+      @media (min-width: 80em) { #SubtitlesConfigPage .content-primary { padding-left: 2em; padding-right: 2em; } }
+      /* Primary actions are centred at a reasonable width (a group sits centred as a row); row actions stay compact */
+      #SubtitlesConfigPage .subs-button-row { display: flex; flex-wrap: wrap; justify-content: center; gap: .5em 1em; margin: 1em 0; }
+      #SubtitlesConfigPage .subs-button-row > .emby-button, #SubtitlesConfigPage .emby-button.block { display: inline-flex; justify-content: center; width: auto; min-width: 12em; max-width: 20em; margin: 0; }
+      #SubtitlesConfigPage .subs-button-row > .emby-button.block { flex: 0 1 16em; }
+      #SubtitlesConfigPage .subs-button-row > [hidden] { display: none; }
+      #SubtitlesConfigPage .subs-button-row:not(:has(> :not([hidden]))) { display: none; }
+      #SubtitlesConfigPage .subs-more { justify-content: center; flex-wrap: wrap; }
+      #SubtitlesConfigPage #ResMore, #SubtitlesConfigPage #SpeechErrorsMore, #SubtitlesConfigPage .restore-more { min-width: 12em; max-width: 20em; padding: .35em 1.2em; }
+      #SubtitlesConfigPage #SpeechErrorsMore, #SubtitlesConfigPage .restore-more { display: block; margin: .75em auto; }
+      #SubtitlesConfigPage #SpeechErrorsMore[hidden] { display: none; }
+      /* A service with no key field (built-in: Download now, Test) centres its buttons */
+      #SubtitlesConfigPage .subs-key:not(:has(.inputContainer)) { justify-content: center; }
       #SubtitlesConfigPage .subs-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
       @media (max-width: 720px) {
         #SubtitlesConfigPage .subs-tier { grid-template-columns: 1fr; }
@@ -143,7 +161,7 @@
             </div>
             <p class="subs-muted">Times are h:mm:ss.mmm. ▶ plays that line's audio. Saving keeps the original: <strong>Undo</strong> in the results brings it back.</p>
             <div class="subs-scroll"><table id="EdLines" class="subs-lines"></table></div>
-            <button is="emby-button" type="button" id="EdMore" class="raised button-alt" hidden><span>Show more</span></button>
+            <div class="subs-button-row"><button is="emby-button" type="button" id="EdMore" class="raised button-alt" hidden><span>Show more</span></button></div>
           </div>
           <table id="Results" class="subs-results"></table>
           <div class="subs-more">
@@ -153,11 +171,13 @@
           <details class="subs-restore">
             <summary>Restore all originals (before uninstalling)</summary>
             <p class="subs-muted">Puts back the original of every subtitle file this plugin changed, and removes every subtitle it added or generated, as <strong>Undo</strong> would for each. A file changed since outside this page (by you or another program) is left alone and listed, as is one whose original is no longer kept. Restored files aren't changed again unless you choose <strong>Check again</strong>; if you're about to uninstall, also untick <strong>Enabled</strong> and save. Not while a scheduled task is running.</p>
-            <button is="emby-button" type="button" id="RestoreStart" class="raised button-alt"><span>Restore all originals…</span></button>
+            <div class="subs-button-row"><button is="emby-button" type="button" id="RestoreStart" class="raised button-alt"><span>Restore all originals…</span></button></div>
             <div id="RestoreConfirm" class="subs-warning" hidden>
               <p id="RestorePlan"></p>
-              <button is="emby-button" type="button" id="RestoreGo" class="raised"><span>Yes, restore them</span></button>
-              <button is="emby-button" type="button" id="RestoreCancel" class="raised button-alt"><span>Cancel</span></button>
+              <div class="subs-button-row">
+                <button is="emby-button" type="button" id="RestoreGo" class="raised"><span>Yes, restore them</span></button>
+                <button is="emby-button" type="button" id="RestoreCancel" class="raised button-alt"><span>Cancel</span></button>
+              </div>
             </div>
             <div id="RestoreProgress" role="status" aria-live="polite"></div>
           </details>
@@ -333,7 +353,7 @@
               <input id="LocalServiceUrl" type="url" is="emby-input" placeholder="http://localhost:8000/v1" />
               <div class="fieldDescription">A speech-to-text service with an OpenAI-compatible API on this server or your network (for example a faster-whisper server, speaches, or the whisper.cpp server). Free, and fast with a GPU.</div>
             </div>
-            <button is="emby-button" type="button" class="raised button-alt" id="FindLocal"><span>Find a local service</span></button>
+            <div class="subs-button-row"><button is="emby-button" type="button" class="raised button-alt" id="FindLocal"><span>Find a local service</span></button></div>
             <div id="LocalFound" class="subs-muted" aria-live="polite"></div>
             <div class="subs-key"></div>
           </div>
@@ -539,7 +559,7 @@
             <button type="button" id="SpeechErrorsMore" class="subs-btn" hidden>Show more</button>
           </details>
 
-          <div style="margin-top:2em">
+          <div class="subs-button-row" style="margin-top:2em">
             <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
           </div>
         </form>

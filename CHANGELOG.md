@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings pages use the full width; buttons are centred.** The settings sections, fields and lists now use the whole
+  page area instead of stopping at about half a wide screen (help text keeps a comfortable reading width). *Save*,
+  *Restore all originals…*, *Find a local service*, *Download now* and the *Show more* buttons are centred at a
+  sensible width instead of stretching across the page or hugging the left edge; buttons inside rows stay compact.
+
 ## [0.16.0-alpha] - 2026-09-27
 
 ### Added
