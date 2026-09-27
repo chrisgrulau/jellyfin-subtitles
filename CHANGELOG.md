@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.0-alpha] - 2026-09-27
+
 ### Added
 
 - **Restore all originals** (FEAT-06), for use before uninstalling: under the results, **Restore all originals…** first
