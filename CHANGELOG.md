@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.1-alpha] - 2026-09-28
+
 ### Fixed
 
 - **A result no longer says changes wait for review once they were applied or declined.** Applying held-back clean-up
