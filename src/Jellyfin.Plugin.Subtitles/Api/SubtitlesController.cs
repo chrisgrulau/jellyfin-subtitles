@@ -164,7 +164,7 @@ public class SubtitlesController : ControllerBase
     private Func<string, bool> UsableNow()
     {
         var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
-        var paidAllowed = SpendingLimit.AllowsPaidUsage(Pricing.Spending.LimitsOf(config).Overall);
+        var paidAllowed = _spending.PaidMayBeUsed(Pricing.Spending.LimitsOf(config));
         var builtInInstalled = SpeechSelection.BuiltInModelInstalled(_builtIn) is not null;
         return provider => SpeechFallback.Usable(provider, _keys.Get(provider) is not null, paidAllowed, config.LocalServiceUrl, config.AllowBuiltInDownload, builtInInstalled);
     }
@@ -664,14 +664,23 @@ public class SubtitlesController : ControllerBase
     }
 
     /// <summary>
-    /// This month's spending on paid services, in the user's currency, with the limit and the exchange rates used.
+    /// This month's spending on paid services, in the user's currency, with the limit and the exchange rates used: Shoal
+    /// AI's figures when it keeps this plugin's budget (the page then shows them instead of this plugin's own spending
+    /// settings), else this plugin's own.
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The spending.</returns>
     [HttpGet("Spending")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<SpendingSummary> Spending()
+    public async Task<ActionResult<SpendingSummary>> Spending(CancellationToken cancellationToken)
     {
         var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
+        var shared = await _spending.SharedSummaryAsync(cancellationToken).ConfigureAwait(false);
+        if (SharedSummary(shared, _spending.Prices?.Version) is { } fromAi)
+        {
+            return fromAi;
+        }
+
         var limits = Pricing.Spending.LimitsOf(config);
         var rates = _spending.Rates.Current;
         var month = _spending.ThisMonth(limits);
@@ -684,6 +693,36 @@ public class SubtitlesController : ControllerBase
             rates is not null && rates.IsFresh(DateOnly.FromDateTime(DateTime.Now)),
             _spending.Prices?.Version,
             Pricing.Spending.Currencies);
+    }
+
+    /// <summary>
+    /// The spending summary from Shoal AI's figures, when it keeps this plugin's budget; <c>null</c> when this plugin uses
+    /// its own (Shoal AI not installed, a different version, or not allowing it). Shoal AI installed but not answering
+    /// still counts as keeping the budget: its figures are then unknown, and paid calls wait.
+    /// </summary>
+    /// <param name="shared">Shoal AI's reply.</param>
+    /// <param name="pricesVersion">This plugin's price table version (it prices its own calls).</param>
+    /// <returns>The summary, or <c>null</c>.</returns>
+    internal static SpendingSummary? SharedSummary(Common.Costs.SpendingSummaryReply shared, string? pricesVersion)
+    {
+        ArgumentNullException.ThrowIfNull(shared);
+        if (!shared.Ok && Common.Costs.SpendingBridgeClient.MeansOwnBudget(shared.Failure))
+        {
+            return null;
+        }
+
+        return new SpendingSummary(
+            shared.Currency ?? SpendingLimit.DefaultCurrency,
+            shared.Limit,
+            shared.Ok ? shared.Spent : null,
+            shared.PerProvider,
+            shared.RatesDate,
+            shared.RatesFresh,
+            pricesVersion,
+            Pricing.Spending.Currencies,
+            SetInAi: true,
+            ProviderLimits: shared.ProviderLimits,
+            Problem: shared.Ok ? null : shared.Error);
     }
 
     /// <summary>
@@ -766,7 +805,7 @@ public class SubtitlesController : ControllerBase
 
         // The page's values as they are now, before Save (SUB-29), made safe as Save would; nothing is stored
         var limits = request.Limits(config.Currency, config.MonthlyBudget, config.NoSpendingLimit, config.ExtraChargesPercent);
-        var paidAllowed = SpendingLimit.AllowsPaidUsage(limits.Overall);
+        var paidAllowed = _spending.PaidMayBeUsed(limits);
         using var http = _http.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(60);
         var (service, problem) = SpeechToTextFactory.Create(request.Provider ?? string.Empty, request.Model ?? string.Empty, request.LocalServiceUrl ?? config.LocalServiceUrl, paidAllowed, request.AllowBuiltInDownload ?? config.AllowBuiltInDownload, _keys, http, _builtIn);
@@ -926,7 +965,23 @@ public sealed record BuiltInStatus(bool Available, string? Problem, bool NeedsRe
 /// <param name="RatesFresh">Whether those rates are recent enough to use.</param>
 /// <param name="PricesVersion">The version of the published prices shipped with the plugin.</param>
 /// <param name="Currencies">The currencies that can be chosen (the settings page offers these, rather than its own copy).</param>
-public sealed record SpendingSummary(string Currency, decimal? Limit, decimal? Spent, IReadOnlyDictionary<string, decimal> PerProvider, string? RatesDate, bool RatesFresh, string? PricesVersion, IReadOnlyList<string> Currencies);
+/// <param name="SetInAi">Whether Shoal AI keeps the budget: the currency, limits and figures are then its own (per
+/// provider by its names: <c>deepgram</c>, <c>openai-speech</c>, <c>anthropic</c> …), and the page shows them instead of
+/// this plugin's spending settings.</param>
+/// <param name="ProviderLimits">Each provider's own monthly limit set in Shoal AI, when <paramref name="SetInAi"/>.</param>
+/// <param name="Problem">Why Shoal AI's figures couldn't be read, when it keeps the budget but didn't answer.</param>
+public sealed record SpendingSummary(
+    string Currency,
+    decimal? Limit,
+    decimal? Spent,
+    IReadOnlyDictionary<string, decimal> PerProvider,
+    string? RatesDate,
+    bool RatesFresh,
+    string? PricesVersion,
+    IReadOnlyList<string> Currencies,
+    bool SetInAi = false,
+    IReadOnlyDictionary<string, decimal>? ProviderLimits = null,
+    string? Problem = null);
 
 /// <summary>
 /// What the local-service helper found.

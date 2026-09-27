@@ -200,6 +200,11 @@ A subtitle that looks doubtful can be compared, line by line, with a full transc
     month's limit before it is made, and recorded afterwards, so runs stop at the limit.
   - A call whose cost can't be worked out isn't made.
   - The settings page shows this month's spending.
+  - **One budget page with Shoal AI:** when Shoal AI is installed (and "Allow Subtitles to use this budget for paid
+    speech-to-text" is ticked there, the default), the currency, monthly limit and a limit for Deepgram and for OpenAI
+    are set on Shoal AI's page, and paid calls are counted there. This page then shows "Spending limits are set in
+    Shoal AI" with this month's figures and a link, and hides its own spending settings (they are kept, and apply
+    again without Shoal AI). API keys stay here. What was spent here earlier in the month is counted there once.
   - Provider limits are handled respectfully: no hammering an API that has said stop.
 
 ## Settings
