@@ -125,7 +125,7 @@ public class ConfigurationTests
         Assert.Contains("<option value=\"wholefile\">Differs from what is said (whole file)</option>", page, StringComparison.Ordinal);
         Assert.Contains("'/CheckWholeFile'", page, StringComparison.Ordinal);
         Assert.Contains("'/Findings/' + index + '/'", page, StringComparison.Ordinal);
-        Assert.Contains("openEditor(rid, found && found.Result.Findings[index]);", page, StringComparison.Ordinal);
+        Assert.Contains("openEditor(rid, found && found.Result.Findings[index], busy(fd, ", page, StringComparison.Ordinal);
     }
 
     // The decluttered results and the speech-to-text fallback: paged on the server, chips with words for assistive
