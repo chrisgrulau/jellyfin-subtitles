@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0-alpha] - 2026-09-27
+
 ### Added
 
 - **Speech-to-text retries**: a call to Deepgram, OpenAI or a local service that fails for a passing reason (no
