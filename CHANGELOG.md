@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.0-alpha] - 2026-09-28
+
 ### Added
 
 - **Subtitles made for a different cut are fixed section by section** (**Fix subtitles made for a different cut**, off
