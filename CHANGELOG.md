@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hidden parts of the settings page stay hidden.** Page styles that lay elements out (flex rows, Jellyfin's buttons)
+  overrode the `hidden` attribute, so the Deepgram *billing key* field, the built-in model's download row and buttons
+  such as *Run full transcripts now* and *Download now* could show when they shouldn't. Hidden elements are now always
+  hidden.
+
 ## [0.16.1-alpha] - 2026-09-27
 
 ### Changed

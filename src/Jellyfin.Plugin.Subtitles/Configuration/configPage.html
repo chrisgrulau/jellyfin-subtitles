@@ -10,6 +10,9 @@
       /* Colours follow the theme: neutrals are translucent greys over the theme's own background and text, accents
          use Jellyfin's theme colour where the theme defines one */
       #SubtitlesConfigPage { --subs-line: rgba(128,128,128,.22); --subs-soft: rgba(128,128,128,.12); --subs-softer: rgba(128,128,128,.06); --subs-ok: #4caf50; --subs-info: #03a9f4; --subs-warn: #ffb300; --subs-bad: #ff7043; --subs-accent: var(--theme-primary-color, #00a4dc); }
+      /* [hidden] always wins: rules that set display (.subs-key and .subs-download are flex, emby-buttons inline-flex)
+         would otherwise show elements the script hides */
+      #SubtitlesConfigPage [hidden] { display: none !important; }
       #SubtitlesConfigPage .subs-tier { display: grid; grid-template-columns: minmax(12em, 1.4fr) minmax(12em, 1fr) minmax(10em, 1fr); gap: .5em 1em; align-items: end; padding: .75em 0; border-bottom: 1px solid var(--subs-line); }
       #SubtitlesConfigPage .subs-tier .inputContainer, #SubtitlesConfigPage .subs-tier .selectContainer, #SubtitlesConfigPage .subs-tier .checkboxContainer { margin: 0; }
       #SubtitlesConfigPage .subs-muted { opacity: .7; font-size: .9em; }
@@ -98,12 +101,10 @@
       #SubtitlesConfigPage .subs-button-row { display: flex; flex-wrap: wrap; justify-content: center; gap: .5em 1em; margin: 1em 0; }
       #SubtitlesConfigPage .subs-button-row > .emby-button, #SubtitlesConfigPage .emby-button.block { display: inline-flex; justify-content: center; width: auto; min-width: 12em; max-width: 20em; margin: 0; }
       #SubtitlesConfigPage .subs-button-row > .emby-button.block { flex: 0 1 16em; }
-      #SubtitlesConfigPage .subs-button-row > [hidden] { display: none; }
       #SubtitlesConfigPage .subs-button-row:not(:has(> :not([hidden]))) { display: none; }
       #SubtitlesConfigPage .subs-more { justify-content: center; flex-wrap: wrap; }
       #SubtitlesConfigPage #ResMore, #SubtitlesConfigPage #SpeechErrorsMore, #SubtitlesConfigPage .restore-more { min-width: 12em; max-width: 20em; padding: .35em 1.2em; }
       #SubtitlesConfigPage #SpeechErrorsMore, #SubtitlesConfigPage .restore-more { display: block; margin: .75em auto; }
-      #SubtitlesConfigPage #SpeechErrorsMore[hidden] { display: none; }
       /* A service with no key field (built-in: Download now, Test) centres its buttons */
       #SubtitlesConfigPage .subs-key:not(:has(.inputContainer)) { justify-content: center; }
       #SubtitlesConfigPage .subs-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
@@ -114,7 +115,6 @@
         #SubtitlesConfigPage .subs-results thead { display: none; }
         #SubtitlesConfigPage .subs-results tr.subs-row, #SubtitlesConfigPage .subs-errors tr { position: relative; border: 1px solid var(--subs-line); border-radius: 6px; margin: .6em 0 0; padding: .4em .6em; }
         #SubtitlesConfigPage .subs-results tr.subs-detail { border: 1px solid var(--subs-line); border-top: 0; border-radius: 0 0 6px 6px; margin-top: -.3em; }
-        #SubtitlesConfigPage .subs-results tr.subs-detail[hidden] { display: none; }
         #SubtitlesConfigPage .subs-results td { border: 0; padding: .2em 0; }
         #SubtitlesConfigPage .subs-results td[data-label]:not(.subs-video)::before { content: attr(data-label) ": "; opacity: .6; font-size: .85em; }
         #SubtitlesConfigPage .subs-toggle { position: absolute; top: .4em; right: .4em; width: auto; }
