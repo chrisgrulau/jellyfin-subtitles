@@ -48,6 +48,7 @@ public class SubtitlesController : ControllerBase
     private readonly ILibraryMonitor _monitor;
     private readonly SpeechErrorLog _errors;
     private readonly BulkJobs _bulk;
+    private readonly SectionFixer _sections;
 
     // What videos are, from the library, remembered across requests (controllers are made per request)
     private static readonly VideoIdentityCache Identities = new();
@@ -71,8 +72,10 @@ public class SubtitlesController : ControllerBase
     /// <param name="monitor">Jellyfin's library monitor (told about restored and removed subtitles).</param>
     /// <param name="errors">Speech-to-text calls and failures.</param>
     /// <param name="bulk">Bulk actions on the results, run in the background.</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, RunGate gate, ILibraryMonitor monitor, SpeechErrorLog errors, BulkJobs bulk)
+    /// <param name="sections">The fix by section (for subtitles made for a different cut).</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, RunGate gate, ILibraryMonitor monitor, SpeechErrorLog errors, BulkJobs bulk, SectionFixer sections)
     {
+        _sections = sections ?? throw new ArgumentNullException(nameof(sections));
         _bulk = bulk ?? throw new ArgumentNullException(nameof(bulk));
         _errors = errors ?? throw new ArgumentNullException(nameof(errors));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
@@ -363,6 +366,61 @@ public class SubtitlesController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return NotFound(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Tries fixing a subtitle's timing section by section against a full transcript of its video, for a subtitle made for
+    /// a different cut. With a full transcript already kept (by the whole-file check or generating) the fit is made at
+    /// once; otherwise the file is queued for the next run of the full transcripts task. Either way, a correction found
+    /// waits for review. A subtitle the run couldn't fix is refused with the reason.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated result (<see cref="SubtitleResult.SectionFixRequested"/> when it was queued).</returns>
+    [HttpPost("Results/{id}/FixBySection")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<SubtitleResult>> FixBySection([FromRoute] string id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
+            var scope = JellyfinLibraries.Scope(_library, config, _serverConfig);
+            IReadOnlyList<string> WantedFor(SubtitleJob job) => scope.LanguagesForPath(job.VideoPath).Codes;
+            var (result, job, refused) = _processor.RequestSectionFix(id, JobFor, WantedFor);
+            if (result is null)
+            {
+                return BadRequest(refused);
+            }
+
+            // A kept transcript makes the fit a matter of milliseconds: no need to wait for the night
+            var tier = config.FullTranscript ?? new TranscriptionTier();
+            if (job is not null && tier.Enabled
+                && await _sections.FixAsync(job, null, null, SubtitleGenerator.SetupOf(tier.Provider, tier.Model), WantedFor(job), cancellationToken).ConfigureAwait(false) is { } done)
+            {
+                return done;
+            }
+
+            return result;
+        }
+        catch (StaleResultException ex)
+        {
+            return Conflict(ex.Message);
+        }
+        catch (InvalidOperationException ex) when (ex.Message is StaleResults.UnreachableMessage or StaleResults.NoFileMessage)
+        {
+            return Conflict(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            return Conflict(ex.Message);
         }
     }
 

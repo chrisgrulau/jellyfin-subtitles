@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Subtitles made for a different cut are fixed section by section** (**Fix subtitles made for a different cut**, off
+  by default). A subtitle made for another version of the video (a scene added or cut, a recap, ad breaks, often a
+  different frame rate as well) jumps or drifts part-way, so the timing check left it unclear. Now a subtitle whose check
+  was unclear, or agreed only partly, is lined up with a full transcript of its video piece by piece: the timing is split
+  into sections (at most 8, each needing enough agreeing words over enough time, one frame-rate correction for the whole
+  file), each jump placed between two lines. The correction waits for review ("Made for a different cut: timing jumps at
+  12:40 (+3.2 s) and 31:05 (−41.0 s)", each section in the nerd stats); **Apply** moves each section, Undo brings the
+  original back. Lines covering a part the video doesn't have are listed for removal, never moved. Subtitles for another
+  episode or language, or too few matching words, are left alone with the reason. Runs with the full transcripts
+  (sharing their time budget and nightly limit, and their kept transcripts); **Try fixing timing by section** in the
+  results asks for one at any time, answering at once when the video's transcript is already kept. Calibrated on real
+  videos: 312 synthetic cuts all found with offsets within 0.03 s (median); on untouched good subtitles the only jumps
+  found were real act-break steps; every wrong-episode pairing rejected (see docs/DESIGN.md).
+- `tools/DiscrepancyEval sections`: evaluates the fit on real videos (synthetic cuts of good subtitles, wrong-episode
+  pairings), for calibrating it.
+
 ## [0.17.1-alpha] - 2026-09-27
 
 ### Fixed

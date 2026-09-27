@@ -3,6 +3,7 @@
 //
 //   damage     --in S.srt --out D.srt --truth D.truth.json [--seed 1] [--deletes 5] [--numbers 5] [--negations 3] [--names 3] [--extras 3]
 //   transcribe --manifest M.json --service http://host:port/v1 --cache DIR [--model NAME] [--ffmpeg PATH] [--ffprobe PATH] [--only ID]
+//   sections   see Sections.cs
 //   evaluate   --manifest M.json --cache DIR --out DIR [--model NAME] [--tolerance 2,3,4] [--ratio 0.4,0.5,0.6]
 //              [--missing 4:1.5,6:2.5] [--extra 3,5] [--words-min 4] [--confidence 0.741] [--anchored false,true]
 //              [--known-names false,true] [--distinct false,true] [--isolated false,true] [--detail CONFIG,...|all]
@@ -41,7 +42,7 @@ public static class Program
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("usage: damage | transcribe | evaluate (see Program.cs header)");
+            Console.Error.WriteLine("usage: damage | transcribe | evaluate | sections (see Program.cs header)");
             return 2;
         }
 
@@ -51,6 +52,7 @@ public static class Program
             "damage" => Damage(a),
             "transcribe" => await Transcribe(a).ConfigureAwait(false),
             "evaluate" => Evaluate(a),
+            "sections" => Sections.Run(a),
             _ => 2,
         };
     }
@@ -69,7 +71,7 @@ public static class Program
         return d;
     }
 
-    private static string Get(Dictionary<string, string> a, string key, string? fallback = null)
+    internal static string Get(Dictionary<string, string> a, string key, string? fallback = null)
         => a.TryGetValue(key, out var v) ? v : fallback ?? throw new ArgumentException("missing --" + key);
 
     // Capitalised words that aren't a character's name
@@ -81,7 +83,7 @@ public static class Program
         "East", "West", "Christmas", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "English",
     };
 
-    private static SubtitleDocument Read(string path)
+    internal static SubtitleDocument Read(string path)
     {
         var (text, _) = SubtitleEncoding.Decode(File.ReadAllBytes(path));
         return SubtitleReader.Parse(text, SubtitleReader.Detect(path, text) ?? SubtitleFormat.Srt);
@@ -254,7 +256,7 @@ public static class Program
     // ---------------------------------------------------------------------------------------------------------------
     // Transcripts: each video once, cached on disk
     // ---------------------------------------------------------------------------------------------------------------
-    private static string CacheFile(string cache, Entry e, string model)
+    internal static string CacheFile(string cache, Entry e, string model)
     {
         var info = new FileInfo(e.Video);
         var key = string.Join('|', e.Video, info.Length.ToString(Inv), info.LastWriteTimeUtc.Ticks.ToString(Inv), e.AudioStream.ToString(Inv), e.Language, model);
@@ -262,7 +264,7 @@ public static class Program
         return Path.Combine(cache, hash + ".json.gz");
     }
 
-    private static CachedTranscript? Load(string file)
+    internal static CachedTranscript? Load(string file)
     {
         if (!File.Exists(file))
         {
@@ -273,7 +275,7 @@ public static class Program
         return JsonSerializer.Deserialize<CachedTranscript>(gz);
     }
 
-    private static List<Entry> Manifest(Dictionary<string, string> a)
+    internal static List<Entry> Manifest(Dictionary<string, string> a)
         => JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(Get(a, "manifest"))) ?? [];
 
     private static async Task<double> Duration(string ffprobe, string video)
@@ -331,7 +333,7 @@ public static class Program
     // ---------------------------------------------------------------------------------------------------------------
     // Evaluation: every file against a grid of options
     // ---------------------------------------------------------------------------------------------------------------
-    private static List<double> Doubles(string s) => s.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => double.Parse(x, Inv)).ToList();
+    internal static List<double> Doubles(string s) => s.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => double.Parse(x, Inv)).ToList();
 
     private static List<Config> Grid(Dictionary<string, string> a)
     {

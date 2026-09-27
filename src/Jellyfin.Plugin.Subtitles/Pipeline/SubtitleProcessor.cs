@@ -699,8 +699,17 @@ public sealed class SubtitleProcessor
             (document, fixedLines) = DiscrepancyReview.ApplyAll(document, r.Findings);
         }
 
-        if (r.Status == ResultStatus.Proposed)
+        var notInVideo = 0;
+        if (r.Status == ResultStatus.Proposed && r.Sections is { Count: > 0 } sections)
         {
+            // A subtitle made for a different cut: the lines still flagged as not in the video go, then each section moves
+            // by its own timing
+            (document, notInVideo) = RemoveNotInVideo(document, r.Findings);
+            document = PiecewiseFit.Retime(document, r.Scale, sections);
+        }
+        else if (r.Status == ResultStatus.Proposed)
+        {
+            (document, notInVideo) = RemoveNotInVideo(document, r.Findings);
             document = document.Retime(new SyncModel(SyncStatus.Corrected, r.Scale, r.Offset, r.Confidence, [], r.Explanation).Map);
         }
 
@@ -722,6 +731,11 @@ public sealed class SubtitleProcessor
             if (fixedLines > 0)
             {
                 cleanedCounts[DiscrepancyReview.FixedKind] = cleanedCounts.GetValueOrDefault(DiscrepancyReview.FixedKind) + fixedLines;
+            }
+
+            if (notInVideo > 0)
+            {
+                cleanedCounts[DiscrepancyReview.RemovedNotInVideoKind] = cleanedCounts.GetValueOrDefault(DiscrepancyReview.RemovedNotInVideoKind) + notInVideo;
             }
 
             // Lines with nothing heard are only removed one at a time, so they stay for review
@@ -766,11 +780,11 @@ public sealed class SubtitleProcessor
         var document = SubtitleReader.Read(bytes, r.SubtitlePath) ?? throw new InvalidOperationException("The subtitle can no longer be read.");
         SubtitleDocument changed;
         string kind;
-        if (DiscrepancyReview.IsWholeFile(f))
+        if (DiscrepancyReview.IsWholeFile(f) || DiscrepancyReview.IsSection(f))
         {
             var (done, problem) = DiscrepancyReview.ApplyOne(document, f);
             changed = done ?? throw new InvalidOperationException(problem);
-            kind = DiscrepancyReview.FixedKind;
+            kind = DiscrepancyReview.IsSection(f) ? DiscrepancyReview.RemovedNotInVideoKind : DiscrepancyReview.FixedKind;
         }
         else
         {
@@ -977,6 +991,53 @@ public sealed class SubtitleProcessor
     }
 
     /// <summary>
+    /// Asks for a subtitle's timing to be fixed by section against a full transcript (see <see cref="SectionFixer"/>) on
+    /// the next run of the full transcripts task. A file the run can't fix is refused with the reason, by the run's own
+    /// rules (see <see cref="SectionFixer.Ineligible"/>).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="jobFor">The subtitle as the library lists it (video, language, audio track), or <c>null</c>.</param>
+    /// <param name="wantedFor">The wanted languages for a subtitle's video, in order.</param>
+    /// <returns>The updated result and the subtitle as the library lists it, or why it can't be fixed.</returns>
+    /// <exception cref="InvalidOperationException">No such result.</exception>
+    public (SubtitleResult? Result, SubtitleJob? Job, string? Refused) RequestSectionFix(string id, Func<SubtitleResult, SubtitleJob?> jobFor, Func<SubtitleJob, IReadOnlyList<string>> wantedFor)
+    {
+        ArgumentNullException.ThrowIfNull(jobFor);
+        ArgumentNullException.ThrowIfNull(wantedFor);
+        var r = Find(id);
+        Require(r, subtitle: true);
+        var job = jobFor(r);
+        if (job is not null)
+        {
+            Require(r, subtitle: true, video: job.VideoPath);
+        }
+
+        if (SectionFixer.Ineligible(r, job, job is null ? [] : wantedFor(job)) is { } why)
+        {
+            return (null, job, why);
+        }
+
+        return (r.SectionFixRequested ? r : Save(r with { SectionFixRequested = true }), job, null);
+    }
+
+    // The lines a fix by section flagged as not in the video, as long as they are still flagged (not declined) and as
+    // they were
+    private static (SubtitleDocument Document, int Removed) RemoveNotInVideo(SubtitleDocument document, IReadOnlyList<LineFinding> findings)
+    {
+        var removed = 0;
+        foreach (var f in findings.Where(f => DiscrepancyReview.IsSection(f) && f.Kind == DiscrepancyReview.NotInVideo))
+        {
+            if (document.Cues.Count > 1 && DiscrepancyReview.ApplyOne(document, f) is ({ } done, null))
+            {
+                document = done;
+                removed++;
+            }
+        }
+
+        return (document, removed);
+    }
+
+    /// <summary>
     /// Undoes this plugin's changes to a file: the first original comes back, if the file is still as this plugin left it.
     /// </summary>
     /// <param name="id">Result id.</param>
@@ -1118,6 +1179,7 @@ public sealed class SubtitleProcessor
                 CleanupPending = new Dictionary<string, int>(),
                 Examples = [],
                 Findings = [],
+                Sections = null,
                 Time = _clock.GetUtcNow(),
                 Explanation = "Undone: the original subtitle file is back.",
             });
@@ -1243,6 +1305,7 @@ public sealed class SubtitleProcessor
             Status = r.Status == ResultStatus.Proposed ? ResultStatus.Declined : r.Status,
             Scale = r.Status == ResultStatus.Proposed ? 1 : r.Scale,
             Offset = r.Status == ResultStatus.Proposed ? 0 : r.Offset,
+            Sections = r.Status == ResultStatus.Proposed ? null : r.Sections,
             CleanupPending = new Dictionary<string, int>(),
             Findings = [],
             Time = _clock.GetUtcNow(),

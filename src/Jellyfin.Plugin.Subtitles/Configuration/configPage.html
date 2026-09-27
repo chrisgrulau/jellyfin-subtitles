@@ -321,10 +321,17 @@
             </label>
             <div class="fieldDescription checkboxFieldDescription">A subtitle whose timing check was unclear or settled by few matching words, or whose wording the AI audit flagged, is compared line by line with a <strong>Full transcript</strong> of its video. Lines that are heard but missing, lines with nothing heard, and lines whose names, numbers, negations or words differ from what is said are listed with what was heard and a suggested fix, for you to apply or decline one by one (or open in the editor); nothing is changed on its own. Words heard with low confidence aren't used. Only subtitles in the audio's language; generated subtitles are never checked. <strong>Check whole file</strong> in the results asks for any subtitle to be checked, even with this off. Transcripts are kept, so checking again, or generating from the same video, costs nothing more. Runs nightly with the generated subtitles (Scheduled Tasks → Shoal → Generate missing subtitles and check whole files).</div>
           </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="FixDifferentCuts" type="checkbox" is="emby-checkbox" />
+              <span>Fix subtitles made for a different cut</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">Some subtitles were made for another version of the video: a scene added or cut, a recap or cold open, ad breaks, sometimes a different frame rate too. They start in time and then jump or drift part-way, so no single shift fixes them and the timing check leaves them unclear. With this on, a subtitle whose timing check was unclear, or settled with few matching words, is lined up with a <strong>Full transcript</strong> of its video section by section. If the timing jumps (for example "at 12:40 by +3.2 s and at 31:05 by −41 s"), the correction is listed for you to apply or decline; nothing is changed on its own. Lines covering a part the video doesn't have are flagged for you to remove, not moved. Subtitles for another episode or in another language are left alone. <strong>Try fixing timing by section</strong> in the results asks for one, even with this off. Transcripts are shared with the whole-file check and generated subtitles, so a video is never transcribed twice. Runs nightly with them.</div>
+          </div>
           <div class="inputContainer" id="WholeFileOptions">
-            <label class="inputLabel inputLabelUnfocused" for="MaxWholeFileChecksPerNight">Subtitle files checked whole per night</label>
+            <label class="inputLabel inputLabelUnfocused" for="MaxWholeFileChecksPerNight">Subtitle files checked whole or fixed by section per night</label>
             <input id="MaxWholeFileChecksPerNight" type="number" min="0" max="200" step="1" is="emby-input" />
-            <div class="fieldDescription">Default 5 (0 to 200). Files you picked with <strong>Check whole file</strong> go first and count too.</div>
+            <div class="fieldDescription">Default 5 (0 to 200), shared by the whole-file check and fixes by section. Files you picked with <strong>Check whole file</strong> or <strong>Try fixing timing by section</strong> go first and count too.</div>
           </div>
           <div class="inputContainer" id="TranscriptHoursBox">
             <label class="inputLabel inputLabelUnfocused" for="MaxGenerateHours">Stop starting new videos after (hours)</label>
@@ -1052,12 +1059,12 @@
         var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large', CantWrite: "Can't write here", Declined: 'Declined', Generated: 'Generated', NoSpeech: 'No speech to transcribe', Replaced: 'Replaced by a found subtitle', Deferred: "Couldn't check yet" };
 
         // What the whole-file check found, by kind
-        var findingNames = { 'missing-line': ['missing line', 'missing lines'], extra: ['line with nothing heard', 'lines with nothing heard'], name: ['name', 'names'], number: ['number', 'numbers'], negation: ['negation', 'negations'], words: ['line with words missing', 'lines with words missing'] };
+        var findingNames = { 'missing-line': ['missing line', 'missing lines'], extra: ['line with nothing heard', 'lines with nothing heard'], 'not-in-video': ['not in this cut of the video', 'not in this cut of the video'], name: ['name', 'names'], number: ['number', 'numbers'], negation: ['negation', 'negations'], words: ['line with words missing', 'lines with words missing'] };
 
         // Lists show a first page and a Show more button; these are the page sizes
         var pageSize = 15, findingsShown = 10, skippedShown = 15;
 
-        function isWhole(f) { return f.From === 'whole file'; }
+        function isWhole(f) { return f.From === 'whole file' || f.From === 'timing by section'; }
 
         function fmtShort(s) {
           var t = Math.max(0, Math.floor(s)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, sec = t % 60;
@@ -1093,9 +1100,9 @@
             var what = isWhole(f) ? (names ? names[0] : f.Kind) : f.Kind + ' (wording audit)';
             var line = f.Kind === 'missing-line' ? '' : ' “' + esc(f.Current.replace(/<[^>]*>/g, '').replace(/\n/g, ' ')) + '”';
             var heard = f.Heard ? '<br>Heard: “' + esc(f.Heard.replace(/\n/g, ' ')) + '”' : '';
-            var fix = f.Kind === 'extra' && isWhole(f) ? '<br>Fix: remove the line' : f.Suggestion ? '<br>' + (f.Kind === 'missing-line' ? 'Add' : 'Fix') + ': “' + esc(f.Suggestion.replace(/\n/g, ' / ')) + '”' : '';
-            var applyLabel = f.Kind === 'missing-line' ? 'Add line' : f.Kind === 'extra' && isWhole(f) ? 'Remove line' : 'Apply';
-            var canApply = f.Suggestion || (f.Kind === 'extra' && isWhole(f));
+            var fix = (f.Kind === 'extra' && isWhole(f)) || f.Kind === 'not-in-video' ? '<br>Fix: remove the line' : f.Suggestion ? '<br>' + (f.Kind === 'missing-line' ? 'Add' : 'Fix') + ': “' + esc(f.Suggestion.replace(/\n/g, ' / ')) + '”' : '';
+            var applyLabel = f.Kind === 'missing-line' ? 'Add line' : (f.Kind === 'extra' && isWhole(f)) || f.Kind === 'not-in-video' ? 'Remove line' : 'Apply';
+            var canApply = f.Suggestion || (f.Kind === 'extra' && isWhole(f)) || f.Kind === 'not-in-video';
             var attrs = ' data-index="' + i + '" data-time="' + f.Time + '"';
             return '<li><strong>' + esc(fmtShort(f.Time)) + '</strong> ' + esc(what) + ':' + line + heard + fix + '<br><span class="subs-muted">' + esc(f.Reason) + '</span><div class="subs-actions">' +
               (canApply ? button('fd-apply', applyLabel, r.Id, '', attrs) : '') +
@@ -1109,6 +1116,13 @@
         function wholeCheckable(r) {
           return !r.WholeFileRequested && r.Id.indexOf('gen-') !== 0 && r.Id.indexOf('emb-') !== 0 && !/\.generated\.[^.\\/]+$/i.test(r.SubtitlePath || '') &&
             ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'Added', 'Declined', 'Undone'].indexOf(r.Status) >= 0 && !(r.Status === 'Undone' && r.Id.indexOf('find-') === 0);
+        }
+
+        // Subtitles whose timing check was unclear, or settled with few matching words, can be fixed by section
+        function sectionFixable(r) {
+          return !r.SectionFixRequested && r.Id.indexOf('gen-') !== 0 && r.Id.indexOf('emb-') !== 0 && !/\.generated\.[^.\\/]+$/i.test(r.SubtitlePath || '') &&
+            r.Stage !== 'lines by meaning' && r.Stage !== 'timing by section' &&
+            (r.Status === 'Unreliable' || (['InSync', 'Corrected', 'Proposed'].indexOf(r.Status) >= 0 && r.Stage === 'speech-to-text' && r.Confidence < 0.75));
         }
 
         function chips(v) {
@@ -1134,8 +1148,9 @@
             ? button('res-check', r.Id.indexOf('gen-') === 0 ? 'Generate again' : r.Status === 'Undone' || r.Status === 'NotFound' ? 'Search again' : 'Check again', r.Id, 'Check this subtitle again on the next run (or search again for this video, or generate its subtitle again)')
             : '';
           var whole = wholeCheckable(r) ? button('res-whole', 'Check whole file', r.Id, 'Compare every line with a full transcript of the video on the next run of the full transcripts task') : '';
+          var sections = sectionFixable(r) ? button('res-sections', 'Try fixing timing by section', r.Id, 'For a subtitle made for a different cut of the video: line it up with a full transcript section by section (now if a transcript is kept, else on the next run of the full transcripts task); a correction waits for your review') : '';
           var queued = v.RerunQueued ? '<span class="subs-muted">' + esc(v.RerunLabel) + ': queued for the next check.</span>' : '';
-          return again || whole || queued ? '<div class="subs-actions">' + again + whole + queued + '</div>' : '';
+          return again || whole || sections || queued ? '<div class="subs-actions">' + again + whole + sections + queued + '</div>' : '';
         }
 
         function detail(r, v) {
@@ -1641,6 +1656,18 @@
               'Queued: it is compared with a full transcript on the next run of Scheduled Tasks → Shoal → Generate missing subtitles and check whole files (daily at 05:00), or now with Run full transcripts now. That can take a while on the built-in speech-to-text.');
             return;
           }
+          var sectionsButton = e.target.closest('.res-sections');
+          if (sectionsButton) {
+            settle(ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + sectionsButton.getAttribute('data-id') + '/FixBySection'), dataType: 'json' })
+              .then(function (r) { if (r && r.SectionFixRequested) { page.querySelector('#GenerateNow').hidden = false; } return r; }), busy(sectionsButton, 'Fitting…'),
+              function (r) {
+                if (r && r.SectionFixRequested) {
+                  return 'Queued: it is lined up with a full transcript on the next run of Scheduled Tasks → Shoal → Generate missing subtitles and check whole files (daily at 05:00), or now with Run full transcripts now.';
+                }
+                return r && r.Status === 'Proposed' && r.Stage === 'timing by section' ? 'A correction by section is waiting for your review above.' : 'No fix by section: see the explanation in the nerd stats.';
+              });
+            return;
+          }
           var rerun = e.target.closest('.res-rerun');
           if (rerun) {
             var label = rerun.textContent;
@@ -1747,7 +1774,7 @@
         page.querySelector('#GenerateNow').addEventListener('click', function () { runTask('ShoalSubtitlesGenerate', 'Running full transcripts', this); });
 
         // Generating needs the Full transcript speech-to-text: switching generation on switches it on too
-        ['#GenerateMissing', '#CheckWholeFile'].forEach(function (sel) {
+        ['#GenerateMissing', '#CheckWholeFile', '#FixDifferentCuts'].forEach(function (sel) {
           page.querySelector(sel).addEventListener('change', function () {
             var full = page.querySelector('.subs-tier[data-tier="FullTranscript"] .tier-on');
             if (this.checked && full) { full.checked = true; }
@@ -1767,7 +1794,7 @@
           page.querySelector('#MonthlyBudget').disabled = noLimit;
           Array.prototype.forEach.call(page.querySelectorAll('.subs-currency'), function (e) { e.textContent = page.querySelector('#Currency').value; });
           var generating = page.querySelector('#GenerateMissing').checked;
-          var checkingWhole = page.querySelector('#CheckWholeFile').checked;
+          var checkingWhole = page.querySelector('#CheckWholeFile').checked || page.querySelector('#FixDifferentCuts').checked;
           var queued = !!(results.tally && results.tally.Queued);
           page.querySelector('#GenerateOptions').hidden = !generating;
           page.querySelector('#NewItemsOptions').hidden = !page.querySelector('#HandleNewItems').checked;
@@ -1821,6 +1848,7 @@
             page.querySelector('#MaxGeneratedPerNight').value = config.MaxGeneratedPerNight == null ? 20 : config.MaxGeneratedPerNight;
             page.querySelector('#MaxGenerateHours').value = config.MaxGenerateHours == null ? 4 : config.MaxGenerateHours;
             page.querySelector('#CheckWholeFile').checked = config.CheckWholeFile === true;
+            page.querySelector('#FixDifferentCuts').checked = config.FixDifferentCuts === true;
             page.querySelector('#MaxWholeFileChecksPerNight').value = config.MaxWholeFileChecksPerNight == null ? 5 : config.MaxWholeFileChecksPerNight;
             page.querySelector('#TuneConfidence').checked = config.TuneConfidence === true;
             page.querySelector('#WriteToActivityLog').checked = config.WriteToActivityLog !== false;
@@ -1864,6 +1892,7 @@
             var hours = parseInt(page.querySelector('#MaxGenerateHours').value, 10);
             config.MaxGenerateHours = isNaN(hours) ? 4 : Math.max(0, Math.min(24, hours));
             config.CheckWholeFile = page.querySelector('#CheckWholeFile').checked;
+            config.FixDifferentCuts = page.querySelector('#FixDifferentCuts').checked;
             var wholePerNight = parseInt(page.querySelector('#MaxWholeFileChecksPerNight').value, 10);
             config.MaxWholeFileChecksPerNight = isNaN(wholePerNight) ? 5 : Math.max(0, Math.min(200, wholePerNight));
             config.TuneConfidence = page.querySelector('#TuneConfidence').checked;

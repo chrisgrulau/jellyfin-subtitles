@@ -21,7 +21,7 @@ public sealed record ResultRow(SubtitleResult Result, ResultView View);
 /// <param name="ByStatus">Results per status (by name).</param>
 /// <param name="Waiting">Results waiting for review.</param>
 /// <param name="WholeFile">Results the whole-file check flagged.</param>
-/// <param name="Queued">Results queued for a whole-file check.</param>
+/// <param name="Queued">Results queued for a whole-file check, a fix by section or a rerun.</param>
 /// <param name="FellBack">Results whose speech-to-text fell back or failed.</param>
 public sealed record ResultTally(int All, IReadOnlyDictionary<string, int> ByStatus, int Waiting, int WholeFile, int Queued, int FellBack);
 
@@ -63,7 +63,7 @@ public static class ResultQuery
             "" => true,
             "waiting" => r.PendingReview,
             "wholefile" => r.Findings.Any(DiscrepancyReview.IsWholeFile),
-            "queued" => r.WholeFileRequested || r.RerunWith is not null,
+            "queued" => r.WholeFileRequested || r.SectionFixRequested || r.RerunWith is not null,
             "fellback" => r.SpeechFallback is not null,
             var status => string.Equals(r.Status.ToString(), status, StringComparison.Ordinal),
         };
@@ -134,7 +134,7 @@ public static class ResultQuery
             all.GroupBy(r => r.Status.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal),
             all.Count(r => r.PendingReview),
             all.Count(r => r.Findings.Any(DiscrepancyReview.IsWholeFile)),
-            all.Count(r => r.WholeFileRequested || r.RerunWith is not null),
+            all.Count(r => r.WholeFileRequested || r.SectionFixRequested || r.RerunWith is not null),
             all.Count(r => r.SpeechFallback is not null));
     }
 }

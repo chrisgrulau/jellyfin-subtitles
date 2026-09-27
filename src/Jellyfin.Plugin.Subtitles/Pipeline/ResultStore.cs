@@ -109,6 +109,25 @@ public sealed record WholeFileCheck
 }
 
 /// <summary>
+/// An attempt to fix a subtitle's timing section by section against a full transcript (for a subtitle made for a
+/// different cut of the video).
+/// </summary>
+public sealed record SectionFixCheck
+{
+    /// <summary>Gets when.</summary>
+    public DateTimeOffset Time { get; init; }
+
+    /// <summary>Gets the speech-to-text service and model of the transcript (for example <c>builtin/base</c>).</summary>
+    public string Setup { get; init; } = string.Empty;
+
+    /// <summary>Gets what it found, in one or two sentences.</summary>
+    public string Summary { get; init; } = string.Empty;
+
+    /// <summary>Gets a value indicating whether it couldn't be done (the transcript failed); tried again after a while.</summary>
+    public bool Failed { get; init; }
+}
+
+/// <summary>
 /// The chosen speech-to-text service failed during a check: what stood in for it, if anything, and why.
 /// </summary>
 /// <param name="From">The chosen service's id (<c>deepgram</c> …).</param>
@@ -196,6 +215,18 @@ public sealed record SubtitleResult
 
     /// <summary>Gets a value indicating whether the whole file is to be compared with a full transcript on the next run (asked for from the results).</summary>
     public bool WholeFileRequested { get; init; }
+
+    /// <summary>
+    /// Gets the sections of a timing proposed (or applied) piece by piece, for a subtitle made for a different cut: each
+    /// line is moved by its section's offset after <see cref="Scale"/>. <c>null</c> for a single timing.
+    /// </summary>
+    public IReadOnlyList<Sync.TimingSection>? Sections { get; init; }
+
+    /// <summary>Gets the latest attempt to fix the timing section by section, if one was made.</summary>
+    public SectionFixCheck? SectionFix { get; init; }
+
+    /// <summary>Gets a value indicating whether a fix by section is to be tried on the next full-transcript run (asked for from the results).</summary>
+    public bool SectionFixRequested { get; init; }
 
     /// <summary>Gets what happened when the chosen speech-to-text service failed during the check, if it did.</summary>
     public SpeechFallbackNote? SpeechFallback { get; init; }
@@ -286,7 +317,7 @@ public sealed class ResultStore : IDisposable
     public static bool MustKeep(SubtitleResult r, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(r);
-        return r.Changed || r.PendingReview || r.WholeFileRequested || r.RerunWith is not null || r.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Generated or ResultStatus.NoSpeech
+        return r.Changed || r.PendingReview || r.WholeFileRequested || r.SectionFixRequested || r.RerunWith is not null || r.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Generated or ResultStatus.NoSpeech
             || (r.Status is ResultStatus.NotFound or ResultStatus.Failed && r.Id.StartsWith("find-", StringComparison.Ordinal) && now - r.Time < SubtitleFinder.SearchAgainAfter);
     }
 
@@ -300,7 +331,7 @@ public sealed class ResultStore : IDisposable
     public static bool SaveAtOnce(SubtitleResult result, SubtitleResult? previous)
     {
         ArgumentNullException.ThrowIfNull(result);
-        return result.Changed || previous?.Changed == true || result.PendingReview || previous?.PendingReview == true || result.WholeFileRequested != (previous?.WholeFileRequested ?? false) || !string.Equals(result.RerunWith, previous?.RerunWith, StringComparison.Ordinal)
+        return result.Changed || previous?.Changed == true || result.PendingReview || previous?.PendingReview == true || result.WholeFileRequested != (previous?.WholeFileRequested ?? false) || result.SectionFixRequested != (previous?.SectionFixRequested ?? false) || !string.Equals(result.RerunWith, previous?.RerunWith, StringComparison.Ordinal)
             || result.Status is ResultStatus.Added or ResultStatus.Undone or ResultStatus.Declined or ResultStatus.Generated or ResultStatus.Replaced;
     }
 

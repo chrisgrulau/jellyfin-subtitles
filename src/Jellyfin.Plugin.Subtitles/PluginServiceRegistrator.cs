@@ -75,6 +75,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         });
         serviceCollection.AddSingleton(sp => new SubtitleGenerator(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SubtitleFiles>>()), cache: sp.GetRequiredService<Generation.TranscriptCache>()));
         serviceCollection.AddSingleton(sp => new WholeFileChecker(sp.GetRequiredService<ResultStore>(), sp.GetRequiredService<Generation.TranscriptCache>(), sp.GetRequiredService<Discrepancy.ConfidenceCalibration>()));
+        serviceCollection.AddSingleton(sp => new SectionFixer(sp.GetRequiredService<ResultStore>(), sp.GetRequiredService<Generation.TranscriptCache>()));
         serviceCollection.AddSingleton(sp => new EmbeddedChecker(sp.GetRequiredService<ResultStore>()));
         // The in-process entry point other plugins of the family use for short transcripts (no HTTP endpoint): its work is
         // a registered service; the static method they find by reflection forwards to it

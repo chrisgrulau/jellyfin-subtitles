@@ -309,9 +309,10 @@ public static partial class ResultPresenter
         ArgumentNullException.ThrowIfNull(r);
         var chips = new List<ResultChip>();
         var shifted = r.Status is ResultStatus.Corrected or ResultStatus.Proposed or ResultStatus.Added && (Math.Abs(r.Offset) >= 0.005 || Math.Abs(r.Scale - 1) > 1e-9);
-        if (shifted)
+        if (shifted || r.Sections is { Count: > 1 } && r.Status is ResultStatus.Corrected or ResultStatus.Proposed)
         {
-            var label = Math.Abs(r.Offset) >= 0.005 ? string.Create(CultureInfo.InvariantCulture, $"{r.Offset:+0.0;-0.0} s") : "fps";
+            var label = r.Sections is { Count: > 1 } cut ? string.Create(CultureInfo.InvariantCulture, $"{cut.Count - 1} cut{(cut.Count == 2 ? string.Empty : "s")}")
+                : Math.Abs(r.Offset) >= 0.005 ? string.Create(CultureInfo.InvariantCulture, $"{r.Offset:+0.0;-0.0} s") : "fps";
             var words = Shift(r) + (r.Status == ResultStatus.Proposed ? " — waiting for review" : string.Empty);
             chips.Add(new ResultChip("timing", Icons["timing"], label, words, r.Status == ResultStatus.Proposed));
         }
@@ -321,7 +322,7 @@ public static partial class ResultPresenter
             var tail = pending ? " — waiting for review" : string.Empty;
             Add(chips, "tidied", Count(counts, "FixedOverlap", "ExtendedShortCue"), Plural(Count(counts, "FixedOverlap", "ExtendedShortCue"), "line's timing tidied (overlaps, brief lines)", "lines' timing tidied (overlaps, brief lines)") + tail, pending);
             Add(chips, "sounds", Count(counts, "StrippedHearingImpaired"), Plural(Count(counts, "StrippedHearingImpaired"), "sound description removed", "sound descriptions removed") + tail, pending);
-            var removed = Count(counts, "RemovedAdvert", "RemovedEmpty", "MergedDuplicate");
+            var removed = Count(counts, "RemovedAdvert", "RemovedEmpty", "MergedDuplicate", DiscrepancyReview.RemovedNotInVideoKind);
             Add(chips, "removed", removed, Removed(counts) + tail, pending);
             var worded = Count(counts, SubtitleProcessor.RewordedKind, SubtitleEditing.EditedKind, DiscrepancyReview.FixedKind);
             Add(chips, "wording", worded, Plural(worded, "line reworded or edited", "lines reworded or edited") + tail, pending);
@@ -330,10 +331,12 @@ public static partial class ResultPresenter
         var open = r.Findings.Where(f => f.Suggestion is not null || f.From is not null).ToList();
         var toAdd = open.Count(f => f.Kind == "missing-line");
         var toRemove = open.Count(f => f.Kind == "extra" && f.From is not null);
-        var toWord = open.Count - toAdd - toRemove;
+        var notInCut = open.Count(f => f.Kind == DiscrepancyReview.NotInVideo);
+        var toWord = open.Count - toAdd - toRemove - notInCut;
         Add(chips, "wording", toWord, Plural(toWord, "line differs from what is said — waiting for review", "lines differ from what is said — waiting for review"), true);
         Add(chips, "added", toAdd, Plural(toAdd, "line heard but missing — waiting for review", "lines heard but missing — waiting for review"), true);
         Add(chips, "removed", toRemove, Plural(toRemove, "line with nothing heard — waiting for review", "lines with nothing heard — waiting for review"), true);
+        Add(chips, "removed", notInCut, Plural(notInCut, "line not in this cut of the video — waiting for review", "lines not in this cut of the video — waiting for review"), true);
         if (r.Explanation.Contains("didn't decode cleanly", StringComparison.Ordinal))
         {
             chips.Add(new ResultChip("encoding", Icons["encoding"], "!", "The text didn't decode cleanly (a guessed code page), so changes wait for review", true));
@@ -342,6 +345,11 @@ public static partial class ResultPresenter
         if (r.WholeFileRequested)
         {
             chips.Add(new ResultChip("queued", Icons["queued"], string.Empty, "Whole-file check queued for the next full-transcript run", true));
+        }
+
+        if (r.SectionFixRequested)
+        {
+            chips.Add(new ResultChip("queued", Icons["queued"], string.Empty, "Fix by section queued for the next full-transcript run", true));
         }
 
         if (r.RerunWith is { } rerun)
@@ -364,7 +372,9 @@ public static partial class ResultPresenter
         var sentence = r.Status switch
         {
             ResultStatus.InSync => "In sync — no timing change needed",
+            ResultStatus.Corrected when r.Sections is { Count: > 1 } => "Made for a different cut: timing fixed section by section",
             ResultStatus.Corrected => Shift(r) + " to match the speech",
+            ResultStatus.Proposed when r.Sections is { Count: > 1 } => "Made for a different cut: timing " + Jumps(r) + " — waiting for your review",
             ResultStatus.Proposed => "Could be " + LowerFirst(Shift(r)) + " — waiting for your review",
             ResultStatus.Unreliable => "Couldn't tell whether the timing is right, so it was left alone",
             ResultStatus.WrongLanguage => "Doesn't match what is said (another language or version?) — left alone",
@@ -451,6 +461,16 @@ public static partial class ResultPresenter
             Add("Parts", gen.Groups[3].Value);
         }
 
+        if (r.Sections is { Count: > 1 } sections)
+        {
+            Add("Sections", string.Join("; ", sections.Select((s, k) => string.Create(CultureInfo.InvariantCulture, $"{(k == 0 ? "from the start" : "from " + Sync.PiecewiseAligner.Clock(s.ShowsAt) + " in the video (" + Sync.PiecewiseAligner.Clock(s.From) + " in the file)")}: {s.Offset:+0.00;-0.00} s ({s.Anchors} words)"))));
+        }
+
+        if (r.SectionFix is { } fix)
+        {
+            Add("Fix by section", TimeZoneInfo.ConvertTime(fix.Time, zone).ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture) + " by " + fix.Setup + (fix.Failed ? " (failed)" : string.Empty));
+        }
+
         if (r.WholeFile is { } whole)
         {
             Add("Whole-file check", TimeZoneInfo.ConvertTime(whole.Time, zone).ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture) + " by " + whole.Setup + (whole.Failed ? " (failed)" : string.Empty));
@@ -502,6 +522,20 @@ public static partial class ResultPresenter
 
     private static int Count(IReadOnlyDictionary<string, int> counts, params string[] kinds) => kinds.Sum(k => counts.GetValueOrDefault(k));
 
+    // "jumps at 12:40 (+3.2 s) and 31:05 (−41.0 s)", in the video's time
+    private static string Jumps(SubtitleResult r)
+    {
+        var s = r.Sections!;
+        var parts = new List<string>();
+        for (var k = 1; k < s.Count; k++)
+        {
+            var delta = s[k].Offset - s[k - 1].Offset;
+            parts.Add(Sync.PiecewiseAligner.Clock(s[k].ShowsAt > 0 ? s[k].ShowsAt : (r.Scale * s[k].From) + s[k].Offset) + string.Create(CultureInfo.InvariantCulture, $" ({(delta >= 0 ? "+" : "−")}{Math.Abs(delta):0.0} s)"));
+        }
+
+        return "jumps at " + (parts.Count == 1 ? parts[0] : string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[^1]);
+    }
+
     private static string Removed(IReadOnlyDictionary<string, int> counts)
     {
         var parts = new List<string>();
@@ -517,6 +551,7 @@ public static partial class ResultPresenter
         Part("RemovedAdvert", "advert or credit line", "adverts or credit lines");
         Part("RemovedEmpty", "empty line", "empty lines");
         Part("MergedDuplicate", "repeated line", "repeated lines");
+        Part(DiscrepancyReview.RemovedNotInVideoKind, "line not in this cut", "lines not in this cut");
         return string.Join(", ", parts) + " removed";
     }
 

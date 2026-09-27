@@ -110,10 +110,20 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool CheckWholeFile { get; set; }
 
     /// <summary>
-    /// Gets or sets how many subtitle files are compared whole per night at most (0 to 200; 5 by default), those picked in
-    /// the results first.
+    /// Gets or sets how many subtitle files are compared whole, or fixed by section, per night at most (0 to 200; 5 by
+    /// default), those picked in the results first.
     /// </summary>
     public int MaxWholeFileChecksPerNight { get; set; } = 5;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether subtitles made for a different cut of the video are fixed section by
+    /// section (off by default): a subtitle whose timing check was unclear, or settled with few matching words, is fitted
+    /// to a full transcript piece by piece, and timing that jumps part-way (a scene added or removed, a recap, ad breaks)
+    /// is proposed as a correction for review, never applied on its own. Shares the full-transcript run's time budget and
+    /// its per-night limit (<see cref="MaxWholeFileChecksPerNight"/>). Files picked in the results with <b>Try fixing
+    /// timing by section</b> are tried either way. Needs the "Full transcript" speech-to-text switched on.
+    /// </summary>
+    public bool FixDifferentCuts { get; set; } = Pipeline.SectionFixer.OnByDefault;
 
     /// <summary>
     /// Gets or sets the currency costs and limits are shown and set in (ISO 4217, e.g. <c>AUD</c>). Providers charge in
