@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.17.1-alpha] - 2026-09-27
+
 ### Fixed
 
 - **Results of replaced or removed files no longer break.** When another tool replaced an episode (the old copy and its
