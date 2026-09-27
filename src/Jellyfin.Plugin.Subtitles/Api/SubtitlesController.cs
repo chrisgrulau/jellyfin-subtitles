@@ -52,6 +52,9 @@ public class SubtitlesController : ControllerBase
     // What videos are, from the library, remembered across requests (controllers are made per request)
     private static readonly VideoIdentityCache Identities = new();
 
+    // Which results are stale, remembered for a minute, so a page of results doesn't look at every file on every refresh
+    private static readonly TimedAnswers<bool> Gone = new(keepFor: TimeSpan.FromMinutes(1), max: 250_000);
+
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitlesController"/> class.
     /// </summary>
@@ -159,7 +162,10 @@ public class SubtitlesController : ControllerBase
     {
         var now = DateTimeOffset.UtcNow;
         var usable = UsableNow();
-        return ResultQuery.Page(_processor.Ordered(), filter, q?.Length > 200 ? q[..200] : q, offset, limit, r => ResultPresenter.Present(r, IdentityOf(r), now, TimeZoneInfo.Local, SubtitleProcessor.CanRerun(r) && usable(r.SpeechFallback!.From)));
+        // Results whose video or subtitle file was replaced or removed are hidden at once (and cleared by the next prune,
+        // action or library event)
+        var shown = ResultQuery.Visible(_processor.Ordered(), r => Gone.Get(r.Id + "@" + r.Time.UtcTicks.ToString(CultureInfo.InvariantCulture), () => _processor.StalenessOf(r) is Staleness.SubtitleGone or Staleness.VideoGone));
+        return ResultQuery.Page(shown, filter, q?.Length > 200 ? q[..200] : q, offset, limit, r => ResultPresenter.Present(r, IdentityOf(r), now, TimeZoneInfo.Local, SubtitleProcessor.CanRerun(r) && usable(r.SpeechFallback!.From)));
     }
 
     // Which speech-to-text services can be used now (a key set and paid use allowed, the local address set, the built-in
@@ -224,6 +230,11 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
+            return Conflict(ex.Message);
+        }
     }
 
     /// <summary>
@@ -263,6 +274,11 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
+            return Conflict(ex.Message);
+        }
     }
 
     /// <summary>
@@ -281,6 +297,11 @@ public class SubtitlesController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
+            return Conflict(ex.Message);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
             return Conflict(ex.Message);
         }
     }
@@ -304,6 +325,11 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
+            return Conflict(ex.Message);
+        }
     }
 
     /// <summary>
@@ -316,6 +342,7 @@ public class SubtitlesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public ActionResult<SubtitleResult> CheckWholeFile([FromRoute] string id)
     {
         try
@@ -324,6 +351,14 @@ public class SubtitlesController : ControllerBase
             var scope = JellyfinLibraries.Scope(_library, SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration(), _serverConfig);
             var (result, refused) = _processor.RequestWholeFileCheck(id, JobFor, job => scope.LanguagesForPath(job.VideoPath).Codes);
             return result is not null ? result : BadRequest(refused);
+        }
+        catch (StaleResultException ex)
+        {
+            return Conflict(ex.Message);
+        }
+        catch (InvalidOperationException ex) when (ex.Message is StaleResults.UnreachableMessage or StaleResults.NoFileMessage)
+        {
+            return Conflict(ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -372,6 +407,11 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
+            return Conflict(ex.Message);
+        }
     }
 
     /// <summary>
@@ -392,6 +432,11 @@ public class SubtitlesController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
+            return Conflict(ex.Message);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
             return Conflict(ex.Message);
         }
     }
@@ -417,6 +462,11 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
+            return Conflict(ex.Message);
+        }
     }
 
     /// <summary>
@@ -435,6 +485,11 @@ public class SubtitlesController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
+            return Conflict(ex.Message);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
             return Conflict(ex.Message);
         }
     }
@@ -564,6 +619,11 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
+            return Conflict(ex.Message);
+        }
     }
 
     /// <summary>
@@ -617,8 +677,22 @@ public class SubtitlesController : ControllerBase
     [HttpGet("Editor/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public ActionResult<EditorView> OpenEditor([FromRoute] string id)
-        => _processor.LoadForEditing(id) is { } view ? view : NotFound("This subtitle can't be opened (it may have been moved or deleted, or isn't a text subtitle).");
+    {
+        try
+        {
+            return _processor.LoadForEditing(id) is { } view ? view : NotFound("This subtitle can't be opened (it isn't a text subtitle, or is no longer in the results).");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            return Conflict(ex.Message);
+        }
+    }
 
     /// <summary>
     /// Saves lines edited by hand (Undo brings the original back).
@@ -641,6 +715,11 @@ public class SubtitlesController : ControllerBase
         {
             return Conflict(ex.Message);
         }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Whatever the file system says (a missing file is already answered above, and its result cleared)
+            return Conflict(ex.Message);
+        }
     }
 
     /// <summary>
@@ -656,6 +735,7 @@ public class SubtitlesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult> Clip([FromRoute] string id, [FromQuery] double start, [FromQuery] double length, CancellationToken cancellationToken)
     {
         if (!double.IsFinite(start) || !double.IsFinite(length) || start < 0 || start > SubtitleEditing.MaxTime || length <= 0 || length > MaxClipSeconds)
@@ -664,7 +744,15 @@ public class SubtitlesController : ControllerBase
         }
 
         var result = _processor.Get(id);
-        if (result is null || _library.GetItemById(result.ItemId) is not MediaBrowser.Controller.Entities.Video video || string.IsNullOrEmpty(video.Path) || !System.IO.File.Exists(video.Path))
+        var video = result is null ? null : _library.GetItemById(result.ItemId) as MediaBrowser.Controller.Entities.Video;
+
+        // The video (or the subtitle) replaced or removed: the result is cleared
+        if (result is not null && _processor.ClearIfStale(id, video?.Path) is { } gone)
+        {
+            return Conflict(gone);
+        }
+
+        if (result is null || video is null || string.IsNullOrEmpty(video.Path) || !System.IO.File.Exists(video.Path))
         {
             return NotFound("The video for this subtitle wasn't found.");
         }

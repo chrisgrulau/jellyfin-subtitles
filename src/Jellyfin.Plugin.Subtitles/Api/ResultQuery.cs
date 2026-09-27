@@ -75,6 +75,31 @@ public static class ResultQuery
     }
 
     /// <summary>
+    /// The results the list shows: all but those that are stale (their video, or their subtitle file, was replaced or
+    /// removed; see <see cref="StaleResults"/>), so they are hidden at once, before the library reports it or the next
+    /// prune clears them.
+    /// </summary>
+    /// <param name="ordered">All results, in order.</param>
+    /// <param name="gone">Whether a result is stale.</param>
+    /// <returns>The results shown, in the same order.</returns>
+    public static IReadOnlyList<SubtitleResult> Visible(IReadOnlyList<SubtitleResult> ordered, Func<SubtitleResult, bool> gone)
+    {
+        ArgumentNullException.ThrowIfNull(ordered);
+        ArgumentNullException.ThrowIfNull(gone);
+        return [.. ordered.Where(r => !gone(r))];
+    }
+
+    /// <summary>
+    /// The results the list shows, by the files as they are now (see <see cref="Visible(IReadOnlyList{SubtitleResult}, Func{SubtitleResult, bool})"/>).
+    /// </summary>
+    /// <param name="ordered">All results, in order.</param>
+    /// <param name="fileExists">Whether a file exists.</param>
+    /// <param name="folderExists">Whether a folder exists.</param>
+    /// <returns>The results shown, in the same order.</returns>
+    public static IReadOnlyList<SubtitleResult> Visible(IReadOnlyList<SubtitleResult> ordered, Func<string, bool> fileExists, Func<string, bool> folderExists)
+        => Visible(ordered, r => StaleResults.IsGone(r, fileExists, folderExists));
+
+    /// <summary>
     /// A page of results, in the order given (waiting for review first, then newest).
     /// </summary>
     /// <param name="ordered">All results, in order.</param>
@@ -162,5 +187,57 @@ public sealed class VideoIdentityCache
         var identity = lookUp();
         _known[key] = (identity, now);
         return identity;
+    }
+}
+
+/// <summary>
+/// Remembers answers for a while (whether a result is stale, say), so a page of results doesn't look again for every row
+/// on every refresh.
+/// </summary>
+/// <typeparam name="T">The answer.</typeparam>
+public sealed class TimedAnswers<T>
+{
+    private readonly ConcurrentDictionary<string, (T Answer, DateTimeOffset At)> _known = new(StringComparer.Ordinal);
+    private readonly TimeProvider _clock;
+    private readonly TimeSpan _keepFor;
+    private readonly int _max;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TimedAnswers{T}"/> class.
+    /// </summary>
+    /// <param name="clock">Clock.</param>
+    /// <param name="keepFor">How long an answer is kept.</param>
+    /// <param name="max">The most answers kept (past that, all are forgotten).</param>
+    public TimedAnswers(TimeProvider? clock = null, TimeSpan? keepFor = null, int max = 5000)
+    {
+        _clock = clock ?? TimeProvider.System;
+        _keepFor = keepFor ?? TimeSpan.FromMinutes(1);
+        _max = Math.Max(1, max);
+    }
+
+    /// <summary>
+    /// An answer: remembered, or found out.
+    /// </summary>
+    /// <param name="key">What it is about.</param>
+    /// <param name="find">Finds it out.</param>
+    /// <returns>The answer.</returns>
+    public T Get(string key, Func<T> find)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(find);
+        var now = _clock.GetUtcNow();
+        if (_known.TryGetValue(key, out var hit) && now - hit.At < _keepFor)
+        {
+            return hit.Answer;
+        }
+
+        if (_known.Count >= _max)
+        {
+            _known.Clear();
+        }
+
+        var answer = find();
+        _known[key] = (answer, now);
+        return answer;
     }
 }

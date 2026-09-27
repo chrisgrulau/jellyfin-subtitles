@@ -206,7 +206,8 @@ public static class BulkRules
 /// time. A job takes the <see cref="RunGate"/> alone, so it never works on subtitle files while a nightly task, the
 /// handling of new videos or "Restore all originals" does (it waits for them; they wait for it). Items are handled one by
 /// one with the same rules and safety as the single-item actions (<see cref="SubtitleProcessor"/>): each is read again
-/// first, one that no longer qualifies or whose file changed since is skipped with the reason, and anything unexpected
+/// first, one that no longer qualifies or whose file changed since is skipped with the reason, one whose file no longer
+/// exists (replaced or removed) is skipped and its result cleared (see <see cref="StaleResults"/>), and anything unexpected
 /// is recorded as failed without stopping the job. It can be stopped, and is when the server stops.
 /// </summary>
 public sealed class BulkJobs : IHostedService, IDisposable
@@ -434,6 +435,12 @@ public sealed class BulkJobs : IHostedService, IDisposable
             }
         }
 
+        // Its video or subtitle file replaced or removed: skipped, and the result cleared
+        if (_processor.ClearIfStale(id) is not null)
+        {
+            return (false, new BulkIssue(id, Name(), StaleResults.BulkSkipReason), false);
+        }
+
         if (BulkRules.WhyNot(action, r) is { } why)
         {
             return (false, new BulkIssue(id, Name(), why), false);
@@ -458,6 +465,10 @@ public sealed class BulkJobs : IHostedService, IDisposable
             }
 
             return (true, null, false);
+        }
+        catch (StaleResultException)
+        {
+            return (false, new BulkIssue(id, Name(), StaleResults.BulkSkipReason), false);
         }
         catch (InvalidOperationException ex)
         {

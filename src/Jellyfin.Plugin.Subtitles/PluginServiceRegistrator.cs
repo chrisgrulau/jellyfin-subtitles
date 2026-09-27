@@ -69,6 +69,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton(sp => new SubtitleProcessor(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SubtitleFiles>>()))
         {
             Calibration = sp.GetRequiredService<Discrepancy.ConfidenceCalibration>(),
+
+            // Searches that found nothing don't record their video: the library knows it, so a replaced one is seen as gone
+            VideoLookup = r => r.ItemId == System.Guid.Empty ? null : sp.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>().GetItemById(r.ItemId)?.Path,
         });
         serviceCollection.AddSingleton(sp => new SubtitleGenerator(sp.GetRequiredService<ResultStore>(), new SubtitleFiles(Path.Combine(DataFolder(sp), "originals"), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SubtitleFiles>>()), cache: sp.GetRequiredService<Generation.TranscriptCache>()));
         serviceCollection.AddSingleton(sp => new WholeFileChecker(sp.GetRequiredService<ResultStore>(), sp.GetRequiredService<Generation.TranscriptCache>(), sp.GetRequiredService<Discrepancy.ConfidenceCalibration>()));

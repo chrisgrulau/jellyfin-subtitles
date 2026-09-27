@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Results of replaced or removed files no longer break.** When another tool replaced an episode (the old copy and its
+  subtitle moved away, the new one filed under a new name), its results still pointed at the old files, stayed in the
+  list, and acting on them failed with a server error ("Could not find file …"). Now every action on a result (Apply,
+  Decline, Undo, Check again, Check whole file, Rerun, the editor and its audio clips, applying or declining lines)
+  first checks the files it needs: if the subtitle file or the video is gone, it answers "This subtitle file no longer
+  exists (replaced or removed) — the result has been cleared." and clears the result; a file that vanishes mid-action
+  goes the same way, never as a server error. Bulk actions skip such results ("file no longer exists") and clear them.
+  Results that legitimately have no file (a search that found nothing, one waiting for speech-to-text, one that
+  couldn't write there or was undone, and generated subtitles) are kept for as long as their video is. A file whose
+  folder can't be reached (an offline share) is never taken as gone.
+- The results list hides stale results at once (their video or subtitle file gone), and the nightly clean-up now also
+  drops results whose video is gone.
+- When Jellyfin removes a video from its library, its results (and its subtitles' results) are dropped after the same
+  quiet delay as new videos, unless the video is back at the same path; when a video is added, stale results in its
+  folder are dropped too, so a replacement filed under a new name leaves nothing behind. The new file is handled as a
+  new video, as before.
+
 ## [0.17.0-alpha] - 2026-09-27
 
 ### Added
