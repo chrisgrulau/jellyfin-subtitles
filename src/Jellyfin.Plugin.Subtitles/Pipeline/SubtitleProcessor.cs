@@ -739,17 +739,21 @@ public sealed class SubtitleProcessor
             }
 
             // Lines with nothing heard are only removed one at a time, so they stay for review
-            return Save(r with
-            {
-                Status = r.Status == ResultStatus.Proposed ? ResultStatus.Corrected : r.Status,
-                Backup = r.Changed ? r.Backup ?? backup : backup,
-                Fingerprint = written,
-                Changed = true,
-                Cleaned = cleanedCounts,
-                CleanupPending = new Dictionary<string, int>(),
-                Findings = [.. r.Findings.Where(f => DiscrepancyReview.IsWholeFile(f) && f.Kind == DiscrepancyFinder.Extra && DiscrepancyReview.StillOpen(cleaned, f))],
-                Time = _clock.GetUtcNow(),
-            });
+            var left = r.Findings.Where(f => DiscrepancyReview.IsWholeFile(f) && f.Kind == DiscrepancyFinder.Extra && DiscrepancyReview.StillOpen(cleaned, f)).ToList();
+            return Save(ReviewText.Settle(
+                r with
+                {
+                    Status = r.Status == ResultStatus.Proposed ? ResultStatus.Corrected : r.Status,
+                    Backup = r.Changed ? r.Backup ?? backup : backup,
+                    Fingerprint = written,
+                    Changed = true,
+                    Cleaned = cleanedCounts,
+                    CleanupPending = new Dictionary<string, int>(),
+                    Findings = left,
+                    Time = _clock.GetUtcNow(),
+                },
+                r.Findings.Except(left),
+                applied: true));
         }
         catch (IOException ex)
         {
@@ -798,15 +802,18 @@ public sealed class SubtitleProcessor
             var (backup, written) = _files.Replace(r.SubtitlePath, r.Fingerprint, SubtitleWriter.ToBytes(changed));
             var counts = new Dictionary<string, int>(r.Cleaned, StringComparer.Ordinal);
             counts[kind] = counts.GetValueOrDefault(kind) + 1;
-            return Save(r with
-            {
-                Backup = r.Changed ? r.Backup ?? backup : backup,
-                Fingerprint = written,
-                Changed = true,
-                Cleaned = counts,
-                Findings = [.. r.Findings.Where((_, i) => i != index)],
-                Time = _clock.GetUtcNow(),
-            });
+            return Save(ReviewText.Settle(
+                r with
+                {
+                    Backup = r.Changed ? r.Backup ?? backup : backup,
+                    Fingerprint = written,
+                    Changed = true,
+                    Cleaned = counts,
+                    Findings = [.. r.Findings.Where((_, i) => i != index)],
+                    Time = _clock.GetUtcNow(),
+                },
+                [f],
+                applied: true));
         }
         catch (IOException ex)
         {
@@ -826,8 +833,8 @@ public sealed class SubtitleProcessor
     {
         var r = Find(id);
         Require(r);
-        FindingAt(r, index, time);
-        return Save(r with { Findings = [.. r.Findings.Where((_, i) => i != index)], Time = _clock.GetUtcNow() });
+        var f = FindingAt(r, index, time);
+        return Save(ReviewText.Settle(r with { Findings = [.. r.Findings.Where((_, i) => i != index)], Time = _clock.GetUtcNow() }, [f], applied: false));
     }
 
     /// <summary>
@@ -905,15 +912,18 @@ public sealed class SubtitleProcessor
                 counts[DiscrepancyReview.FixedKind] = counts.GetValueOrDefault(DiscrepancyReview.FixedKind) + fixedLines;
             }
 
-            return (Save(r with
-            {
-                Backup = r.Changed ? r.Backup ?? backup : backup,
-                Fingerprint = written,
-                Changed = true,
-                Cleaned = counts,
-                Findings = [.. r.Findings.Where((_, i) => !applied.Contains(i))],
-                Time = _clock.GetUtcNow(),
-            }), applied.Count);
+            return (Save(ReviewText.Settle(
+                r with
+                {
+                    Backup = r.Changed ? r.Backup ?? backup : backup,
+                    Fingerprint = written,
+                    Changed = true,
+                    Cleaned = counts,
+                    Findings = [.. r.Findings.Where((_, i) => !applied.Contains(i))],
+                    Time = _clock.GetUtcNow(),
+                },
+                r.Findings.Where((_, i) => applied.Contains(i)),
+                applied: true)), applied.Count);
         }
         catch (IOException ex)
         {
@@ -937,7 +947,7 @@ public sealed class SubtitleProcessor
             throw new InvalidOperationException("There are no lines to review for this subtitle.");
         }
 
-        return Save(r with { Findings = [], Time = _clock.GetUtcNow() });
+        return Save(ReviewText.Settle(r with { Findings = [], Time = _clock.GetUtcNow() }, r.Findings, applied: false));
     }
 
     // A finding "Apply all suggestions" applies: one with a suggestion that isn't a line with nothing heard
@@ -1247,7 +1257,7 @@ public sealed class SubtitleProcessor
             CleanChangeKind.ExtendedShortCue => "Lengthened a too-brief line at " + at,
             _ => c.Kind.ToString(),
         };
-        return pending ? "Waiting for review: " + what : what;
+        return pending ? ReviewText.Waiting(what) : what;
     }
 
     /// <summary>
@@ -1300,17 +1310,20 @@ public sealed class SubtitleProcessor
             throw new InvalidOperationException("Nothing is waiting for review for this subtitle.");
         }
 
-        return Save(r with
-        {
-            Status = r.Status == ResultStatus.Proposed ? ResultStatus.Declined : r.Status,
-            Scale = r.Status == ResultStatus.Proposed ? 1 : r.Scale,
-            Offset = r.Status == ResultStatus.Proposed ? 0 : r.Offset,
-            Sections = r.Status == ResultStatus.Proposed ? null : r.Sections,
-            CleanupPending = new Dictionary<string, int>(),
-            Findings = [],
-            Time = _clock.GetUtcNow(),
-            Explanation = r.Explanation + " Declined in review: nothing was changed.",
-        });
+        return Save(ReviewText.Settle(
+            r with
+            {
+                Status = r.Status == ResultStatus.Proposed ? ResultStatus.Declined : r.Status,
+                Scale = r.Status == ResultStatus.Proposed ? 1 : r.Scale,
+                Offset = r.Status == ResultStatus.Proposed ? 0 : r.Offset,
+                Sections = r.Status == ResultStatus.Proposed ? null : r.Sections,
+                CleanupPending = new Dictionary<string, int>(),
+                Findings = [],
+                Time = _clock.GetUtcNow(),
+                Explanation = r.Explanation + " Declined in review: nothing was changed.",
+            },
+            r.Findings,
+            applied: false));
     }
 
     /// <summary>
