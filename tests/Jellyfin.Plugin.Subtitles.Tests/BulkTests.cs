@@ -110,20 +110,30 @@ public sealed class BulkTests : IDisposable
         Assert.Equal(Original, File.ReadAllText(a));
     }
 
-    [Fact]
-    public async Task A_file_that_cannot_be_read_counts_as_failed_without_stopping_the_job()
+    [Theory]
+    [InlineData(BulkAction.Apply)]
+    [InlineData(BulkAction.Decline)]
+    [InlineData(BulkAction.CheckAgain)]
+    public async Task A_subtitle_file_replaced_or_removed_is_skipped_and_its_result_cleared_without_stopping_the_job(BulkAction action)
     {
-        var gone = Proposed("a.en.srt");
-        var fine = Proposed("b.en.srt");
+        var gone = action == BulkAction.CheckAgain ? InSync("a.en.srt") : Proposed("a.en.srt");
+        var fine = action == BulkAction.CheckAgain ? InSync("b.en.srt") : Proposed("b.en.srt");
+        var items = BulkRules.ForAction(action, _processor.Ordered()).Items;
         File.Delete(gone);
 
-        var progress = await Run(BulkAction.Apply, BulkRules.ForAction(BulkAction.Apply, _processor.Ordered()).Items);
+        var progress = await Run(action, items);
 
         Assert.Equal(1, progress.Succeeded);
-        Assert.Single(progress.Failed);
-        Assert.Equal(ResultStore.IdFor(gone), progress.Failed[0].Id);
-        Assert.Equal(ResultStatus.Corrected, _store.ForPath(fine)!.Status);
-        Assert.EndsWith("1 failed.", progress.Summary, StringComparison.Ordinal);
+        Assert.Empty(progress.Failed);
+        var skipped = Assert.Single(progress.Skipped);
+        Assert.Equal(ResultStore.IdFor(gone), skipped.Id);
+        Assert.Equal(StaleResults.BulkSkipReason, skipped.Reason);
+        Assert.Null(_store.ForPath(gone));
+        Assert.Contains("1 skipped: file no longer exists", progress.Summary, StringComparison.Ordinal);
+        if (action == BulkAction.Apply)
+        {
+            Assert.Equal(ResultStatus.Corrected, _store.ForPath(fine)!.Status);
+        }
     }
 
     [Fact]

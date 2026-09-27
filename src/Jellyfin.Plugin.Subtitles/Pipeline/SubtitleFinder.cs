@@ -88,13 +88,16 @@ public sealed class SubtitleFinder
         _clock = clock ?? TimeProvider.System;
     }
 
+    /// <summary>What every search result's id starts with.</summary>
+    public const string IdPrefix = "find-";
+
     /// <summary>
     /// The result id for a video and language.
     /// </summary>
     /// <param name="videoPath">The video.</param>
     /// <param name="language">The language.</param>
     /// <returns>The id.</returns>
-    public static string IdFor(string videoPath, string language) => "find-" + ResultStore.IdFor(videoPath + "|" + language);
+    public static string IdFor(string videoPath, string language) => IdPrefix + ResultStore.IdFor(videoPath + "|" + language);
 
     /// <summary>
     /// The file name for an added subtitle: the video's name, the two-letter language (Jellyfin's convention), a

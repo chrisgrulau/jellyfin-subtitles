@@ -68,6 +68,146 @@ public sealed class SubtitleProcessor
     /// </summary>
     public ConfidenceCalibration? Calibration { get; init; }
 
+    /// <summary>Gets whether a file exists (for tests; <see cref="File.Exists(string)"/> by default).</summary>
+    public Func<string, bool> FileExists { get; init; } = File.Exists;
+
+    /// <summary>Gets whether a folder exists (for tests; <see cref="Directory.Exists(string)"/> by default).</summary>
+    public Func<string, bool> FolderExists { get; init; } = Directory.Exists;
+
+    /// <summary>
+    /// Gets or sets where to find the video of a result that stands for its video but doesn't record it (a search that
+    /// found nothing, from before videos were recorded): Jellyfin's library, by the result's item. <c>null</c> when unknown.
+    /// </summary>
+    public Func<SubtitleResult, string?>? VideoLookup { get; set; }
+
+    /// <summary>
+    /// Whether a result is stale: its video or its subtitle file was replaced or removed (see <see cref="StaleResults"/>).
+    /// </summary>
+    /// <param name="r">The result.</param>
+    /// <param name="fileExists">Whether a file exists (default <see cref="FileExists"/>; the results list passes a cached one).</param>
+    /// <param name="folderExists">Whether a folder exists (default <see cref="FolderExists"/>).</param>
+    /// <returns>Why it is stale, or <see cref="Staleness.None"/>.</returns>
+    public Staleness StalenessOf(SubtitleResult r, Func<string, bool>? fileExists = null, Func<string, bool>? folderExists = null)
+        => StaleResults.Check(r, fileExists ?? FileExists, folderExists ?? FolderExists, LookUpVideo);
+
+    /// <summary>
+    /// Clears a result if it is stale (its video, or its subtitle file, is gone): bulk jobs and the editor's audio clip use
+    /// it before acting.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <param name="video">The video as the library has it now, if known (checked too).</param>
+    /// <returns>Why it was cleared, or <c>null</c> when it wasn't (not stale, or no such result).</returns>
+    public string? ClearIfStale(string id, string? video = null)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        if (_results.FindForRequest(id) is not { } r)
+        {
+            return null;
+        }
+
+        var why = Why(r, video);
+        if (why is Staleness.SubtitleGone or Staleness.VideoGone)
+        {
+            _results.Remove(r.Id);
+            return StaleResults.MessageFor(why);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Forgets the results of videos removed from the library whose file is gone (see <see cref="RemovedVideos"/>), and
+    /// stale results in the folders of videos just added (a replacement filed under a new name).
+    /// </summary>
+    /// <param name="removed">Videos removed from the library.</param>
+    /// <param name="folders">Folders a video was added to.</param>
+    /// <returns>How many results were forgotten.</returns>
+    public int DropForRemovedVideos(IReadOnlyCollection<RemovedVideo> removed, IReadOnlyCollection<string> folders)
+    {
+        ArgumentNullException.ThrowIfNull(removed);
+        ArgumentNullException.ThrowIfNull(folders);
+        var gone = removed.Where(v => !FileExists(v.Path)).ToList();
+        if (gone.Count == 0 && folders.Count == 0)
+        {
+            return 0;
+        }
+
+        var inFolders = new HashSet<string>(folders, StringComparer.Ordinal);
+        return _results.RemoveWhere(r => gone.Any(v => RemovedVideos.Concerns(r, v))
+            || (RemovedVideos.InFolders(r, inFolders) && StaleResults.IsGone(r, FileExists, FolderExists)));
+    }
+
+    // What an action's result is: its files as the rule has them, and the video the library has now, if given
+    private Staleness Why(SubtitleResult r, string? video)
+    {
+        var why = StalenessOf(r);
+        if (why == Staleness.None && !string.IsNullOrEmpty(video) && !FileExists(video))
+        {
+            why = Path.GetDirectoryName(video) is { Length: > 0 } folder && FolderExists(folder) ? Staleness.VideoGone : Staleness.Unreachable;
+        }
+
+        return why;
+    }
+
+    private string? LookUpVideo(SubtitleResult r)
+    {
+        if (VideoLookup is not { } lookUp || !StaleResults.StandsForVideo(r))
+        {
+            return null;
+        }
+
+        try
+        {
+            return lookUp(r);
+        }
+#pragma warning disable CA1031 // The library not answering means only that the video isn't known
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+    }
+
+    // Before an action: a stale result is cleared and the action refused with the reason (409); a file the action needs
+    // that can't be reached, or that a result standing for its video doesn't have, refuses it without clearing anything
+    private void Require(SubtitleResult r, bool subtitle = false, string? video = null)
+    {
+        var why = Why(r, video);
+        if (why is Staleness.SubtitleGone or Staleness.VideoGone)
+        {
+            _results.Remove(r.Id);
+            throw new StaleResultException(StaleResults.MessageFor(why));
+        }
+
+        if (why == Staleness.Unreachable && (subtitle || video is not null))
+        {
+            throw new InvalidOperationException(StaleResults.UnreachableMessage);
+        }
+
+        if (subtitle && !FileExists(r.SubtitlePath))
+        {
+            throw new InvalidOperationException(StaleResults.NoFileMessage);
+        }
+    }
+
+    // A file that vanished between the check and the read or write goes the same way as one gone before: never an
+    // unhandled exception
+    private T Guard<T>(SubtitleResult r, Func<T> action)
+    {
+        try
+        {
+            return action();
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException
+            || (ex is InvalidOperationException { InnerException: FileNotFoundException or DirectoryNotFoundException } && ex is not StaleResultException))
+        {
+            Require(r, subtitle: true);
+            throw new InvalidOperationException(StaleResults.NoFileMessage, ex);
+        }
+    }
+
+    private SubtitleResult Find(string id) => _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+
     /// <summary>
     /// The latest results, newest first.
     /// </summary>
@@ -101,7 +241,7 @@ public sealed class SubtitleProcessor
     /// Drops results for subtitle files that were deleted (see <see cref="ResultStore.Prune"/>).
     /// </summary>
     /// <returns>How many were dropped.</returns>
-    public int PruneGone() => _results.Prune(File.Exists, Directory.Exists);
+    public int PruneGone() => _results.Prune(FileExists, FolderExists, LookUpVideo);
 
     /// <summary>The pipeline version: raised when a new stage is added, so files are checked once more.</summary>
     public const int CurrentVersion = 3;
@@ -362,21 +502,27 @@ public sealed class SubtitleProcessor
     /// Opens a subtitle this plugin has a result for, for editing by hand.
     /// </summary>
     /// <param name="id">Result id.</param>
-    /// <returns>The lines, or <c>null</c> if there is no such result or the file can't be read.</returns>
+    /// <returns>The lines, or <c>null</c> if there is no such result or the file isn't a text subtitle.</returns>
+    /// <exception cref="StaleResultException">The subtitle file (or the video) is gone; the result was cleared.</exception>
+    /// <exception cref="InvalidOperationException">The file can't be reached, or there is none (yet).</exception>
     public EditorView? LoadForEditing(string id)
     {
-        if (_results.FindForRequest(id) is not { } r || !File.Exists(r.SubtitlePath))
+        if (_results.FindForRequest(id) is not { } r)
         {
             return null;
         }
 
-        var bytes = File.ReadAllBytes(r.SubtitlePath);
-        if (bytes.Length > SubtitleReader.MaxBytes || SubtitleReader.Read(bytes, r.SubtitlePath) is not { } document)
+        Require(r, subtitle: true);
+        return Guard(r, () =>
         {
-            return null;
-        }
+            var bytes = File.ReadAllBytes(r.SubtitlePath);
+            if (bytes.Length > SubtitleReader.MaxBytes || SubtitleReader.Read(bytes, r.SubtitlePath) is not { } document)
+            {
+                return null;
+            }
 
-        return new EditorView(r.Id, r.Name, Path.GetFileName(r.SubtitlePath), SubtitleFiles.Fingerprint(bytes), document.Format.ToString(), SubtitleEditing.ToEditor(document));
+            return new EditorView(r.Id, r.Name, Path.GetFileName(r.SubtitlePath), SubtitleFiles.Fingerprint(bytes), document.Format.ToString(), SubtitleEditing.ToEditor(document));
+        });
     }
 
     /// <summary>
@@ -390,7 +536,13 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such result, the file changed since, or the edit isn't valid.</exception>
     public SubtitleResult SaveEdited(string id, string fingerprint, IReadOnlyList<EditorCue> cues)
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r, subtitle: true);
+        return Guard(r, () => SaveEditedNow(r, fingerprint, cues));
+    }
+
+    private SubtitleResult SaveEditedNow(SubtitleResult r, string fingerprint, IReadOnlyList<EditorCue> cues)
+    {
         if (r.Id.StartsWith(SubtitleGenerator.IdPrefix, StringComparison.Ordinal))
         {
             // Undo removes a generated subtitle only while it is as generated; edits would make it impossible to undo
@@ -518,7 +670,13 @@ public sealed class SubtitleProcessor
     public SubtitleResult Apply(string id, Policies policies)
     {
         ArgumentNullException.ThrowIfNull(policies);
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r, subtitle: true);
+        return Guard(r, () => ApplyNow(r, policies));
+    }
+
+    private SubtitleResult ApplyNow(SubtitleResult r, Policies policies)
+    {
         if (!r.PendingReview)
         {
             throw new InvalidOperationException("Nothing is waiting for review for this subtitle.");
@@ -596,7 +754,13 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such finding, or its line changed since.</exception>
     public SubtitleResult ApplyFinding(string id, int index, double time)
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r, subtitle: true);
+        return Guard(r, () => ApplyFindingNow(r, index, time));
+    }
+
+    private SubtitleResult ApplyFindingNow(SubtitleResult r, int index, double time)
+    {
         var f = FindingAt(r, index, time);
         var bytes = File.ReadAllBytes(r.SubtitlePath);
         var document = SubtitleReader.Read(bytes, r.SubtitlePath) ?? throw new InvalidOperationException("The subtitle can no longer be read.");
@@ -646,7 +810,8 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such finding.</exception>
     public SubtitleResult DeclineFinding(string id, int index, double time)
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r);
         FindingAt(r, index, time);
         return Save(r with { Findings = [.. r.Findings.Where((_, i) => i != index)], Time = _clock.GetUtcNow() });
     }
@@ -662,7 +827,13 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No suggestion to apply, none could be applied, or the file changed since.</exception>
     public (SubtitleResult Result, int Applied) ApplyFindings(string id)
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r, subtitle: true);
+        return Guard(r, () => ApplyFindingsNow(r));
+    }
+
+    private (SubtitleResult Result, int Applied) ApplyFindingsNow(SubtitleResult r)
+    {
         if (!r.Findings.Any(HasSuggestion))
         {
             throw new InvalidOperationException("No line to review here has a suggestion to apply.");
@@ -745,7 +916,8 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such result, or no findings.</exception>
     public SubtitleResult DeclineFindings(string id)
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r);
         if (r.Findings.Count == 0)
         {
             throw new InvalidOperationException("There are no lines to review for this subtitle.");
@@ -787,16 +959,18 @@ public sealed class SubtitleProcessor
     {
         ArgumentNullException.ThrowIfNull(jobFor);
         ArgumentNullException.ThrowIfNull(wantedFor);
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r, subtitle: true);
         var job = jobFor(r);
+        if (job is not null)
+        {
+            // The check reads the video: one replaced or removed clears the result too
+            Require(r, subtitle: true, video: job.VideoPath);
+        }
+
         if (WholeFileChecker.Ineligible(r, job, job is null ? [] : wantedFor(job)) is { } why)
         {
             return (null, why);
-        }
-
-        if (!File.Exists(r.SubtitlePath))
-        {
-            return (null, "The subtitle file isn't there any more.");
         }
 
         return (r.WholeFileRequested ? r : Save(r with { WholeFileRequested = true }), null);
@@ -808,7 +982,14 @@ public sealed class SubtitleProcessor
     /// <param name="id">Result id.</param>
     /// <returns>The updated result.</returns>
     /// <exception cref="InvalidOperationException">Nothing to undo, or the file changed since.</exception>
-    public SubtitleResult Undo(string id) => Undo(_results.FindForRequest(id) ?? throw new InvalidOperationException("No such result."));
+    public SubtitleResult Undo(string id)
+    {
+        var r = Find(id);
+
+        // Putting an original back needs the file as this plugin left it; removing an added or generated one doesn't
+        Require(r, subtitle: r.Changed && !IsRemoval(r));
+        return Guard(r, () => Undo(r));
+    }
 
     /// <summary>The most files one call of <see cref="RestoreAll"/> handles.</summary>
     public const int RestoreBatch = 200;
@@ -1050,7 +1231,8 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">Nothing waits for review.</exception>
     public SubtitleResult Decline(string id)
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r);
         if (!r.PendingReview)
         {
             throw new InvalidOperationException("Nothing is waiting for review for this subtitle.");
@@ -1077,7 +1259,8 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such result, or the file holds this plugin's changes.</exception>
     public void CheckAgain(string id)
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r);
         if (r.Changed && r.Status != ResultStatus.Added)
         {
             throw new InvalidOperationException("This subtitle holds this plugin's changes: undo them first, then check it again.");
@@ -1128,7 +1311,8 @@ public sealed class SubtitleProcessor
     /// <exception cref="InvalidOperationException">No such result, or it didn't fall back.</exception>
     public SubtitleResult RequestRerun(string id)
     {
-        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        var r = Find(id);
+        Require(r, subtitle: true);
         if (!CanRerun(r))
         {
             throw new InvalidOperationException("This check didn't fall back from another speech-to-text service, so there is nothing to run again.");

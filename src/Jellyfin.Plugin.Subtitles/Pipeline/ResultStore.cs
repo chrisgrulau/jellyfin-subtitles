@@ -305,15 +305,16 @@ public sealed class ResultStore : IDisposable
     }
 
     /// <summary>
-    /// Drops results for subtitle files that are gone, where the folder is still there (so an offline share never loses
-    /// its results). "Nothing found" results are for files that don't exist yet and are kept. Results of generating a
-    /// subtitle stand for the video (a generated file someone deleted isn't generated again), so they go only with the
-    /// video.
+    /// Drops stale results (see <see cref="StaleResults"/>): those whose subtitle file is gone, and those whose recorded
+    /// video is gone, where the folder is still there (so an offline share never loses its results). "Nothing found"
+    /// results are for files that don't exist yet and are kept. Results of generating a subtitle stand for the video (a
+    /// generated file someone deleted isn't generated again), so they go only with the video.
     /// </summary>
     /// <param name="fileExists">Whether a file exists.</param>
     /// <param name="folderExists">Whether a folder exists.</param>
     /// <returns>How many were dropped.</returns>
-    public int Prune(Func<string, bool> fileExists, Func<string, bool> folderExists)
+    /// <param name="videoOf">Where to find the video of a result that doesn't record it (the library), if anywhere.</param>
+    public int Prune(Func<string, bool> fileExists, Func<string, bool> folderExists, Func<SubtitleResult, string?>? videoOf = null)
     {
         ArgumentNullException.ThrowIfNull(fileExists);
         ArgumentNullException.ThrowIfNull(folderExists);
@@ -324,10 +325,7 @@ public sealed class ResultStore : IDisposable
                 return 0;
             }
 
-            var gone = all.Values.Where(r => r.Status != ResultStatus.NotFound && !(r.Status == ResultStatus.Deferred && r.Id.StartsWith("find-", StringComparison.Ordinal))
-                && (r.Id.StartsWith(SubtitleGenerator.IdPrefix, StringComparison.Ordinal) ? r.VideoPath : r.SubtitlePath) is { } path
-                && !fileExists(path)
-                && Path.GetDirectoryName(path) is { } folder && folderExists(folder)).ToList();
+            var gone = all.Values.Where(r => StaleResults.IsGone(r, fileExists, folderExists, videoOf)).ToList();
             foreach (var r in gone)
             {
                 Unindex(r);
@@ -429,6 +427,36 @@ public sealed class ResultStore : IDisposable
             Unindex(r);
             Save();
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Forgets every result that matches (the results of videos removed from the library, say).
+    /// </summary>
+    /// <param name="match">Which to forget.</param>
+    /// <returns>How many were forgotten.</returns>
+    public int RemoveWhere(Func<SubtitleResult, bool> match)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+        lock (_lock)
+        {
+            if (Load() is not { } all)
+            {
+                return 0;
+            }
+
+            var gone = all.Values.Where(match).ToList();
+            foreach (var r in gone)
+            {
+                Unindex(r);
+            }
+
+            if (gone.Count > 0)
+            {
+                Save();
+            }
+
+            return gone.Count;
         }
     }
 

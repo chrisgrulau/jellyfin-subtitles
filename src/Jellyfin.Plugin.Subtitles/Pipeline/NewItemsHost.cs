@@ -21,6 +21,12 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// subtitles stays nightly: a video nothing was found for is a candidate for the next night's run. Never at the same
 /// time as a nightly task (see <see cref="RunGate"/>): while one runs, the queue waits and is tried again after another
 /// quiet delay.
+/// <para>
+/// It also keeps the results in step with the library: a video Jellyfin removes (replaced by a copy under a new name,
+/// or deleted) has its results dropped, its subtitles' too, once nothing has been reported for the quiet delay, and a
+/// video added has the stale results in its folder dropped (see <see cref="RemovedVideos"/>). This clean-up runs
+/// whatever the settings say (it only forgets results whose files are gone) and needs no <see cref="RunGate"/>.
+/// </para>
 /// </summary>
 internal sealed partial class NewItemsHost : IHostedService, IDisposable
 {
@@ -29,10 +35,12 @@ internal sealed partial class NewItemsHost : IHostedService, IDisposable
     private readonly RunGate _gate;
     private readonly ILogger<NewItemsHost> _logger;
     private readonly NewItemsWaiting _queue = new();
+    private readonly RemovedVideos _removed = new();
     private readonly DailyAiChecks _checks = new();
     private readonly TimeProvider _clock = TimeProvider.System;
     private readonly CancellationTokenSource _stopping = new();
     private ITimer? _timer;
+    private ITimer? _cleanupTimer;
     private int _running;
     private int _droppedLogged;
 
@@ -55,8 +63,10 @@ internal sealed partial class NewItemsHost : IHostedService, IDisposable
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _timer = _clock.CreateTimer(_ => _ = RunDueAsync(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _cleanupTimer = _clock.CreateTimer(_ => CleanUpDue(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _library.ItemAdded += OnItemAdded;
         _library.ItemUpdated += OnItemUpdated;
+        _library.ItemRemoved += OnItemRemoved;
         return Task.CompletedTask;
     }
 
@@ -65,7 +75,9 @@ internal sealed partial class NewItemsHost : IHostedService, IDisposable
     {
         _library.ItemAdded -= OnItemAdded;
         _library.ItemUpdated -= OnItemUpdated;
+        _library.ItemRemoved -= OnItemRemoved;
         _timer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _cleanupTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         await _stopping.CancelAsync().ConfigureAwait(false);
     }
 
@@ -73,6 +85,7 @@ internal sealed partial class NewItemsHost : IHostedService, IDisposable
     public void Dispose()
     {
         _timer?.Dispose();
+        _cleanupTimer?.Dispose();
         _stopping.Dispose();
     }
 
@@ -80,7 +93,58 @@ internal sealed partial class NewItemsHost : IHostedService, IDisposable
 
     private static TimeSpan DelayOf(PluginConfiguration config) => TimeSpan.FromMinutes(Math.Clamp(config.NewItemsDelayMinutes, 1, 1440));
 
-    private void OnItemAdded(object? sender, ItemChangeEventArgs e) => Queue(e, isNew: true);
+    private void OnItemAdded(object? sender, ItemChangeEventArgs e)
+    {
+        Queue(e, isNew: true);
+
+        // A copy filed under a new name replaces one whose results would otherwise linger until the nightly prune
+        if (IsVideo(e) && _removed.Added(e.Item.Path, _clock.GetUtcNow()))
+        {
+            ArmCleanup();
+        }
+    }
+
+    // Quick and never throws: this runs on Jellyfin's scanning thread
+    private void OnItemRemoved(object? sender, ItemChangeEventArgs e)
+    {
+        if (IsVideo(e) && _removed.Removed(e.Item.Id, e.Item.Path, _clock.GetUtcNow()))
+        {
+            ArmCleanup();
+        }
+    }
+
+    private static bool IsVideo([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] ItemChangeEventArgs? e) => e?.Item is (Movie or Episode) && !e.Item.IsVirtualItem;
+
+    // Every report starts the quiet delay over
+    private void ArmCleanup() => _cleanupTimer?.Change(DelayOf(Settings ?? new PluginConfiguration()), Timeout.InfiniteTimeSpan);
+
+    private void CleanUpDue()
+    {
+        try
+        {
+            if (_removed.TakeIfDue(_clock.GetUtcNow(), DelayOf(Settings ?? new PluginConfiguration())) is not { } due)
+            {
+                if (_removed.DueAt(DelayOf(Settings ?? new PluginConfiguration())) is { } at)
+                {
+                    var wait = at - _clock.GetUtcNow();
+                    _cleanupTimer?.Change(wait > TimeSpan.FromSeconds(1) ? wait : TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
+                }
+
+                return;
+            }
+
+            if (_services.GetService(typeof(SubtitleProcessor)) is SubtitleProcessor processor && processor.DropForRemovedVideos(due.Removed, due.Folders) is > 0 and var dropped)
+            {
+                LogDropped(_logger, dropped);
+            }
+        }
+#pragma warning disable CA1031 // Clean-up is a convenience: the nightly prune sees to whatever is left
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogFailed(_logger, ex.Message);
+        }
+    }
 
     private void OnItemUpdated(object? sender, ItemChangeEventArgs e)
     {
@@ -181,6 +245,9 @@ internal sealed partial class NewItemsHost : IHostedService, IDisposable
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: more than {Max} new videos at once; the rest are left to the nightly tasks")]
     private static partial void LogQueueFull(ILogger logger, int max);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: {Count} results of videos replaced or removed were cleared")]
+    private static partial void LogDropped(ILogger logger, int count);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Shoal Subtitles: handling new videos failed: {Error}")]
     private static partial void LogFailed(ILogger logger, string error);
