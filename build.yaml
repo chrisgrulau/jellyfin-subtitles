@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.16.0.0"
+version: "0.16.1.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,6 +14,4 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.16.0-alpha: speech-to-text retries, falls back to a free local service, can be rerun with the chosen service,
-  and flags only lasting problems; checks that can't run yet wait instead of guessing; tidier results page with Show
-  more, icons, plain sentences and nerd stats on expand.
+  0.16.1-alpha: the settings and results page uses the full width with centred buttons.
