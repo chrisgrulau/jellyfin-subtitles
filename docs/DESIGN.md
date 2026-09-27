@@ -353,6 +353,61 @@ works in batches of 200 in a fixed order (originals, then removals, each by resu
 page shows progress without a background job, and a batch never runs alongside a scheduled task or new-video run
 (`RunGate`). Jellyfin is told about each file restored or removed.
 
+## Speech-to-text failures
+
+- **Retries** (`SpeechRetry`, `RetryingSpeechToText`): remote services (Deepgram, OpenAI, the local service) try a
+  failed call again for `Transient` and `NoConnection` failures: 5 attempts in all, waits from common's
+  `BackoffSchedule` (transient: 2 s doubling, half to all of it by jitter), each at most 60 s; a `Retry-After` is
+  honoured up to 60 s, and a longer one (a 429 asking for more is a `ProviderLimit` anyway) isn't waited out. No retry
+  starts once 5 minutes have passed since the first attempt, so a whole-video chunk that timed out isn't resent.
+  `Authentication`, `BadRequest` and `ProviderLimit` are never retried. The retrying wrapper sits inside
+  `MeteredSpeechToText`, so one reservation covers every attempt. The built-in service is wrapped with one attempt, only
+  to count its calls.
+- **Fallback chain** (`SpeechFallback.Chain`, `FallbackSpeechToText`), for checks (snippets and AI context; not full
+  transcripts, whose cache is keyed by service): the chosen service, then the local service (address set, not the one
+  that failed), then built-in (allowed, a model already installed: a fallback never starts a download, not the one that
+  failed). Never a paid service. Anything but `BadRequest` falls back. A failed service is passed over for 10 minutes,
+  or for the run when it refused the key, is over a limit or is `ServiceBroken` (the built-in program can't start).
+  Transcripts from a stand-in carry `FallbackFrom`/`FallbackReason`; the result records `SpeechFallback` (from, to,
+  reason), and its `SpeechSetup` is the stand-in's, so an unclear result is checked again with the chosen service.
+  Switch: `FallBackToFree` (on).
+- **Deferred**: when the line-start stage couldn't decide and speech-to-text failed (not `BadRequest`), no verdict is
+  recorded: `ResultStatus.Deferred`, nothing changed, checked again on the next run (after new files, so deferred ones
+  never crowd them out); the search (`find-`) and embedded tracks likewise. A decided line-start verdict stands, with
+  the failure noted.
+- **Rerun**: `POST Subtitles/Results/{id}/Rerun` sets `RerunWith` to the service first chosen, for a subtitle file's own
+  check (plain id) that fell back or failed, and only while that service is usable now (`SpeechFallback.Usable`: key and
+  paid use allowed; address; allowed and installed). The next check run takes those first and builds that service
+  (`RunStart.SpeechWith`, the tier's model when it names the same service); the new result clears the flag.
+- **Built-in contingencies** (`BuiltInSpeechToText`): the program failing to start (`Win32Exception`/`IOException`), or
+  crashing twice in a row (SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV; Windows access violation or illegal instruction),
+  has the install verified once (`BuiltInInstaller.VerifyAsync`: checksums and the execute bit). Damaged: the program
+  folder is removed, `NeedsRepair` set, and the host's single-flight background download started (the service exists
+  only with consent); the page shows "needs repairing" with **Download again**. Intact: the server can't run it. Either
+  way the failure is `ServiceBroken`. A normal non-zero exit, or a kill (137, out of memory), fails that audio only.
+- **Health** (`SpeechErrorLog`, `SpeechHealth.Classify`): each call is counted per service per hour (48 h kept) and per
+  run (last 10), with successes in a row; each call that failed at least once is appended to `speech-errors.jsonl`
+  (time, service, class, message of at most 300 characters with keys already removed, recovered, attempts, run; the last
+  500 within 30 days, rewritten atomically when trimmed). Systemic: 5 calls failed for good in 24 h; or at least half of
+  at least 5 calls; or failures on 3 runs in a row; or an unrecovered `Authentication`/`ProviderLimit` failure with no
+  success since. Three successes in a row clear it. Advice per kind: paid (key, network, credit, status page), local
+  (not answering at its address: is it running?), built-in (Download again, CPU and memory). A systemic problem goes to
+  the page's banner and the Activity log (once a day per service); transitory ones only to the nerd stats and
+  **Recent speech errors** (`GET Subtitles/SpeechHealth`, paged).
+
+## Results page
+
+- `ResultPresenter` (pure, tested) turns a result into its row: `Headline`/`Subline` from `VideoIdentity` (the
+  controller looks the item up by id, else by video path, cached 30 minutes in `VideoIdentityCache`; else
+  `FromFileName` reads `Series - S01E05 - Title`, `Series.1x05`, `Season 1/S01E05`, `Title (Year)`, `Title.Year.1080p`),
+  a language tag, status words, one-sentence `Summary`, `Chips` (⏱ timing, ↔ tidied, 🔈 sounds, ✂ removed, 💬 wording,
+  ➕ lines to add, 🔤 encoding, ⏳ queued; pending ones separate), `NerdStats` (parsed from the explanation where the
+  numbers live) and a `RelativeTime` (just now, minutes, hours within a day, yesterday and days by the server's
+  calendar, then "12 Sep").
+- `GET Subtitles/Results/Page?offset&limit&filter&q` (`ResultQuery`): waiting for review first, then newest; filters
+  `waiting`, `wholefile`, `queued`, `fellback` or a status; search over name and paths; a tally for the filter and
+  summary. The page loads 15 and appends with **Show more**; a refresh reloads as many as are shown.
+
 ## Budgets, limits and failures
 
 Shared with the other plugins through
@@ -436,8 +491,10 @@ picked for a video in a library left out is cleared as unreachable, with the rea
 
 ## Settings: basic vs advanced
 
-Basic settings are the key decisions in plain language. Advanced settings (costs, per-run limits, clean-up details, AI
-checks) sit behind a collapsed section with a warning; risky values show their own warning.
+Basic settings are the key decisions in plain language, grouped in sections that open and close (General; Finding,
+checking and generating; and the Spending limit start open; Clean-up and Speech-to-text start closed, and a section
+opens itself when it holds a permission still to give). Advanced settings (costs, per-run limits, clean-up details, AI
+checks, recent speech errors) sit behind a collapsed section with a warning; risky values show their own warning.
 
 ## Languages
 

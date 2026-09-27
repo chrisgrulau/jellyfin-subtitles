@@ -5,6 +5,48 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Speech-to-text retries**: a call to Deepgram, OpenAI or a local service that fails for a passing reason (no
+  connection, a timeout, a server error, a 429 asking to wait a minute or less) is tried again up to 5 times with
+  exponential back-off and jitter (about 2, 4, 8, 16 s; each wait at most 60 s, a stated wait honoured up to that; none
+  once 5 minutes have passed). Refused keys, rejected requests and used-up allowances aren't retried. A paid call is
+  reserved and charged once however many attempts it takes.
+- **Falling back to a free service** (**If the chosen service fails, fall back to a free local one**, on by default):
+  a check whose service still fails uses the local service, then the built-in one (allowed and already installed);
+  never a paid one. A failing local service falls back to built-in and vice versa. A failed service is passed over for
+  10 minutes (for the rest of the run if its key was refused, its allowance used up or it can't start). The result
+  says what happened ("Deepgram couldn't be reached; used the local service instead.").
+- **Rerun with …** on a result that fell back or whose speech-to-text failed, naming the service first chosen (Deepgram,
+  OpenAI, the local service, built-in) and shown only while that service can be used: the check runs again with it on
+  the next run, first in line (`POST Subtitles/Results/{id}/Rerun`).
+- **Couldn't check yet**: when speech-to-text was needed (the line-start stage couldn't decide) and no service could be
+  used, no verdict is recorded and nothing is changed; the check (or search, or embedded track) is tried again on the
+  next run, after new files.
+- **Built-in repair**: a built-in program that can't start, or crashes twice in a row, has its files checked against the
+  compiled-in checksums; damaged or unrunnable files are removed and downloaded again in the background, and the page
+  says it needs repairing with **Download again** until then. Intact files mean the server can't run it. A normal
+  failure or a kill (out of memory) counts against that audio only.
+- **Speech-to-text health**: every call and failure is recorded (`speech-errors.jsonl`, the last 500 within 30 days; call
+  counts in `speech-calls.json`). A service is in trouble when 5 calls failed for good in a day, half its calls failed
+  (at least 5), calls failed on 3 runs in a row, or its key was refused with no success since; it clears after 3
+  successes in a row. Only then does a banner say so, with advice for the kind of service, and the Activity log once a
+  day; passing failures are listed only under **Advanced → Recent speech errors** (`GET Subtitles/SpeechHealth`).
+- `GET Subtitles/Results/Page`: results a page at a time (offset, limit), filtered and searched on the server, each with
+  its presentation.
+
+### Changed
+
+- **The results list is decluttered**: each video shows as "Series S01E05" with the episode title beneath (from
+  Jellyfin's item when it can be matched, else the file name) or "Title (Year)", with a small language tag; the file
+  name moved into the row's details. Changes are icon chips with counts and tooltips; the details are one sentence;
+  times are relative ("3 hours ago", "yesterday", "12 Sep") with the exact time on hover. ▸ opens a row's details: its
+  secondary actions, lines to review, what changed and "Nerd stats" (stretches agreeing, margin, z, matched words,
+  confidence, service, fallback, counts, files, full explanation). Lists show 15 rows with **Show more** (results, lines
+  to review, speech errors, files left alone by Restore all originals). On narrow screens rows become cards.
+- **Settings are grouped** in sections that open and close; the common ones start open. Colours follow the theme.
+- The built-in program failing to start is no longer treated as a rejected request, so checks fall back from it.
+
 ## [0.15.0-alpha] - 2026-09-27
 
 ### Added
