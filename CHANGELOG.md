@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Act on many results at once.** Each result has a tick box, and the header's box selects every result shown; once
+  they are all ticked, **Select all N matching this filter** selects every result matching the filter and search, not
+  just the loaded page. The selection survives **Show more** and refreshes, and is cleared when the filter or search
+  changes. A bar then offers **Apply**, **Decline**, **Undo** and **Check again**, each with how many of the selection
+  it applies to (for example "Apply (37)"; an action none of them allows is disabled), and **Clear selection**. On the
+  filter bar, **Apply all waiting for review…** applies everything waiting for the current filter and search after a
+  confirmation stating the count; Undo asks too.
+- The work runs in the background on the server, one job at a time and at most 5,000 subtitles per job, item by item
+  with the same rules as each row's own button: a file changed since is skipped (never overwritten), Undo never loses
+  an edit made after this plugin's change, a subtitle that no longer qualifies is left alone. It waits for a running
+  scheduled task (or the handling of new videos) to finish, and they wait for it. The page shows a progress bar
+  ("Applying 37 of 214…"), a **Stop** button, then a summary ("Applied 214 changes; 3 skipped: the subtitle changed
+  since it was checked…") with the skipped and failed subtitles listed with their reasons; the summary also goes to
+  Jellyfin's Activity log. A job stops when the server does.
+- **Apply all suggestions** and **Decline all** for a result's lines to review, in its details: every suggested wording
+  and missing line in one go (lines with nothing heard are still removed one by one); Undo brings the original back.
+- API: `POST Subtitles/Results/Bulk` (`{ Action, Ids | Filter: { Filter, Q }, Except }` → 202 with the job),
+  `GET Subtitles/Results/Bulk/{id}` (progress), `DELETE Subtitles/Results/Bulk/{id}` (stop), `GET Subtitles/Results/Bulk`
+  (the latest job), `POST Subtitles/Results/Bulk/Preview` (counts per action), and
+  `POST Subtitles/Results/{id}/Findings/Apply` and `…/Findings/Decline`.
+
 ### Changed
 
 - **The whole-file check flags far fewer lines that aren't wrong.** It was tuned on real films and episodes whose

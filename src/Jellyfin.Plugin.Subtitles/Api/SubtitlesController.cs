@@ -47,6 +47,7 @@ public class SubtitlesController : ControllerBase
     private readonly RunGate _gate;
     private readonly ILibraryMonitor _monitor;
     private readonly SpeechErrorLog _errors;
+    private readonly BulkJobs _bulk;
 
     // What videos are, from the library, remembered across requests (controllers are made per request)
     private static readonly VideoIdentityCache Identities = new();
@@ -66,8 +67,10 @@ public class SubtitlesController : ControllerBase
     /// <param name="gate">Keeps restoring all originals apart from the scheduled tasks.</param>
     /// <param name="monitor">Jellyfin's library monitor (told about restored and removed subtitles).</param>
     /// <param name="errors">Speech-to-text calls and failures.</param>
-    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, RunGate gate, ILibraryMonitor monitor, SpeechErrorLog errors)
+    /// <param name="bulk">Bulk actions on the results, run in the background.</param>
+    public SubtitlesController(SpeechToTextKeys keys, IHttpClientFactory http, SubtitleProcessor processor, BuiltInHost builtIn, Pricing.Spending spending, IServerConfigurationManager serverConfig, ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, RunGate gate, ILibraryMonitor monitor, SpeechErrorLog errors, BulkJobs bulk)
     {
+        _bulk = bulk ?? throw new ArgumentNullException(nameof(bulk));
         _errors = errors ?? throw new ArgumentNullException(nameof(errors));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _monitor = monitor ?? throw new ArgumentNullException(nameof(monitor));
@@ -392,6 +395,139 @@ public class SubtitlesController : ControllerBase
             return Conflict(ex.Message);
         }
     }
+
+    /// <summary>
+    /// Applies every line to review of a subtitle that has a suggestion (suggested wording, missing lines added) in one
+    /// go; lines with nothing heard are only removed one at a time, so they keep waiting, as does any whose line changed
+    /// since.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result and how many were applied.</returns>
+    [HttpPost("Results/{id}/Findings/Apply")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<FindingsApplied> ApplyAllFindings([FromRoute] string id)
+    {
+        try
+        {
+            var (result, applied) = _processor.ApplyFindings(id);
+            return new FindingsApplied(result, applied, result.Findings.Count);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Declines every line to review of a subtitle: nothing is changed.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    [HttpPost("Results/{id}/Findings/Decline")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<SubtitleResult> DeclineAllFindings([FromRoute] string id)
+    {
+        try
+        {
+            return _processor.DeclineFindings(id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// How many of a selection each bulk action applies to (the page shows "Apply (37)").
+    /// </summary>
+    /// <param name="request">The selection (the action isn't needed).</param>
+    /// <returns>The counts.</returns>
+    [HttpPost("Results/Bulk/Preview")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult<BulkCounts> BulkPreview([FromBody, Required] BulkRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (selected, problem) = BulkSelection.Resolve(_processor.Ordered(), request);
+        return selected is null ? BadRequest(problem) : BulkRules.Count(selected);
+    }
+
+    /// <summary>
+    /// Starts a bulk action (Apply, Decline, Undo or CheckAgain) on the selected results, in the background: results by
+    /// id, or every result matching a filter and search. Only the results the action applies to are included, at most
+    /// 5,000 per job. The job waits for a running scheduled task to finish first, and works item by item with the same
+    /// rules as each result's own button. One job at a time.
+    /// </summary>
+    /// <param name="request">The action and the selection.</param>
+    /// <returns>The job's progress (poll <see cref="BulkProgressOf"/>).</returns>
+    [HttpPost("Results/Bulk")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<BulkProgress> StartBulk([FromBody, Required] BulkRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (BulkSelection.ActionOf(request.Action) is not { } action)
+        {
+            return BadRequest("Unknown action; choose Apply, Decline, Undo or CheckAgain.");
+        }
+
+        var (selected, problem) = BulkSelection.Resolve(_processor.Ordered(), request);
+        if (selected is null)
+        {
+            return BadRequest(problem);
+        }
+
+        var (items, left) = BulkRules.ForAction(action, selected);
+        if (items.Count == 0)
+        {
+            return BadRequest("None of the chosen subtitles can be " + action switch
+            {
+                BulkAction.Apply => "applied",
+                BulkAction.Decline => "declined",
+                BulkAction.Undo => "undone",
+                _ => "checked again",
+            } + ".");
+        }
+
+        var (started, running) = _bulk.Start(action, items, left, () => (SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration()).Policies(), r => ResultPresenter.Headline(r, IdentityOf(r)).Headline);
+        return started is not null
+            ? Accepted(started)
+            : Conflict("Another bulk action is still running (" + running!.Done + " of " + running.Total + " done). Wait for it to finish, or stop it.");
+    }
+
+    /// <summary>
+    /// The latest bulk job's progress (so a page opened while one runs can show it).
+    /// </summary>
+    /// <returns>The progress, or no content when none has run since the server started.</returns>
+    [HttpGet("Results/Bulk")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult<BulkProgress> LatestBulk() => _bulk.Latest() is { } p ? p : NoContent();
+
+    /// <summary>
+    /// A bulk job's progress: how many are done, succeeded, skipped and failed (with the reasons), and its state.
+    /// </summary>
+    /// <param name="id">The job's id.</param>
+    /// <returns>The progress.</returns>
+    [HttpGet("Results/Bulk/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<BulkProgress> BulkProgressOf([FromRoute] string id) => _bulk.Get(id) is { } p ? p : NotFound("That bulk action isn't known (only the latest is kept, until the server restarts).");
+
+    /// <summary>
+    /// Stops a bulk job: the item in hand is finished, the rest are left as they are.
+    /// </summary>
+    /// <param name="id">The job's id.</param>
+    /// <returns>No content.</returns>
+    [HttpDelete("Results/Bulk/{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult StopBulk([FromRoute] string id) => _bulk.Cancel(id) ? NoContent() : NotFound("That bulk action isn't running.");
 
     /// <summary>
     /// The server's film and show libraries, whether the plugin works on each (the settings page's library picker), and
@@ -849,6 +985,14 @@ public class SubtitlesController : ControllerBase
         }
     }
 }
+
+/// <summary>
+/// Result of <see cref="SubtitlesController.ApplyAllFindings"/>.
+/// </summary>
+/// <param name="Result">The updated result.</param>
+/// <param name="Applied">How many lines were changed.</param>
+/// <param name="Left">How many lines still wait for review (lines with nothing heard, lines changed since).</param>
+public sealed record FindingsApplied(SubtitleResult Result, int Applied, int Left);
 
 /// <summary>
 /// Body of <see cref="SubtitlesController.StartBuiltInDownload"/>.
