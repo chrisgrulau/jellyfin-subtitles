@@ -83,6 +83,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<RunGate>();
         serviceCollection.AddHostedService<NewItemsHost>();
 
+        // Bulk actions on the results (apply, decline, undo, check again many at once) run in the background under the
+        // gate, one job at a time, and stop when the server does
+        serviceCollection.AddSingleton(sp => new BulkJobs(sp.GetRequiredService<SubtitleProcessor>(), sp.GetRequiredService<RunGate>(), sp.GetRequiredService<SubtitleActivity>()));
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<BulkJobs>());
+
         serviceCollection.AddSingleton(sp => new SubtitleFinder(sp.GetRequiredService<ResultStore>(), new DownloadLedger(Path.Combine(DataFolder(sp), "downloads.json"))));
     }
 

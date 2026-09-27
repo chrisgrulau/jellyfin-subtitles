@@ -414,6 +414,28 @@ page shows progress without a background job, and a batch never runs alongside a
 - `GET Subtitles/Results/Page?offset&limit&filter&q` (`ResultQuery`): waiting for review first, then newest; filters
   `waiting`, `wholefile`, `queued`, `fellback` or a status; search over name and paths; a tally for the filter and
   summary. The page loads 15 and appends with **Show more**; a refresh reloads as many as are shown.
+- **Bulk actions** (`BulkJobs`, `BulkRules`, `BulkSelection`). A selection is either result ids (rows ticked) or a
+  filter and search (`{ Filter, Q }`, less `Except` ids unticked afterwards), resolved on the server with
+  `ResultQuery.Matches` over `Ordered()`, so "Select all matching" means exactly what the list shows, loaded or not.
+  `POST Subtitles/Results/Bulk/Preview` counts how many of a selection each action applies to (`BulkRules.WhyNot`,
+  the rules the page uses for each row's buttons: Apply needs something applicable waiting, Decline anything waiting,
+  Undo a change whose original is kept (or an added/generated subtitle), Check again neither a change nor a review).
+  `POST Subtitles/Results/Bulk` keeps only the results the action applies to, in list order, capped at
+  `BulkRules.MaxPerJob` (5,000; the rest are counted as `Left`), and answers 202 with the job, or 409 while another runs
+  (one at a time; only the latest job is kept, in memory). The job runs on the thread pool: it first takes the
+  `RunGate` alone with `EnterAloneAsync` (waiting for the nightly tasks, a new-video run or a restore to finish;
+  `WaitingFor` says which), so they in turn wait for it. Each item is read again and checked against `WhyNot`, then
+  done through `SubtitleProcessor` exactly as its single-item endpoint (the fingerprint check in `SubtitleFiles` skips a
+  file changed since; Undo refuses a file edited after the change). An `InvalidOperationException` is a skip with its
+  message, anything else a failure; neither stops the job. Each decision is saved at once, as for single actions.
+  `GET Subtitles/Results/Bulk/{id}` gives `Total`, `Done`, `Succeeded`, `Skipped`/`Failed` (`{ Id, Headline, Reason }`),
+  `State` (Waiting, Running, Done, Cancelled) and, at the end, a `Summary` line that also goes to the Activity log.
+  `DELETE` stops a job after the item in hand; it is a hosted service, so the server stopping cancels it too. The page
+  polls every second, then clears the selection and reloads the list.
+- **Apply all suggestions / Decline all** for one result's findings (`POST Subtitles/Results/{id}/Findings/Apply`,
+  `…/Decline`; `SubtitleProcessor.ApplyFindings`, `DeclineFindings`): every finding with a suggestion is applied as
+  `ApplyFinding` would, in one write that keeps the first original; lines with nothing heard, and findings whose line
+  changed since, keep waiting. A timing correction or clean-up waiting for review is left as it is.
 
 ## Budgets, limits and failures
 

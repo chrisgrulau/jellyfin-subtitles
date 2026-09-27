@@ -9,7 +9,8 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// once. The nightly tasks share it (they already avoid each other's files, as they always have); the handling of new
 /// videos and "Restore all originals" each need it alone. A nightly task that starts while one of those holds it waits
 /// for it to finish; they, in turn, don't start while a nightly task runs (new videos wait and try again later, a
-/// restore is refused with the reason).
+/// restore is refused with the reason). Bulk actions on the results take it alone too, waiting their turn
+/// (<see cref="EnterAloneAsync"/>).
 /// </summary>
 public sealed class RunGate
 {
@@ -17,6 +18,7 @@ public sealed class RunGate
     private int _shared;
     private string? _alone;
     private TaskCompletionSource? _released;
+    private TaskCompletionSource? _changed;
 
     /// <summary>
     /// Gets what holds the gate now, in words for the settings page, or <c>null</c> when nothing does.
@@ -54,6 +56,35 @@ public sealed class RunGate
     }
 
     /// <summary>
+    /// Takes the gate alone, waiting until nothing holds it (the nightly tasks and whatever holds it alone finish first).
+    /// </summary>
+    /// <param name="what">What takes it, in words.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A hold to dispose when done.</returns>
+    public async Task<IDisposable> EnterAloneAsync(string what, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(what);
+        while (true)
+        {
+            Task wait;
+            lock (_lock)
+            {
+                if (_shared == 0 && _alone is null)
+                {
+                    _alone = what;
+                    _released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    return new Hold(this, alone: true);
+                }
+
+                _changed ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                wait = _changed.Task;
+            }
+
+            await wait.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Takes the gate alongside the other nightly tasks, once nothing holds it alone.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -81,8 +112,11 @@ public sealed class RunGate
     private void Release(bool alone)
     {
         TaskCompletionSource? released = null;
+        TaskCompletionSource? changed;
         lock (_lock)
         {
+            changed = _changed;
+            _changed = null;
             if (alone)
             {
                 _alone = null;
@@ -96,6 +130,7 @@ public sealed class RunGate
         }
 
         released?.TrySetResult();
+        changed?.TrySetResult();
     }
 
     private sealed class Hold(RunGate gate, bool alone) : IDisposable

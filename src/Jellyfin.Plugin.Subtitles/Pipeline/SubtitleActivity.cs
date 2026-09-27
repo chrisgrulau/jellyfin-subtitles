@@ -18,7 +18,7 @@ public sealed record ActivityNote(string Name, string ShortOverview, string Over
 /// <summary>
 /// Copies what needs attention (something waiting for review, a folder that can't be written, a subtitle search the
 /// provider stopped) and subtitles that were added or generated to Jellyfin's Activity log, so they're seen without opening the
-/// plugin page (FAM-05). The same subtitle and outcome is written at most once a day.
+/// plugin page (FAM-05), and what bulk actions on the results did. The same subtitle and outcome is written at most once a day.
 /// </summary>
 public sealed class SubtitleActivity
 {
@@ -99,6 +99,20 @@ public sealed class SubtitleActivity
         return health.Systemic && health.Problem is { } problem
             ? WriteOnceAsync("speech|" + health.Provider, new ActivityNote("Shoal Subtitles: speech-to-text keeps failing", Short(problem), problem + " Checks fall back to a free service on this server where one is set up; see Recent speech errors on the plugin page.", LogLevel.Warning))
             : Task.FromResult(false);
+    }
+
+    /// <summary>
+    /// Writes what a bulk action on the results did (once per job).
+    /// </summary>
+    /// <param name="job">The job's id.</param>
+    /// <param name="summary">Its summary line.</param>
+    /// <param name="problems">Whether items were skipped or failed (shown as a warning).</param>
+    /// <returns>Whether it was written.</returns>
+    public Task<bool> NotifyBulkAsync(string job, string summary, bool problems)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(summary);
+        return WriteOnceAsync("bulk|" + job, new ActivityNote("Shoal Subtitles: bulk action finished", Short(summary), summary + (problems ? " The items skipped or failed are listed on the plugin page." : string.Empty), problems ? LogLevel.Warning : LogLevel.Information));
     }
 
     private static string Short(string text) => text.Length > 250 ? text[..250] + "…" : text;
