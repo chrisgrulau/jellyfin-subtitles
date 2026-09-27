@@ -31,7 +31,7 @@ public sealed class StaleResultTests : IDisposable
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
-    public static TheoryData<string> Actions => ["Apply", "Decline", "Undo", "CheckAgain", "ApplyFinding", "DeclineFinding", "ApplyFindings", "DeclineFindings", "Edit", "SaveEdit", "Rerun", "CheckWholeFile"];
+    public static TheoryData<string> Actions => ["Apply", "Decline", "Undo", "CheckAgain", "ApplyFinding", "DeclineFinding", "ApplyFindings", "DeclineFindings", "Edit", "SaveEdit", "Rerun", "CheckWholeFile", "FixBySection"];
 
     [Theory]
     [MemberData(nameof(Actions))]
@@ -293,6 +293,7 @@ public sealed class StaleResultTests : IDisposable
             case "Edit": _processor.LoadForEditing(id); break;
             case "SaveEdit": _processor.SaveEdited(id, "x", []); break;
             case "Rerun": _processor.RequestRerun(id); break;
+            case "FixBySection": _processor.RequestSectionFix(id, _ => null, _ => ["en"]); break;
             default: _processor.RequestWholeFileCheck(id, _ => null, ["en"]); break;
         }
     }

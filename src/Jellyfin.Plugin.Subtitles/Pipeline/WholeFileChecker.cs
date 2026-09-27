@@ -492,6 +492,11 @@ public sealed class WholeFileChecker
             return (t => t, t => t);
         }
 
+        if (r.Sections is { Count: > 0 } sections)
+        {
+            return PiecewiseFit.Clocks(r.Scale, sections);
+        }
+
         double scale = r.Scale, offset = r.Offset;
         return (t => (scale * t) + offset, a => (a - offset) / scale);
     }

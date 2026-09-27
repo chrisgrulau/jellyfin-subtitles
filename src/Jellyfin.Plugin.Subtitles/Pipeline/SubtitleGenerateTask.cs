@@ -38,6 +38,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     private readonly SpeechErrorLog? _errors;
     private readonly SubtitleGenerator _generator;
     private readonly WholeFileChecker _checker;
+    private readonly SectionFixer _sections;
     private readonly RunGate _gate;
     private readonly IServerConfigurationManager _server;
     private readonly ILogger<SubtitleGenerateTask> _logger;
@@ -58,9 +59,11 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
     /// <param name="gate">Keeps this task and other work on subtitle files apart.</param>
     /// <param name="server">Jellyfin's configuration (for the languages' last fallback).</param>
     /// <param name="logger">Logger.</param>
+    /// <param name="sections">The fix by section.</param>
     /// <param name="errors">Where speech-to-text calls and failures are counted.</param>
-    public SubtitleGenerateTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleGenerator generator, WholeFileChecker checker, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleGenerateTask> logger, SpeechErrorLog? errors = null)
+    public SubtitleGenerateTask(ILibraryManager library, IMediaSourceManager media, IMediaEncoder encoder, ILibraryMonitor monitor, IHttpClientFactory http, SpeechToTextKeys keys, BuiltInHost builtIn, Spending spending, SubtitleGenerator generator, WholeFileChecker checker, RunGate gate, IServerConfigurationManager server, ILogger<SubtitleGenerateTask> logger, SectionFixer sections, SpeechErrorLog? errors = null)
     {
+        _sections = sections ?? throw new ArgumentNullException(nameof(sections));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _server = server ?? throw new ArgumentNullException(nameof(server));
         _library = library ?? throw new ArgumentNullException(nameof(library));
@@ -111,6 +114,7 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         {
             _generator.FlushResults();
             _checker.FlushResults();
+            _sections.FlushResults();
         }
     }
 
@@ -131,7 +135,8 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         }
 
         var asked = maxWhole > 0 && _checker.HasRequests;
-        if (max == 0 && !asked && (!config.CheckWholeFile || maxWhole == 0))
+        var askedSections = maxWhole > 0 && _sections.HasRequests;
+        if (max == 0 && !asked && !askedSections && ((!config.CheckWholeFile && !config.FixDifferentCuts) || maxWhole == 0))
         {
             return;
         }
@@ -168,13 +173,25 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         List<SubtitleJob> Files() => files ??= [.. videos.SubtitleFiles()];
         var checks = 0;
 
-        // Files picked in the results first (someone is waiting for them), then generation, then doubtful files
+        // Files picked in the results first (someone is waiting for them), then generation, then fixes by section (so a
+        // whole-file check after one compares the lines at their proposed times), then doubtful files
         if (asked)
         {
             // Picked files the run can't reach (the settings or the library changed since) leave the queue, with the reason
             _checker.ClearUnreachable(Files(), j => WantedFor(j.VideoPath));
             var outcome = await CheckWholeAsync(run, config, tier, setup, settings, _checker.Choose(Files(), j => WantedFor(j.VideoPath), automatic: false, maxWhole), budget, began, cancellationToken).ConfigureAwait(false);
             checks += outcome?.Checked + outcome?.Failed ?? 0;
+            if (outcome?.StoppedBy is not null || outcome?.OutOfTime is not null)
+            {
+                return;
+            }
+        }
+
+        if (askedSections && maxWhole - checks > 0)
+        {
+            _sections.ClearUnreachable(Files(), j => WantedFor(j.VideoPath));
+            var outcome = await FixSectionsAsync(run, config, tier, setup, _sections.Choose(Files(), j => WantedFor(j.VideoPath), automatic: false, maxWhole - checks), WantedFor, budget, began, cancellationToken).ConfigureAwait(false);
+            checks += outcome?.Tried + outcome?.Failed ?? 0;
             if (outcome?.StoppedBy is not null || outcome?.OutOfTime is not null)
             {
                 return;
@@ -222,6 +239,16 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
             }
         }
 
+        if (config.FixDifferentCuts && maxWhole - checks > 0)
+        {
+            var outcome = await FixSectionsAsync(run, config, tier, setup, _sections.Choose(Files(), j => WantedFor(j.VideoPath), automatic: true, maxWhole - checks), WantedFor, budget, began, cancellationToken).ConfigureAwait(false);
+            checks += outcome?.Tried + outcome?.Failed ?? 0;
+            if (outcome?.StoppedBy is not null || outcome?.OutOfTime is not null)
+            {
+                return;
+            }
+        }
+
         if (config.CheckWholeFile && maxWhole - checks > 0)
         {
             await CheckWholeAsync(run, config, tier, setup, settings, _checker.Choose(Files(), j => WantedFor(j.VideoPath), automatic: true, maxWhole - checks), budget, began, cancellationToken).ConfigureAwait(false);
@@ -263,6 +290,44 @@ public sealed partial class SubtitleGenerateTask : IScheduledTask
         LogSummary(_logger, line);
         return outcome;
     }
+
+    private async Task<SectionRun?> FixSectionsAsync(RunStart run, PluginConfiguration config, TranscriptionTier tier, string setup, IReadOnlyList<SubtitleJob> jobs, Func<string, IReadOnlyList<string>> wantedFor, TimeSpan? budget, DateTimeOffset began, CancellationToken cancellationToken)
+    {
+        if (jobs.Count == 0)
+        {
+            return null;
+        }
+
+        var speech = run.Speech(config, tier, "subtitles.sections", out var problem, forSubtitles: true);
+        if (speech is null)
+        {
+            LogSkipped(_logger, problem ?? "no speech-to-text service");
+            return null;
+        }
+
+        LogSectionsStarting(_logger, jobs.Count, setup);
+        var outcome = await _sections.RunAsync(
+            jobs,
+            job => new FfmpegAudioSource(run.Ffmpeg, job.VideoPath, job.AudioStream),
+            speech,
+            setup,
+            job => wantedFor(job.VideoPath),
+            budget,
+            began,
+            (job, result) => LogResult(_logger, job.Name, result.Status, result.SectionFix?.Summary ?? result.Explanation),
+            cancellationToken).ConfigureAwait(false);
+        if (outcome.StoppedBy is { } why)
+        {
+            LogStopped(_logger, why);
+        }
+
+        var line = outcome.Summary();
+        LogSummary(_logger, line);
+        return outcome;
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: fixing the timing of {Count} subtitle files by section (full transcript: {Setup})")]
+    private static partial void LogSectionsStarting(ILogger logger, int count, string setup);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: checking {Count} subtitle files whole (full transcript: {Setup})")]
     private static partial void LogWholeStarting(ILogger logger, int count, string setup);

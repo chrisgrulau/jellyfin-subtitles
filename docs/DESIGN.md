@@ -50,7 +50,8 @@ machine-/AI-translated flags; hearing-impaired and forced preferences; language 
   changes recovered in 30 of 30 cases, including every dense comedy the line-start stage had to leave; subtitles for
   another episode or film rejected in 16 of 16; about 10 s per video on a small GPU. Word matching also catches
   subtitles in the wrong language (nothing matches), which the language-independent stage can't.
-  Piecewise corrections (cuts) come later, when anchors split into clusters along the timeline.
+  Subtitles made for a different cut, whose anchors split into clusters along the timeline, are left for the
+  [fix by section](#fix-by-section-different-cuts), which uses a full transcript.
 
 ### Speech-to-text tiers
 
@@ -58,7 +59,7 @@ machine-/AI-translated flags; hearing-impaired and forced preferences; language 
 |---|---|---|
 | A: sync snippets | Check and synchronise | A few minutes per video at most |
 | B: AI context | Excerpt handed to the AI plugin | Extends tier A's snippets to a target length rather than transcribing afresh |
-| C: full transcript | Last-resort subtitles and the whole-file check; later precise timing | The whole video in 10-minute chunks; used by [Generated subtitles](#generated-subtitles) and the [Whole-file check](#whole-file-check) |
+| C: full transcript | Last-resort subtitles, the whole-file check and the fix by section | The whole video in 10-minute chunks; used by [Generated subtitles](#generated-subtitles), the [Whole-file check](#whole-file-check) and the [Fix by section](#fix-by-section-different-cuts) |
 
 Each tier has its own on/off switch, provider, model and budget. Full transcripts are cached (`TranscriptCache`, in
 `<plugin data>/transcripts/`) by the video file (path, size and time written), audio stream, language, service and model
@@ -301,6 +302,96 @@ for review, never applied on their own.
   **Decline** clears them all. The editor opens at a finding with the fix filled in (a missing line added), saved only
   with Save; saving closes the whole-file findings it dealt with. Applied fixes count as `FixedFromWholeFile`; Undo
   restores the original.
+
+## Fix by section (different cuts)
+
+A subtitle made for another cut of the video (a scene added or removed, a recap or cold open, ad breaks trimmed, often
+with a frame-rate change too) starts in time and then jumps or drifts part-way, so no single offset fits: the regular
+check leaves it unclear, or settles it on the snippets that happen to agree. The fix by section fits it to a full
+transcript piece by piece and proposes the correction for review; it never applies it on its own.
+
+- **Switch:** `FixDifferentCuts` (off by default, `SectionFixer.OnByDefault`); **Try fixing timing by section** in the
+  results (`POST Subtitles/Results/{id}/FixBySection`) asks for any candidate whatever the switch. With a full transcript
+  already kept (by the whole-file check or generating, same service and model) the fit is made during the request (a few
+  milliseconds); otherwise the file is queued (`SectionFixRequested`) for the next full-transcript run. A file the run
+  couldn't fix is refused with 400 and the reason (`SectionFixer.Ineligible`: the whole-file check's rules, and a
+  candidate timing). Needs the Full transcript tier; the page switches it on with the switch.
+- **Which files** (`SectionFixer.IsCandidate`, `Choose`): results `Unreliable` ("Unclear"), or settled by speech-to-text
+  (`InSync`, `Corrected`, `Proposed`) with a confidence under 0.75 (`PartialAgreement`, the share of matched words
+  agreeing: snippets can agree while the timing jumps between them); not matched by meaning, generated, embedded, added
+  by the search (chosen among candidates for fitting), with text that didn't decode cleanly, declined, undone, or fixed
+  by section already; in the audio's language. Asked-for first, then oldest; not tried again once tried, except a failed
+  transcript after 3 days. `WrongLanguage` results are left alone.
+- **Where it runs:** a step of the full-transcript task (`ShoalSubtitlesGenerate`), after files asked for (whole-file
+  checks, then fixes) and generation, and before the automatic whole-file checks, so a check that follows compares the
+  lines at their proposed times (`WholeFileChecker.Clocks` maps each section). It shares the task's time budget
+  (`MaxGenerateHours`) and the per-night limit `MaxWholeFileChecksPerNight` (5), counting every file tried; purpose
+  `subtitles.sections` for metering. Transcripts come from `TranscriptCache` (shared with generating and the whole-file
+  check), so a fix after either costs nothing more.
+- **Anchors:** as for sync snippets, every run of three words that occurs exactly once in the subtitle and once in the
+  whole transcript (`TranscriptAligner.Anchors`), sorted by subtitle time. At least 20, or the fit is rejected.
+- **Segmentation** (`PiecewiseAligner`, pure and deterministic): for each frame-rate ratio of the snippet solver, the
+  anchors' offsets (audio time − ratio × subtitle time) are grouped into at most 16 candidate offsets (the densest ±0.5 s
+  cluster, then the densest of the rest, each of at least 8 anchors). Dynamic programming (Viterbi) assigns the anchors,
+  in subtitle order, to candidates: an anchor more than 0.5 s from its candidate costs 1, a change of candidate costs 16.
+  Runs that are too thin (under 8 agreeing anchors) or too short (under 20 s of subtitle time from the first to the last)
+  are folded into the neighbour they agree with more, the weakest first; neighbours less than 1 s apart are one section.
+  Each ratio's cost is the disagreeing anchors plus 16 per jump. The lowest cost wins; the simpler ratio (same rate first) is kept unless another costs
+  more than 1 less. Each section's offset is the median over its agreeing anchors at line starts (at least 5), else all.
+- **Rejection** (left alone, with the reason noted): fewer than 20 anchors; no section; more than 8 sections; fewer than
+  half of all anchors agreeing with their section; or fewer than half of a section's own anchors agreeing. Another
+  episode, another language or notes that aren't dialogue give few anchors, and those don't line up.
+- **Jumps between lines:** for each pair of neighbouring sections, the lines between the last anchor of the first and the
+  first anchor of the second are scored under each section's timing: the share of each line's different words heard in
+  the transcript within 1.5 s of where the timing puts it. The jump goes where the lines before it match the first
+  section and the lines after it the second; ties go to the longer pause. When the offset falls by 5 s or more (the
+  subtitle has a part the video doesn't), a run of lines between them may be flagged instead: it must make room, so that
+  the lines kept either side don't overlap after moving (0.5 s allowed); keeping a spoken line there costs 0.25 unless it
+  is heard, and flagging a heard line costs what it matches. A smaller fall (a trimmed pause at an ad break) flags
+  nothing: the lines either side may overlap a little, which the clean-up tidies. A section starts (`TimingSection.From`)
+  midway in the pause before its first line (or at that line's start when lines overlap), and each line moves with the
+  section its start is in, so a line is never split. Lines that would move before the video starts or past its end are
+  flagged too (a recap or cold open the video doesn't have).
+- **Results:** a fit with jumps becomes `Proposed` with `Scale`, `Offset` (the first section's) and `Sections` (from,
+  offset, anchors, where it shows in the video), `Stage` `timing by section`, and `Confidence` the share of anchors
+  agreeing. Flagged lines are `LineFinding`s of kind `not-in-video` with `From` = `timing by section`, applied (the line
+  removed) or declined one at a time in review. One timing for the whole file is proposed the same way only for a
+  frame-rate change, flagged lines or a shift of at least 0.5 s (`OneTimingWithin`; good subtitles sit a few tenths
+  early); otherwise, and when rejected, the result keeps its status and notes why. `SectionFix` records when, the service
+  and a summary; the explanation ends "Timing by section: Timing jumps at 12:40 (+3.2 s) and 31:05 (−41.0 s): subtitle made
+  for a different cut. Sections: …", and the nerd stats list the sections.
+- **Apply / Decline / Undo:** Apply removes the lines still flagged (not declined), then moves each line by its section
+  (`PiecewiseFit.Retime`), then the clean-up as usual; counted as `RemovedNotInVideo`. The first original is kept, also
+  for a file an earlier correction changed, so Undo brings back the file as it was before the plugin touched it. Decline
+  clears the proposal and the flagged lines, and the file isn't proposed again unless it changes.
+- **Calibration on real videos** (`tools/DiscrepancyEval`, command `sections`, with the whole-file check's cached
+  transcripts from a local Whisper-family service, a small model): 27 subtitles taken to be good (22 episodes, 3 films,
+  two alternative subtitle releases; 18.4 hours of audio, about 5 of them transcribed for this), cut synthetically in
+  312 ways (24 of them × 3 each: a 30–120 s stretch removed from the subtitle, a 30–120 s block from another subtitle
+  inserted, both at once, a stretch removed from a subtitle retimed for 25 fps; and a 30–90 s block before the start),
+  19 subtitles paired with another episode of the same show, and 698 pairings of every good subtitle with every other
+  video.
+  - Cuts: the right number of sections and frame-rate ratio in 312 of 312; section offsets within 0.023 s of the truth
+    (median), 0.27 s at worst; jumps placed at the right line in the video within 0.04 s (median; 255 of 288 within 1 s,
+    the rest an unheard interjection next to the cut placed on the wrong side); 99.97 % of lines moved to within 1 s of
+    where they belong. Lines of a part the video doesn't have: 99.6 % flagged, 99.3 % of flagged lines were such lines.
+  - Untouched subtitles: one timing for 25 of 27. The other two, both episodes of one show whose regular check had only
+    partly agreed (confidence 0.6 and 0.7), really do jump: their offsets are flat within stretches and step by about
+    1–1.4 s at the act breaks (broadcast breaks trimmed differently), which the fit found.
+  - Another episode: 19 of 19 rejected (at most 181 anchors, none agreeing for long enough); cross pairings: 698 of 698
+    rejected.
+  - Tried: a jump penalty of 4 (a false jump on a good subtitle with 20 s sections), 8 and 16 (none); a smallest jump of
+    0.8 s (an extra false jump, and 4 of the 312 cuts split in two), 1.0 and 1.25 s (the same), 1.5 s (real 1.2–1.4 s
+    act-break steps merged, fitted as a false 0.1 % frame-rate change instead); sections of at least 20, 30 or 60 s (30 s
+    folded a real 23 s closing section into the one before); an extra cost for agreeing anchors' distance from their
+    section's offset (meant to tell drift from steps: no difference once the smallest jump was 1 s); agreement within
+    ±0.4 s (a cut missed) or ±0.7 s (six cuts miscounted, and with 40 % agreement one wrong-episode pairing accepted);
+    at least 40 %, 50 % or 60 % of anchors agreeing (60 % lost 6 to 37 cuts); 6, 8 or 12 anchors a section (the same);
+    a cost for keeping an unheard line next to a missing part of 0, 0.1, 0.25 or 0.4 (lines of the missing part flagged:
+    94 %, 99 %, 99.6 %, 99.8 %; flagged lines that were: 99.5 %, 99.5 %, 99.3 %, 99.2 %). Flagging needs a fall of
+    at least 5 s: on a real episode, a 1.5 s fall at an ad break flagged a line that was there.
+  - The real unclear results in a small library: one episode with three act-break jumps (−1.5, −1.3 and −1.6 s) is
+    proposed; a storyboard-notes track, and two short clips with almost no speech, are rejected.
 
 ## Decisions and confidence
 

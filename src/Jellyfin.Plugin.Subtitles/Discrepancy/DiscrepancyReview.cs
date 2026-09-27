@@ -22,6 +22,29 @@ public static class DiscrepancyReview
     /// <summary>The <see cref="SubtitleResult.Cleaned"/> key counting lines fixed from the whole-file check.</summary>
     public const string FixedKind = "FixedFromWholeFile";
 
+    /// <summary>What <see cref="LineFinding.From"/> says for a fix of the timing by section (see <see cref="Pipeline.SectionFixer"/>).</summary>
+    public const string Sections = "timing by section";
+
+    /// <summary>
+    /// The kind of a line covering a part of the video this cut doesn't have (found by the fix by section): its fix is
+    /// removing it.
+    /// </summary>
+    public const string NotInVideo = "not-in-video";
+
+    /// <summary>The <see cref="SubtitleResult.Cleaned"/> key counting lines removed as not in the video (fix by section).</summary>
+    public const string RemovedNotInVideoKind = "RemovedNotInVideo";
+
+    /// <summary>
+    /// Whether a finding comes from the fix by section.
+    /// </summary>
+    /// <param name="f">The finding.</param>
+    /// <returns><c>true</c> if so.</returns>
+    public static bool IsSection(LineFinding f)
+    {
+        ArgumentNullException.ThrowIfNull(f);
+        return string.Equals(f.From, Sections, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// Whether a finding comes from the whole-file check.
     /// </summary>
@@ -134,7 +157,7 @@ public static class DiscrepancyReview
             return (null, "That line has changed since it was checked; open the editor instead.");
         }
 
-        if (f.Kind == DiscrepancyFinder.Extra)
+        if (f.Kind is DiscrepancyFinder.Extra or NotInVideo)
         {
             if (cues.Count == 1)
             {
@@ -194,6 +217,7 @@ public static class DiscrepancyReview
         {
             DiscrepancyFinder.MissingLine => $"{at} (missing line): heard “{heard}” — {f.Reason}",
             DiscrepancyFinder.Extra => $"{at} (nothing heard): “{current}” — {f.Reason}",
+            NotInVideo => $"{at} (not in this cut): “{current}” — {f.Reason}",
             _ => $"{at} ({f.Kind}): “{current}”, heard “{heard}” — {f.Reason}",
         };
     }
@@ -214,6 +238,7 @@ public static class DiscrepancyReview
             DiscrepancyFinder.Number => "number",
             DiscrepancyFinder.Negation => "negation",
             DiscrepancyFinder.Words => "line with words missing",
+            NotInVideo => "line not in this cut",
             _ => kind,
         };
         if (count == 1)
@@ -225,6 +250,7 @@ public static class DiscrepancyReview
         {
             "line with nothing heard" => "lines with nothing heard",
             "line with words missing" => "lines with words missing",
+            "line not in this cut" => "lines not in this cut",
             _ => one + "s",
         };
         return count.ToString(CultureInfo.InvariantCulture) + " " + many;

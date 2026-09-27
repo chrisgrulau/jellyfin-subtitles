@@ -59,7 +59,7 @@ Three uses, each switched on or off separately and each with its own provider an
 |---|---|---|
 | Check and synchronise | A few short snippets per video | On |
 | Context for AI decisions | A slightly longer excerpt, when the [AI plugin](https://github.com/chrisgrulau/jellyfin-ai) is installed. Also used for the short transcripts [Ingest](https://github.com/chrisgrulau/jellyfin-ingest) may ask for (**Let Ingest ask for short transcripts**, off by default) to tell which episode a new video is | Off |
-| Full transcript | The whole video, to generate subtitles when none can be found (see [Generated subtitles](#generated-subtitles)) and to check doubtful subtitles line by line (see [Whole-file check](#whole-file-check)). Its own service and model, so for example Deepgram can check and synchronise while full transcripts stay free on the built-in one. Transcripts are kept, so a video is never transcribed twice with the same service and model | Off |
+| Full transcript | The whole video, to generate subtitles when none can be found (see [Generated subtitles](#generated-subtitles)) to check doubtful subtitles line by line (see [Whole-file check](#whole-file-check)) and to fix subtitles made for a different cut (see [Subtitles made for a different cut](#subtitles-made-for-a-different-cut)). Its own service and model, so for example Deepgram can check and synchronise while full transcripts stay free on the built-in one. Transcripts are kept, so a video is never transcribed twice with the same service and model | Off |
 
 Providers:
 
@@ -100,9 +100,10 @@ timing corrected. Existing subtitle files are never replaced, downloads are capp
 subtitle.
 
 A third daily task (**Generate missing subtitles and check whole files**, off until you switch on **Generate subtitles
-when none can be found** or **Check whole file for doubtful subtitles**, or pick a subtitle with **Check whole file**)
-makes subtitles from a full transcript for videos the search found nothing for, and compares doubtful subtitles with a
-full transcript; see below.
+when none can be found**, **Check whole file for doubtful subtitles** or **Fix subtitles made for a different cut**, or
+pick a subtitle with **Check whole file** or **Try fixing timing by section**) makes subtitles from a full transcript
+for videos the search found nothing for, compares doubtful subtitles with a full transcript, and fixes subtitles made
+for a different cut section by section; see below.
 
 New videos don't wait for the night: a few minutes after films or episodes are added (10 by default, counted from the
 last one, so a whole season is handled together), their subtitles are checked and missing ones searched for, within the
@@ -188,6 +189,35 @@ A subtitle that looks doubtful can be compared, line by line, with a full transc
   **Stop starting new videos after** hours as generating. Picked files are checked on the next run (05:00, or **Run
   full transcripts now**).
 
+## Subtitles made for a different cut
+
+Some subtitles were made for another version of the video: a scene added or cut, a recap or cold open, ad breaks
+trimmed differently, sometimes a different frame rate as well. They start in time and then jump or drift part-way, so
+no single shift fixes them, and the timing check leaves them unclear. Off by default: **Fix subtitles made for a
+different cut**.
+
+- **Which subtitles:** those whose timing check was unclear, or settled by speech-to-text with only partial agreement;
+  and any such subtitle you pick with **Try fixing timing by section** in the results (even with the switch off). Not
+  subtitles for another language or matched by meaning, generated ones, or ones the search added.
+- **How:** the subtitle is lined up with a full transcript of its video, word runs that occur once in each marking where
+  they agree. Where the timing holds steady for a stretch and then jumps, the stretches become sections, each moved by its
+  own amount (with one frame-rate correction for the whole file). A jump is always placed between two lines. If too few
+  words match, or they don't agree for long stretches (another episode, another language, notes rather than dialogue),
+  the subtitle is left alone and the result says why.
+- **Review:** nothing is changed on its own. The result reads, for example, "Made for a different cut: timing jumps at
+  12:40 (+3.2 s) and 31:05 (−41.0 s)", with each section in the nerd stats. **Apply** moves each section; **Decline**
+  leaves the file as it is; Undo brings the original back. Lines covering a part the video doesn't have are listed for
+  you to remove (**Remove line**, or decline to keep them); they are never moved into the wrong place. Where the video
+  has a part the subtitle doesn't, it simply has no lines.
+- **Cost and pace:** it uses the **Full transcript** service and the transcripts the whole-file check and generated
+  subtitles keep, so a video is transcribed only once. With a transcript already kept, **Try fixing timing by section**
+  answers at once; otherwise it waits for the next run. At most **Subtitle files checked whole or fixed by section per
+  night** (5 by default, shared with the whole-file check), within the same **Stop starting new videos after** hours.
+- **Tested on real videos:** on subtitles cut in 312 ways (scenes removed or added, both, with a frame-rate change, a
+  block before the start), the sections were right every time and their timing within a few hundredths of a second;
+  good subtitles were left as one timing (the only jumps found in them were real, at act breaks), and subtitles for
+  another episode were always left alone.
+
 ## Safety
 
 - **Reversible and idempotent**: the original subtitle is always kept; every change is recorded with where it came from,
@@ -246,7 +276,8 @@ has no effect yet.
    wording differs from what is said (done); wording audit of checked subtitles and, a few per night, the existing library (done);
    subtitle editor with audio playback (done).
 3. Full transcription: last-resort subtitles (done), whole-file check of doubtful subtitles (done), automatic
-   confidence calibration (done, off by default); later, precise timing from the full transcript.
+   confidence calibration (done, off by default), timing fixed by section for subtitles made for a different cut (done,
+   off by default).
 4. More languages; later, subtitles in a different language from the audio.
 
 ## What it stores and sends
