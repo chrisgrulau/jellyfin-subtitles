@@ -9,6 +9,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **One budget page with Shoal AI:** when Shoal AI is installed and allows it ("Allow Subtitles to use this budget for
+  paid speech-to-text", on by default there), paid speech-to-text (Deepgram, OpenAI) is kept within the currency,
+  monthly limit and per-service limits set on Shoal AI's page. Each call is still priced here, then reserved and
+  recorded on Shoal AI's ledger through its spending entry point (common's contract version 1); this month's spending
+  so far here is reported there once, so the month counts it. The Spending limit section shows "Spending limits are
+  set in Shoal AI" with this month's figures and a link, and hides the currency, monthly limit, "No spending limit" and
+  the taxes-and-fees percentage (kept as they were). `GET Subtitles/Spending` returns Shoal AI's figures with `SetInAi`.
+  API keys stay here. Without Shoal AI, or if it doesn't allow it or is a different version, everything works as before
+  with this plugin's own settings; a call is only ever counted in one place.
+
 - **Speech-to-text retries**: a call to Deepgram, OpenAI or a local service that fails for a passing reason (no
   connection, a timeout, a server error, a 429 asking to wait a minute or less) is tried again up to 5 times with
   exponential back-off and jitter (about 2, 4, 8, 16 s; each wait at most 60 s, a stated wait honoured up to that; none

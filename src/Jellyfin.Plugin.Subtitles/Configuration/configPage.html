@@ -378,6 +378,10 @@
 
           <details class="subs-section" open>
             <summary>Spending limit</summary>
+          <div id="SpendingShared" hidden style="margin-top:1em">
+            <p><strong>Spending limits are set in Shoal AI.</strong> Paid speech-to-text (Deepgram, OpenAI) is kept within the currency, monthly limit and per-service limits on <a id="SpendingSharedLink" href="#/configurationpage?name=Shoal%20AI">Shoal AI's settings page</a>. The API keys stay here.</p>
+          </div>
+          <div id="SpendingOwn">
           <div class="selectContainer" style="margin-top:1.5em">
             <label class="selectLabel" for="Currency">Currency</label>
             <select is="emby-select" id="Currency"></select>
@@ -395,6 +399,7 @@
             </label>
             <div class="fieldDescription checkboxFieldDescription">Not recommended.</div>
           </div>
+          </div>
           <div id="SpendingNow" class="subs-muted" style="margin:.5em 0 1em"></div>
           <div id="NoLimitWarning" class="subs-warning" hidden>With no limit, spending on cloud services is only capped by what you've set with each provider. A full transcript of a whole library can cost a lot.</div>
 
@@ -403,11 +408,13 @@
           <details class="subs-advanced">
             <summary>Advanced settings</summary>
             <div class="subs-warning">These settings change how results are judged. The defaults are tuned for good results; changing them without understanding the effect can make matches or timing worse.</div>
+            <div id="ExtraChargesOwn">
             <h3 class="sectionTitle">Costs</h3>
             <div class="inputContainer">
               <label class="inputLabel inputLabelUnfocused" for="ExtraChargesPercent">Add to provider prices (%)</label>
               <input id="ExtraChargesPercent" type="number" min="0" max="100" step="0.1" is="emby-input" />
               <div class="fieldDescription">For taxes charged on overseas services (such as GST) or your card's foreign-transaction fee, so limits match what you actually pay. Default 0.</div>
+            </div>
             </div>
 
             <h3 class="sectionTitle">Checking</h3>
@@ -615,6 +622,19 @@
           }, function () { libraries = null; box.className = 'subs-muted'; box.textContent = 'The libraries couldn\'t be listed; they are left as they were.'; });
         }
 
+        // Whether Shoal AI keeps the budget (from the spending reply): this plugin's own spending settings are then hidden
+        // and kept as they were, for when Shoal AI isn't installed or doesn't allow it
+        var sharedBudget = false;
+        var sharedNames = { deepgram: 'Deepgram', 'openai-speech': 'OpenAI', openai: 'OpenAI', anthropic: 'Claude' };
+
+        function showSharedBudget(shared) {
+          sharedBudget = !!shared;
+          page.querySelector('#SpendingShared').hidden = !sharedBudget;
+          page.querySelector('#SpendingOwn').hidden = sharedBudget;
+          page.querySelector('#ExtraChargesOwn').hidden = sharedBudget;
+          page.querySelector('#NoLimitWarning').hidden = sharedBudget || !page.querySelector('#NoSpendingLimit').checked;
+        }
+
         function loadSpending() {
           var box = page.querySelector('#SpendingNow');
           return ApiClient.getJSON(ApiClient.getUrl('Subtitles/Spending')).then(function (s) {
@@ -622,11 +642,21 @@
               currencies = s.Currencies;
               fillCurrencies(page.querySelector('#Currency').value);
             }
+            showSharedBudget(s.SetInAi);
             var fmt = function (n) { return s.Currency + ' ' + Number(n).toFixed(n > 0 && n < 0.01 ? 4 : 2); };
+            if (s.SetInAi && s.Problem) {
+              box.textContent = 'Shoal AI\'s spending figures can\'t be read right now, so paid speech-to-text waits: ' + s.Problem;
+              return;
+            }
             var spent = s.Spent == null ? 'unknown (no current exchange rates)' : fmt(s.Spent);
-            var parts = ['This month: ' + spent + (s.Limit == null ? ' (no limit)' : ' of ' + fmt(s.Limit))];
+            var parts = ['This month: ' + spent + (s.Limit == null ? ' (no limit)' : ' of ' + fmt(s.Limit)) + (s.SetInAi ? ' (set in Shoal AI, all its paid services)' : '')];
             var per = Object.keys(s.PerProvider || {});
-            if (per.length) { parts.push(per.map(function (k) { return k + ' ' + fmt(s.PerProvider[k]); }).join(', ')); }
+            var limits = s.ProviderLimits || {};
+            if (per.length) {
+              parts.push(per.map(function (k) {
+                return (s.SetInAi ? (sharedNames[k] || k) : k) + ' ' + fmt(s.PerProvider[k]) + (limits[k] != null ? ' of ' + fmt(limits[k]) : '');
+              }).join(', '));
+            }
             parts.push(s.RatesDate ? 'exchange rates from ' + s.RatesDate + (s.RatesFresh ? '' : ' (too old: paid services in other currencies wait)') : 'no exchange rates yet (fetched daily from the European Central Bank)');
             if (s.PricesVersion) { parts.push('prices as of ' + s.PricesVersion); }
             box.textContent = parts.join(' · ');
@@ -1320,7 +1350,7 @@
 
         function refreshWarnings() {
           var noLimit = page.querySelector('#NoSpendingLimit').checked;
-          page.querySelector('#NoLimitWarning').hidden = !noLimit;
+          page.querySelector('#NoLimitWarning').hidden = !noLimit || sharedBudget;
           page.querySelector('#MonthlyBudget').disabled = noLimit;
           Array.prototype.forEach.call(page.querySelectorAll('.subs-currency'), function (e) { e.textContent = page.querySelector('#Currency').value; });
           var generating = page.querySelector('#GenerateMissing').checked;

@@ -11,7 +11,8 @@ namespace Jellyfin.Plugin.Subtitles.SpeechToText;
 /// A paid speech-to-text service kept within the spending limits, through the shared <see cref="MeteredCall"/>: each
 /// call's cost (audio length × the published price) is reserved before it is made and settled afterwards, or released if
 /// the call failed. A call whose price or cost in the user's currency is unknown, or that would go over a limit, isn't
-/// made.
+/// made. The limits are Shoal AI's when it keeps this plugin's budget, else this plugin's own (see
+/// <see cref="Spending.Meter"/>); the call is priced here either way.
 /// </summary>
 internal sealed class MeteredSpeechToText : ISpeechToText
 {
@@ -37,7 +38,7 @@ internal sealed class MeteredSpeechToText : ISpeechToText
     /// <param name="inner">The paid service.</param>
     /// <param name="model">The model it uses (for the price).</param>
     /// <param name="spending">Prices, ledger and rates.</param>
-    /// <param name="limits">The spending limits.</param>
+    /// <param name="limits">This plugin's own spending limits (used when Shoal AI doesn't keep the budget).</param>
     /// <param name="purpose">What the calls are for (<c>subtitles.sync</c> …).</param>
     public MeteredSpeechToText(ISpeechToText inner, string model, Spending spending, SpendLimits limits, string purpose)
     {
@@ -63,9 +64,7 @@ internal sealed class MeteredSpeechToText : ISpeechToText
 
         var prices = _spending.Prices;
         return MeteredCall.RunAsync(
-            _spending.Ledger,
-            _limits,
-            _spending.Rates.Current,
+            _spending.Meter(_limits),
             Id,
             _purpose,
             estimate,
@@ -99,9 +98,7 @@ internal sealed class MeteredSpeechToText : ISpeechToText
 
         var prices = _spending.Prices;
         return MeteredCall.RunAsync(
-            _spending.Ledger,
-            _limits,
-            _spending.Rates.Current,
+            _spending.Meter(_limits),
             Id,
             _purpose,
             estimate,

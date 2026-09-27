@@ -64,7 +64,7 @@ internal static class SpeechSelection
 
         var limits = Spending.LimitsOf(config);
         var paid = SpeechToTextFactory.IsPaid(tier.Provider);
-        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, SpendingLimit.AllowsPaidUsage(limits.Overall), config.AllowBuiltInDownload, keys, http, builtIn, forSubtitles);
+        var (service, why) = SpeechToTextFactory.Create(tier.Provider, tier.Model, config.LocalServiceUrl, spending.PaidMayBeUsed(limits), config.AllowBuiltInDownload, keys, http, builtIn, forSubtitles);
         problem = why;
         if (service is null)
         {
