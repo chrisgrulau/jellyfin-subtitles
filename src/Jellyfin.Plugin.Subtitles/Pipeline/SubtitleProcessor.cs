@@ -82,6 +82,17 @@ public sealed class SubtitleProcessor
     }
 
     /// <summary>
+    /// Every result, in the order the page lists them: everything waiting for review first, however old, then the most
+    /// recent.
+    /// </summary>
+    /// <returns>The results.</returns>
+    public IReadOnlyList<SubtitleResult> Ordered()
+    {
+        var all = _results.All();
+        return [.. all.Where(r => r.PendingReview), .. all.Where(r => !r.PendingReview)];
+    }
+
+    /// <summary>
     /// Writes results still waiting to be saved (at the end of a run).
     /// </summary>
     public void FlushResults() => _results.Flush();
