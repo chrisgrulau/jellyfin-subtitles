@@ -88,7 +88,10 @@ text subtitle files beside your films and episodes. Each one's timing is compare
 matching where lines start against where speech starts, then, if that isn't clear-cut, by transcribing a few minutes
 with a free local speech-to-text service and matching the words. Corrections (a shift, and a frame-rate change if the
 subtitle was made for a PAL release) are applied or held for your review, and every change can be undone from the
-plugin page.
+plugin page. With many results, tick the ones to act on (or select every result matching the filter) and apply,
+decline, undo or check them again together; **Apply all waiting for review…** does the first for the whole filter
+after confirming the count. The work runs in the background with the same safety as each row's own buttons, and files
+changed since are skipped and listed.
 
 A second daily task (**Find missing subtitles**, or **Find missing now**) searches your subtitle providers, such as the
 OpenSubtitles plugin, for films and episodes that have no subtitle in your languages. The best candidates are

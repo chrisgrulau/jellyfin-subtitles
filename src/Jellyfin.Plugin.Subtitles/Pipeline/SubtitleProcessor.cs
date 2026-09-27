@@ -652,6 +652,113 @@ public sealed class SubtitleProcessor
     }
 
     /// <summary>
+    /// Applies every line finding that carries a suggestion (suggested wording, a missing line added), as
+    /// <see cref="ApplyFinding"/> would one by one, in one write; lines with nothing heard are only removed one at a time,
+    /// so they, and any finding whose line has changed since, keep waiting. A timing correction or clean-up waiting for
+    /// review is left as it is. The first original is kept, so Undo brings it back.
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result and how many findings were applied.</returns>
+    /// <exception cref="InvalidOperationException">No suggestion to apply, none could be applied, or the file changed since.</exception>
+    public (SubtitleResult Result, int Applied) ApplyFindings(string id)
+    {
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        if (!r.Findings.Any(HasSuggestion))
+        {
+            throw new InvalidOperationException("No line to review here has a suggestion to apply.");
+        }
+
+        var bytes = File.ReadAllBytes(r.SubtitlePath);
+        var document = SubtitleReader.Read(bytes, r.SubtitlePath) ?? throw new InvalidOperationException("The subtitle can no longer be read.");
+        var applied = new HashSet<int>();
+        int reworded = 0, fixedLines = 0;
+        for (var i = 0; i < r.Findings.Count; i++)
+        {
+            var f = r.Findings[i];
+            if (!HasSuggestion(f))
+            {
+                continue;
+            }
+
+            if (DiscrepancyReview.IsWholeFile(f))
+            {
+                if (DiscrepancyReview.ApplyOne(document, f) is ({ } done, null))
+                {
+                    document = done;
+                    applied.Add(i);
+                    fixedLines++;
+                }
+            }
+            else
+            {
+                var (done, n) = WordingAudit.Apply(document, [f]);
+                if (n > 0)
+                {
+                    document = done;
+                    applied.Add(i);
+                    reworded++;
+                }
+            }
+        }
+
+        if (applied.Count == 0)
+        {
+            throw new InvalidOperationException("None of the suggestions could be applied: their lines have changed since they were checked. Open the editor instead.");
+        }
+
+        try
+        {
+            var (backup, written) = _files.Replace(r.SubtitlePath, r.Fingerprint, SubtitleWriter.ToBytes(document));
+            var counts = new Dictionary<string, int>(r.Cleaned, StringComparer.Ordinal);
+            if (reworded > 0)
+            {
+                counts[RewordedKind] = counts.GetValueOrDefault(RewordedKind) + reworded;
+            }
+
+            if (fixedLines > 0)
+            {
+                counts[DiscrepancyReview.FixedKind] = counts.GetValueOrDefault(DiscrepancyReview.FixedKind) + fixedLines;
+            }
+
+            return (Save(r with
+            {
+                Backup = r.Changed ? r.Backup ?? backup : backup,
+                Fingerprint = written,
+                Changed = true,
+                Cleaned = counts,
+                Findings = [.. r.Findings.Where((_, i) => !applied.Contains(i))],
+                Time = _clock.GetUtcNow(),
+            }), applied.Count);
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException(ex.Message, ex);
+        }
+    }
+
+    /// <summary>
+    /// Declines every line finding: nothing is changed, and none of them waits for review any more (a timing correction or
+    /// clean-up waiting for review is left as it is).
+    /// </summary>
+    /// <param name="id">Result id.</param>
+    /// <returns>The updated result.</returns>
+    /// <exception cref="InvalidOperationException">No such result, or no findings.</exception>
+    public SubtitleResult DeclineFindings(string id)
+    {
+        var r = _results.FindForRequest(id) ?? throw new InvalidOperationException("No such result.");
+        if (r.Findings.Count == 0)
+        {
+            throw new InvalidOperationException("There are no lines to review for this subtitle.");
+        }
+
+        return Save(r with { Findings = [], Time = _clock.GetUtcNow() });
+    }
+
+    // A finding "Apply all suggestions" applies: one with a suggestion that isn't a line with nothing heard
+    private static bool HasSuggestion(LineFinding f)
+        => f.Suggestion is not null && !(DiscrepancyReview.IsWholeFile(f) && f.Kind == DiscrepancyFinder.Extra);
+
+    /// <summary>
     /// Asks for a subtitle file to be compared whole with a full transcript of its video on the next run of the full
     /// transcripts task (the request returns at once). A file the run can't check is refused with the reason, by the
     /// run's own rules (see <see cref="WholeFileChecker.Ineligible"/>), so nothing waits in the queue for ever.

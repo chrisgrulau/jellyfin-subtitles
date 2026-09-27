@@ -123,6 +123,18 @@
       #SubtitlesConfigPage .subs-outcome { margin: .3em 0; font-size: .9em; white-space: normal; }
       #SubtitlesConfigPage .subs-outcome-bad { padding: .3em .6em; border-radius: 4px; background: rgba(255,112,67,.15); border-left: 3px solid var(--subs-bad); }
       #SubtitlesConfigPage .subs-button-row + .subs-outcome { text-align: center; }
+      /* Bulk actions: a tick per row, a bar with the actions for what is ticked, and the job's progress */
+      #SubtitlesConfigPage .subs-select { width: 1.6em; }
+      #SubtitlesConfigPage .subs-select input { width: 1.1em; height: 1.1em; margin: .15em 0 0; cursor: pointer; accent-color: var(--subs-accent); }
+      #SubtitlesConfigPage .subs-bulk { display: flex; flex-wrap: wrap; gap: .4em 1em; align-items: center; padding: .5em .75em; margin: .5em 0; border: 1px solid var(--subs-accent); border-radius: 6px; background: var(--subs-softer); }
+      #SubtitlesConfigPage .subs-bulk .subs-actions { flex-wrap: wrap; }
+      #SubtitlesConfigPage .subs-bulk-all { flex-basis: 100%; font-size: .9em; }
+      #SubtitlesConfigPage .subs-bulk-all .subs-btn { margin-left: .5em; }
+      #SubtitlesConfigPage .subs-progress { display: flex; gap: .5em 1em; align-items: center; flex-wrap: wrap; margin: .5em 0; }
+      #SubtitlesConfigPage .subs-progress progress { flex: 1 1 12em; max-width: 24em; accent-color: var(--subs-accent); }
+      #SubtitlesConfigPage .subs-progress > span { flex: 1 1 16em; }
+      #SubtitlesConfigPage #BulkProgress ul { margin: .3em 0; padding-left: 1.2em; font-size: .9em; }
+      #SubtitlesConfigPage #BulkProgress details > summary { cursor: pointer; }
       #SubtitlesConfigPage .subs-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
       @media (max-width: 720px) {
         #SubtitlesConfigPage .subs-tier { grid-template-columns: 1fr; }
@@ -134,7 +146,10 @@
         #SubtitlesConfigPage .subs-results td { border: 0; padding: .2em 0; }
         #SubtitlesConfigPage .subs-results td[data-label]:not(.subs-video)::before { content: attr(data-label) ": "; opacity: .6; font-size: .85em; }
         #SubtitlesConfigPage .subs-toggle { position: absolute; top: .4em; right: .4em; width: auto; }
-        #SubtitlesConfigPage .subs-video { padding-right: 2em; }
+        #SubtitlesConfigPage .subs-video { padding-right: 4.2em; }
+        #SubtitlesConfigPage .subs-results td.subs-select { position: absolute; top: .55em; right: 2.6em; width: auto; }
+        #SubtitlesConfigPage .subs-bulk { flex-direction: column; align-items: stretch; }
+        #SubtitlesConfigPage .subs-bulk-all .subs-btn { display: block; margin: .4em 0 0; }
         #SubtitlesConfigPage .subs-detail > td { padding: .5em .6em; }
         #SubtitlesConfigPage .subs-actions-cell { width: auto; }
         #SubtitlesConfigPage .subs-actions-cell .subs-actions { flex-wrap: wrap; justify-content: flex-start; }
@@ -160,7 +175,27 @@
           <div class="subs-bar" style="margin-top:.5em">
             <label class="subs-muted">Show <select id="ResFilter" class="subs-filter"><option value="">Everything</option></select></label>
             <input id="ResSearch" type="search" class="subs-filter" placeholder="Find a video" aria-label="Find a video" />
+            <button type="button" id="ResApplyWaiting" class="subs-btn" title="Apply what waits for review for every subtitle matching the filter and search (you confirm the count first)" hidden>Apply all waiting for review…</button>
           </div>
+          <div id="BulkConfirm" class="subs-warning" hidden>
+            <p id="BulkConfirmText"></p>
+            <div class="subs-button-row">
+              <button is="emby-button" type="button" id="BulkGo" class="raised"><span>Yes, go ahead</span></button>
+              <button is="emby-button" type="button" id="BulkCancel" class="raised button-alt"><span>Cancel</span></button>
+            </div>
+          </div>
+          <div id="BulkBar" class="subs-bulk" role="region" aria-label="Selected results" hidden>
+            <strong id="BulkCount"></strong>
+            <div class="subs-actions">
+              <button type="button" class="subs-btn subs-primary bulk-act" data-action="Apply" title="Apply everything waiting for review for the selected subtitles">Apply</button>
+              <button type="button" class="subs-btn bulk-act" data-action="Decline" title="Decline everything waiting for review for the selected subtitles: nothing is changed">Decline</button>
+              <button type="button" class="subs-btn bulk-act" data-action="Undo" title="Put the originals back (or remove added subtitles) for the selected subtitles">Undo</button>
+              <button type="button" class="subs-btn bulk-act" data-action="CheckAgain" title="Check the selected subtitles again on the next run">Check again</button>
+              <button type="button" id="BulkClear" class="subs-btn">Clear selection</button>
+            </div>
+            <div id="BulkAllBanner" class="subs-bulk-all" hidden></div>
+          </div>
+          <div id="BulkProgress" role="region" aria-label="Bulk action" hidden></div>
           <details class="subs-howto">
             <summary>How it works</summary>
             <p class="subs-muted">Subtitle files beside your films and episodes are checked daily, and subtitles are found for videos that have none in your languages (Scheduled Tasks → Shoal); new videos are handled a few minutes after they are added; if switched on, subtitles are generated for videos nothing could be found for. Corrections follow the timing setting below; every change keeps the original, and every added or generated subtitle can be removed with Undo. ▸ opens a row's details: the files, what changed, lines to review and the numbers behind the result. Hover over (or tap) an icon to see what it counts.</p>
@@ -684,7 +719,7 @@
         function settle(request, done, okMsg) {
           var reload = function () { return loadResults().then(null, function () {}); };
           return request.then(function (r) {
-            return reload().then(function () { done(true, r && r.status === 202 ? 'Queued — runs shortly.' : okMsg); });
+            return reload().then(function () { done(true, r && r.status === 202 ? 'Queued — runs shortly.' : typeof okMsg === 'function' ? okMsg(r) : okMsg); });
           }, function (err) {
             return problemText(err).then(function (msg) { return reload().then(function () { done(false, msg); }); });
           });
@@ -1048,7 +1083,11 @@
           var findings = r.Findings || [];
           if (!findings.length) { return ''; }
           var all = !!results.allFindings[r.Id];
-          return '<h4 class="subs-dh">Lines to review (' + findings.length + ')</h4><ul class="subs-findings">' + findings.map(function (f, i) {
+          var suggested = findings.filter(function (f) { return f.Suggestion && !(f.Kind === 'extra' && isWhole(f)); }).length;
+          var together = findings.length > 1 ? '<div class="subs-actions">' +
+            (suggested ? button('fd-apply-all subs-primary', 'Apply all suggestions (' + suggested + ')', r.Id, 'Apply every suggested fix in one go (lines with nothing heard are removed only one by one)') : '') +
+            button('fd-decline-all', 'Decline all (' + findings.length + ')', r.Id, 'Decline every line to review: nothing is changed') + '</div>' : '';
+          return '<h4 class="subs-dh">Lines to review (' + findings.length + ')</h4>' + together + '<ul class="subs-findings">' + findings.map(function (f, i) {
             if (!all && i >= findingsShown) { return ''; }
             var names = findingNames[f.Kind];
             var what = isWhole(f) ? (names ? names[0] : f.Kind) : f.Kind + ' (wording audit)';
@@ -1110,6 +1149,7 @@
         function row(item) {
           var r = item.Result, v = item.View, open = !!results.open[r.Id], did = 'det-' + r.Id;
           return '<tr class="subs-row' + (open ? ' subs-open' : '') + '" data-row="' + esc(r.Id) + '">' +
+            '<td class="subs-select"><input type="checkbox" class="res-sel" data-id="' + esc(r.Id) + '"' + (isSelected(r.Id) ? ' checked' : '') + ' aria-label="Select ' + esc(v.Headline + (v.Subline ? ' – ' + v.Subline : '')) + '" /></td>' +
             '<td class="subs-toggle"><button type="button" class="res-toggle" data-id="' + esc(r.Id) + '" aria-expanded="' + open + '" aria-controls="' + esc(did) + '" title="Details" aria-label="Details for ' + esc(v.Headline) + '">' + (open ? '▾' : '▸') + '</button></td>' +
             '<td class="subs-video" data-label="Video"><div class="subs-head">' + esc(v.Headline) + (v.Language ? ' <span class="subs-lang" title="Subtitle language">' + esc(v.Language) + '</span>' : '') + '</div>' +
               (v.Subline ? '<div class="subs-sub">' + esc(v.Subline) + '</div>' : '') + '</td>' +
@@ -1118,7 +1158,7 @@
             '<td data-label="Details">' + esc(v.Summary) + (v.Notice ? '<div class="subs-notice">' + esc(v.Notice) + '</div>' : '') + '</td>' +
             '<td data-label="When" class="subs-when">' + timeTag(r.Time, v.When) + '</td>' +
             '<td class="subs-actions-cell"><div class="subs-actions">' + mainActions(r, v) + '</div></td></tr>' +
-            '<tr class="subs-detail" id="' + esc(did) + '"' + (open ? '' : ' hidden') + '><td colspan="7">' + (open ? detail(r, v) : '') + '</td></tr>';
+            '<tr class="subs-detail" id="' + esc(did) + '"' + (open ? '' : ' hidden') + '><td colspan="8">' + (open ? detail(r, v) : '') + '</td></tr>';
         }
 
         // Results are paged on the server: the first page, then Show more; a refresh reloads as many as are shown
@@ -1138,13 +1178,14 @@
           }
           page.querySelector('#ResultsSummary').textContent = t && t.All ? summary.join(' · ') : 'Nothing checked yet.';
           page.querySelector('#Results').innerHTML = results.items.length
-            ? '<thead><tr><th><span class="subs-sr">Details</span></th><th>Video</th><th>Result</th><th>Changes</th><th>Details</th><th>When</th><th><span class="subs-sr">Actions</span></th></tr></thead><tbody>' + results.items.map(row).join('') + '</tbody>'
+            ? '<thead><tr><th class="subs-select"><input type="checkbox" id="ResAll" aria-label="Select all shown" /></th><th><span class="subs-sr">Details</span></th><th>Video</th><th>Result</th><th>Changes</th><th>Details</th><th>When</th><th><span class="subs-sr">Actions</span></th></tr></thead><tbody>' + results.items.map(row).join('') + '</tbody>'
             : '';
           var more = page.querySelector('#ResMore');
           more.hidden = results.next == null;
           page.querySelector('#ResCount').textContent = results.items.length && results.total > results.items.length ? 'Showing ' + results.items.length + ' of ' + results.total : '';
           if (t && t.All && !results.total) { page.querySelector('#ResCount').textContent = 'Nothing matches.'; }
           refreshWarnings();
+          refreshCounts();
           placeOutcomes();
         }
 
@@ -1169,15 +1210,216 @@
         }
 
         var searchTimer = null;
-        page.querySelector('#ResFilter').addEventListener('change', function () { results.items = []; loadResults(false); });
+        page.querySelector('#ResFilter').addEventListener('change', function () { results.items = []; clearSelection(); loadResults(false); });
         page.querySelector('#ResSearch').addEventListener('input', function () {
           clearTimeout(searchTimer);
-          searchTimer = setTimeout(function () { results.items = []; loadResults(false); }, 300);
+          searchTimer = setTimeout(function () { results.items = []; clearSelection(); loadResults(false); }, 300);
         });
         page.querySelector('#ResMore').addEventListener('click', function () {
           var done = busy(page.querySelector('#ResMore'), 'Loading…');
           loadResults(true).then(function () { done(true); }, function (err) { return problemText(err).then(function (msg) { done(false, msg); }); });
         });
+
+        // ---- Bulk actions: rows are ticked one by one (or every result matching the filter and search, on the server), then
+        // one action runs as a background job on the server, which the page polls. The selection survives Show more and
+        // refreshes, and is cleared when the filter or search changes ----
+        var sel = { all: false, ids: {}, except: {}, counts: null, timer: null, ticket: 0 };
+        var bulk = { job: null, poll: null, watching: false, limit: skippedShown, open: null, confirm: null };
+        var bulkWords = { Apply: ['Apply', 'Applying'], Decline: ['Decline', 'Declining'], Undo: ['Undo', 'Undoing'], CheckAgain: ['Check again', 'Queuing'] };
+
+        function isSelected(id) { return sel.all ? !sel.except[id] : !!sel.ids[id]; }
+
+        function selectedCount() { return sel.all ? Math.max(0, results.total - Object.keys(sel.except).length) : Object.keys(sel.ids).length; }
+
+        function currentFilter() { return { Filter: page.querySelector('#ResFilter').value, Q: page.querySelector('#ResSearch').value.trim() }; }
+
+        function selectionBody() { return sel.all ? { Filter: currentFilter(), Except: Object.keys(sel.except) } : { Ids: Object.keys(sel.ids) }; }
+
+        // A confirmation waiting for the old selection or filter goes with it
+        function clearSelection() {
+          sel.all = false; sel.ids = {}; sel.except = {}; sel.counts = null; sel.ticket++; clearTimeout(sel.timer);
+          page.querySelector('#BulkConfirm').hidden = true;
+          bulk.confirm = null;
+        }
+
+        function bulkRunning() { return !!(bulk.job && !bulk.job.Finished); }
+
+        function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many || one + 's'); }
+
+        function renderBulk() {
+          var n = selectedCount(), c = sel.counts, running = bulkRunning();
+          Array.prototype.forEach.call(page.querySelectorAll('#Results .res-sel'), function (x) { x.checked = isSelected(x.getAttribute('data-id')); });
+          var shown = results.items.length, ticked = results.items.filter(function (i) { return isSelected(i.Result.Id); }).length;
+          var head = page.querySelector('#ResAll');
+          if (head) { head.checked = shown > 0 && ticked === shown; head.indeterminate = ticked > 0 && ticked < shown; }
+          var quick = page.querySelector('#ResApplyWaiting');
+          if (!quick.classList.contains('subs-busy')) { quick.hidden = !(results.tally && results.tally.Waiting); quick.disabled = running; }
+          var bar = page.querySelector('#BulkBar');
+          bar.hidden = n === 0;
+          if (running) { bar.setAttribute('aria-busy', 'true'); } else { bar.removeAttribute('aria-busy'); }
+          if (!n) { return; }
+          page.querySelector('#BulkCount').textContent = (c ? c.Selected : n) + ' selected';
+          Object.keys(bulkWords).forEach(function (a) {
+            var b = bar.querySelector('.bulk-act[data-action="' + a + '"]');
+            if (b.classList.contains('subs-busy')) { return; }
+            var k = c ? c[a] : null;
+            b.textContent = bulkWords[a][0] + (k == null ? '' : ' (' + k + ')');
+            b.disabled = running || !k;
+          });
+          var banner = page.querySelector('#BulkAllBanner');
+          if (sel.all) {
+            banner.hidden = false;
+            banner.textContent = 'All ' + plural(c ? c.Selected : n, 'result') + ' matching this filter are selected.';
+          } else if (shown && ticked === shown && results.total > shown) {
+            banner.hidden = false;
+            banner.innerHTML = 'All ' + shown + ' shown are selected.<button type="button" id="BulkSelectAll" class="subs-btn">Select all ' + results.total + ' matching this filter</button>';
+          } else {
+            banner.hidden = true;
+          }
+        }
+
+        // How many of the selection each action applies to, from the server (a filter's selection isn't all loaded)
+        function refreshCounts() {
+          clearTimeout(sel.timer);
+          if (!selectedCount()) { sel.counts = null; renderBulk(); return; }
+          var ticket = ++sel.ticket;
+          sel.timer = setTimeout(function () {
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/Bulk/Preview'), data: JSON.stringify(selectionBody()), contentType: 'application/json', dataType: 'json' })
+              .then(function (c) { if (ticket === sel.ticket) { sel.counts = c; renderBulk(); } }, function () {});
+          }, 200);
+          renderBulk();
+        }
+
+        function showBulk() {
+          var p = bulk.job, box = page.querySelector('#BulkProgress');
+          box.hidden = !p;
+          if (!p) { box.innerHTML = ''; return; }
+          var w = bulkWords[p.Action] || [p.Action, p.Action];
+          var head = p.State === 'Waiting' ? 'Waiting to start: ' + (p.WaitingFor || 'other work on subtitle files is running') + '. It starts as soon as that has finished.'
+            : !p.Finished ? w[1] + ' ' + Math.min(p.Done + 1, p.Total) + ' of ' + p.Total + '…'
+            : p.Summary || '';
+          var issues = (p.Skipped || []).map(function (i) { return ['', i]; }).concat((p.Failed || []).map(function (i) { return ['Failed: ', i]; }));
+          var open = bulk.open == null ? p.Finished : bulk.open;
+          box.innerHTML = '<div class="subs-progress">' +
+            (p.Finished ? '' : '<progress max="' + Math.max(1, p.Total) + '"' + (p.State === 'Waiting' ? '' : ' value="' + p.Done + '"') + ' aria-label="' + esc(w[1]) + ' progress"></progress>') +
+            '<span' + (p.Finished && (p.Failed || []).length ? ' class="subs-outcome-bad"' : '') + '>' + esc(head) + '</span>' +
+            (p.Finished ? '<button type="button" class="subs-btn bulk-dismiss">Dismiss</button>' : '<button type="button" class="subs-btn bulk-stop">Stop</button>') + '</div>' +
+            (issues.length ? '<details' + (open ? ' open' : '') + '><summary>Skipped or failed (' + issues.length + ')</summary><ul>' + issues.slice(0, bulk.limit).map(function (x) {
+              return '<li><strong>' + esc(x[1].Headline) + '</strong>: ' + esc(x[0] + x[1].Reason) + '</li>';
+            }).join('') + '</ul>' + (issues.length > bulk.limit ? '<button type="button" class="subs-btn bulk-more">Show more</button>' : '') + '</details>' : '');
+        }
+
+        // Shows a job and polls it until it has finished; then the selection is cleared and the list read again
+        function trackBulk(p) {
+          if (bulk.job && bulk.job.Id !== p.Id) { bulk.limit = skippedShown; bulk.open = null; }
+          bulk.job = p;
+          clearTimeout(bulk.poll);
+          showBulk();
+          renderBulk();
+          if (!p.Finished) {
+            bulk.poll = setTimeout(function () {
+              if (!document.body.contains(page)) { return; }
+              ApiClient.getJSON(ApiClient.getUrl('Subtitles/Results/Bulk/' + p.Id)).then(trackBulk, function () { bulk.poll = setTimeout(function () { trackBulk(p); }, 5000); });
+            }, 1000);
+          } else if (bulk.watching) {
+            bulk.watching = false;
+            clearSelection();
+            announce(p.Summary || 'Finished.');
+            loadResults().then(null, function () {});
+          }
+        }
+
+        function startBulk(action, body, b) {
+          var done = busy(b, 'Starting…');
+          body.Action = action;
+          return ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/Bulk'), data: JSON.stringify(body), contentType: 'application/json', dataType: 'json' }).then(function (p) {
+            done(true);
+            bulk.watching = true;
+            announce((bulkWords[action] || [action, action])[1] + ' ' + plural(p.Total, 'subtitle') + '…');
+            trackBulk(p);
+            return true;
+          }, function (err) { return problemText(err).then(function (msg) { done(false, msg); return false; }); });
+        }
+
+        // A step to confirm, stating the count (Apply all waiting, and Undo)
+        function askBulk(action, body, text, go) {
+          bulk.confirm = { action: action, body: body };
+          page.querySelector('#BulkConfirmText').textContent = text;
+          page.querySelector('#BulkGo span').textContent = go;
+          page.querySelector('#BulkConfirm').hidden = false;
+          page.querySelector('#BulkGo').focus();
+        }
+
+        page.querySelector('#Results').addEventListener('change', function (e) {
+          var t = e.target;
+          if (t.classList.contains('res-sel')) {
+            var id = t.getAttribute('data-id');
+            if (sel.all) { if (t.checked) { delete sel.except[id]; } else { sel.except[id] = true; } } else if (t.checked) { sel.ids[id] = true; } else { delete sel.ids[id]; }
+            if (sel.all && !selectedCount()) { clearSelection(); }
+            refreshCounts();
+          } else if (t.id === 'ResAll') {
+            if (!t.checked && sel.all) { clearSelection(); } else {
+              results.items.forEach(function (i) {
+                var rid = i.Result.Id;
+                if (sel.all) { delete sel.except[rid]; } else if (t.checked) { sel.ids[rid] = true; } else { delete sel.ids[rid]; }
+              });
+            }
+            refreshCounts();
+          }
+        });
+
+        page.querySelector('#BulkBar').addEventListener('click', function (e) {
+          if (e.target.closest('#BulkSelectAll')) { sel.all = true; sel.ids = {}; sel.except = {}; sel.counts = null; refreshCounts(); return; }
+          if (e.target.closest('#BulkClear')) { clearSelection(); renderBulk(); return; }
+          var b = e.target.closest('.bulk-act');
+          if (!b || b.disabled) { return; }
+          var action = b.getAttribute('data-action');
+          if (action === 'Undo') {
+            var n = sel.counts ? sel.counts.Undo : selectedCount();
+            askBulk('Undo', selectionBody(), 'This puts back the original of (or removes the subtitle this plugin added for) ' + plural(n, 'selected subtitle') + '. A file changed since is left alone and listed. Go ahead?', 'Yes, undo ' + n);
+            return;
+          }
+          startBulk(action, selectionBody(), b);
+        });
+
+        page.querySelector('#ResApplyWaiting').addEventListener('click', function () {
+          var b = this, f = currentFilter();
+          var done = busy(b, 'Counting…');
+          var body = { Filter: f, Except: [] };
+          ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/Bulk/Preview'), data: JSON.stringify(body), contentType: 'application/json', dataType: 'json' }).then(function (c) {
+            if (!c.Apply) { done(true, 'Nothing ' + (f.Filter || f.Q ? 'matching this filter and search ' : '') + 'has anything to apply.'); return; }
+            done(true);
+            var n = Math.min(c.Apply, c.Max);
+            askBulk('Apply', body, 'This applies what waits for review for ' + plural(c.Apply, 'subtitle') + (f.Filter || f.Q ? ' matching this filter and search' : '') +
+              (c.Apply > c.Max ? ' (' + c.Max + ' now; run it again for the rest)' : '') +
+              ', each as its own Apply would: the original is kept, so Undo brings it back, and a file changed since is skipped and listed. Go ahead?', 'Yes, apply ' + n);
+          }, function (err) { return problemText(err).then(function (msg) { done(false, msg); }); });
+        });
+
+        page.querySelector('#BulkGo').addEventListener('click', function () {
+          var c = bulk.confirm;
+          if (!c) { return; }
+          startBulk(c.action, c.body, this).then(function (ok) { if (ok) { page.querySelector('#BulkConfirm').hidden = true; bulk.confirm = null; } });
+        });
+        page.querySelector('#BulkCancel').addEventListener('click', function () { page.querySelector('#BulkConfirm').hidden = true; bulk.confirm = null; });
+
+        page.querySelector('#BulkProgress').addEventListener('toggle', function (e) { if (e.target.tagName === 'DETAILS') { bulk.open = e.target.open; } }, true);
+        page.querySelector('#BulkProgress').addEventListener('click', function (e) {
+          if (e.target.closest('.bulk-more')) { bulk.limit += skippedShown; bulk.open = true; showBulk(); return; }
+          if (e.target.closest('.bulk-dismiss')) { bulk.job = null; showBulk(); renderBulk(); return; }
+          var stop = e.target.closest('.bulk-stop');
+          if (stop && bulk.job) {
+            var done = busy(stop, 'Stopping…');
+            ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl('Subtitles/Results/Bulk/' + bulk.job.Id) }).then(function () { done(true); }, function (err) { return problemText(err).then(function (msg) { done(false, msg); }); });
+          }
+        });
+
+        // A job still running when the page opens is shown and followed
+        function loadBulk() {
+          return ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Subtitles/Results/Bulk') }).then(function (r) {
+            return r && r.status === 200 ? r.json() : null;
+          }).then(function (p) { if (p && !p.Finished) { bulk.watching = true; trackBulk(p); } }, function () {});
+        }
 
         // Speech-to-text health: a banner only for a systemic problem; every failure is listed under Advanced
         var speechErrors = { items: [], next: null };
@@ -1368,6 +1610,16 @@
           }
           var edit = e.target.closest('.res-edit');
           if (edit) { openEditor(edit.getAttribute('data-id'), null, busy(edit, 'Opening…')); return; }
+          var together = e.target.closest('.fd-apply-all, .fd-decline-all');
+          if (together) {
+            var applyAll = together.classList.contains('fd-apply-all');
+            settle(ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Subtitles/Results/' + together.getAttribute('data-id') + '/Findings/' + (applyAll ? 'Apply' : 'Decline')), dataType: applyAll ? 'json' : undefined }),
+              busy(together, applyAll ? 'Applying…' : 'Declining…'),
+              function (a) {
+                return applyAll && a ? 'Applied ' + a.Applied + ' line' + (a.Applied === 1 ? '' : 's') + '.' + (a.Left ? ' ' + a.Left + ' still to review (lines with nothing heard, or lines changed since).' : '') + ' Undo brings the original back.' : 'Declined: nothing was changed.';
+              });
+            return;
+          }
           var fd = e.target.closest('.fd-apply, .fd-decline, .fd-edit');
           if (fd) {
             var rid = fd.getAttribute('data-id'), index = parseInt(fd.getAttribute('data-index'), 10), time = fd.getAttribute('data-time');
@@ -1579,6 +1831,7 @@
             page.querySelector('#CheckEmbeddedSubtitles').checked = !!config.CheckEmbeddedSubtitles;
             page.querySelector('#MaxEmbeddedPerRun').value = config.MaxEmbeddedPerRun || 10;
             loadResults();
+            loadBulk();
             loadSpeechHealth();
             loadLibraries();
             renderTiers(config);
