@@ -208,29 +208,98 @@ public sealed class SpeechResilienceTests : IDisposable
     }
 
     [Fact]
-    public void The_stand_in_is_free_local_first_and_needs_consent_and_an_install_for_built_in()
+    public void The_chain_is_free_local_then_built_in_and_needs_consent_and_an_install_for_built_in()
     {
         const string Local = "http://127.0.0.1:8000/v1";
-        Assert.Equal("local", SpeechFallback.Choose(true, "deepgram", Local, builtInAllowed: true, builtInInstalled: true));
-        Assert.Equal("builtin", SpeechFallback.Choose(true, "deepgram", string.Empty, builtInAllowed: true, builtInInstalled: true));
-        Assert.Null(SpeechFallback.Choose(true, "deepgram", string.Empty, builtInAllowed: false, builtInInstalled: true));
-        Assert.Null(SpeechFallback.Choose(true, "deepgram", string.Empty, builtInAllowed: true, builtInInstalled: false));
-        Assert.Null(SpeechFallback.Choose(false, "deepgram", Local, builtInAllowed: true, builtInInstalled: true));
-        Assert.Equal("builtin", SpeechFallback.Choose(true, "local", Local, builtInAllowed: true, builtInInstalled: true));
-        Assert.Equal("local", SpeechFallback.Choose(true, "builtin", Local, builtInAllowed: true, builtInInstalled: true));
-        Assert.Null(SpeechFallback.Choose(true, "local", Local, builtInAllowed: false, builtInInstalled: false));
-        Assert.Null(SpeechFallback.Choose(true, "openai", "not an address", builtInAllowed: false, builtInInstalled: false));
+        Assert.Equal(["local", "builtin"], SpeechFallback.Chain(true, "deepgram", Local, builtInAllowed: true, builtInInstalled: true));
+        Assert.Equal(["builtin"], SpeechFallback.Chain(true, "openai", string.Empty, builtInAllowed: true, builtInInstalled: true));
+        Assert.Empty(SpeechFallback.Chain(true, "deepgram", string.Empty, builtInAllowed: false, builtInInstalled: true));
+        Assert.Empty(SpeechFallback.Chain(true, "deepgram", string.Empty, builtInAllowed: true, builtInInstalled: false));
+        Assert.Empty(SpeechFallback.Chain(false, "deepgram", Local, builtInAllowed: true, builtInInstalled: true));
 
-        // Never to a paid service, whatever is chosen
+        // A failing local service falls back to the built-in one, and a failing built-in one to the local service
+        Assert.Equal(["builtin"], SpeechFallback.Chain(true, "local", Local, builtInAllowed: true, builtInInstalled: true));
+        Assert.Equal(["local"], SpeechFallback.Chain(true, "builtin", Local, builtInAllowed: true, builtInInstalled: true));
+        Assert.Empty(SpeechFallback.Chain(true, "local", Local, builtInAllowed: false, builtInInstalled: false));
+        Assert.Empty(SpeechFallback.Chain(true, "openai", "not an address", builtInAllowed: false, builtInInstalled: false));
+
+        // Never to a paid service, never to the one that failed
         foreach (var chosen in new[] { "deepgram", "openai", "local", "builtin" })
         {
             foreach (var local in new[] { Local, string.Empty })
             {
-                var standIn = SpeechFallback.Choose(true, chosen, local, true, true);
-                Assert.True(standIn is null || !SpeechToTextFactory.IsPaid(standIn));
-                Assert.NotEqual(chosen, standIn);
+                var chain = SpeechFallback.Chain(true, chosen, local, true, true);
+                Assert.DoesNotContain(chain, SpeechToTextFactory.IsPaid);
+                Assert.DoesNotContain(chosen, chain);
             }
         }
+    }
+
+    [Fact]
+    public void A_service_is_usable_now_only_when_it_is_set_up()
+    {
+        Assert.True(SpeechFallback.Usable("deepgram", keySet: true, paidAllowed: true, null, false, false));
+        Assert.False(SpeechFallback.Usable("deepgram", keySet: false, paidAllowed: true, null, false, false));
+        Assert.False(SpeechFallback.Usable("openai", keySet: true, paidAllowed: false, null, false, false));
+        Assert.True(SpeechFallback.Usable("local", false, false, "http://127.0.0.1:8000/v1", false, false));
+        Assert.False(SpeechFallback.Usable("local", false, false, string.Empty, false, false));
+        Assert.True(SpeechFallback.Usable("builtin", false, false, null, builtInAllowed: true, builtInInstalled: true));
+        Assert.False(SpeechFallback.Usable("builtin", false, false, null, builtInAllowed: true, builtInInstalled: false));
+        Assert.False(SpeechFallback.Usable("removed-provider", true, true, "http://x/", true, true));
+    }
+
+    private static FallbackSpeechToText Chained(ISpeechToText chosen, params ISpeechToText[] standIns)
+        => new(chosen, [.. standIns.Select(s => (s.Id, (Func<ISpeechToText?>)(() => s)))]);
+
+    [Fact]
+    public async Task Paid_falls_back_to_local_then_to_built_in()
+    {
+        var local = new Flaky("local", Many(9, FailureClass.NoConnection));
+        var builtIn = new Flaky("builtin");
+        var service = Chained(new Flaky("deepgram", Fail(FailureClass.Transient, HttpStatusCode.BadGateway)), local, builtIn);
+
+        var t = await service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken);
+
+        Assert.Equal("builtin", t.Provider);
+        Assert.Equal("deepgram", t.FallbackFrom);
+        Assert.Equal("Deepgram kept failing (HTTP 502); used the built-in speech-to-text instead.", t.FallbackReason);
+        Assert.Equal(1, local.Calls);
+
+        // The local service is passed over for a while too
+        await service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken);
+        Assert.Equal(1, local.Calls);
+        Assert.Equal(2, builtIn.Calls);
+    }
+
+    [Fact]
+    public async Task Local_falls_back_to_built_in_and_built_in_to_local()
+    {
+        var fromLocal = await Chained(new Flaky("local", Fail(FailureClass.NoConnection)), new Flaky("builtin")).TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken);
+        Assert.Equal(("builtin", "local"), (fromLocal.Provider, fromLocal.FallbackFrom));
+        Assert.Equal("The local service couldn't be reached; used the built-in speech-to-text instead.", fromLocal.FallbackReason);
+
+        var broken = new SpeechToTextException("The built-in speech-to-text couldn't be started.") { Failure = FailureClass.Transient, ServiceBroken = true };
+        var builtIn = new Flaky("builtin", broken, broken);
+        var service = Chained(builtIn, new Flaky("local"));
+        var fromBuiltIn = await service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken);
+        Assert.Equal(("local", "builtin"), (fromBuiltIn.Provider, fromBuiltIn.FallbackFrom));
+        Assert.Equal("The built-in speech-to-text couldn't be started; used the local service instead.", fromBuiltIn.FallbackReason);
+
+        // A program that can't start isn't tried again in the same run
+        await service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken);
+        Assert.Equal(1, builtIn.Calls);
+    }
+
+    [Fact]
+    public async Task With_nothing_left_the_failure_names_every_service_tried()
+    {
+        var service = Chained(new Flaky("deepgram", Many(9, FailureClass.NoConnection)), new Flaky("local", Many(9, FailureClass.NoConnection)), new Flaky("builtin", Many(9, FailureClass.Transient)));
+
+        var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken));
+
+        Assert.Equal(FailureClass.NoConnection, ex.Failure);
+        Assert.Contains("The local service couldn't be reached", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("The built-in speech-to-text failed", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -331,7 +400,35 @@ public sealed class SpeechResilienceTests : IDisposable
         Assert.Equal("openai", result.SpeechFallback!.From);
         Assert.Null(result.SpeechFallback.To);
         Assert.StartsWith("OpenAI failed", result.SpeechFallback.Reason, StringComparison.Ordinal);
+
+        // Silent test audio leaves the line-start stage undecided, so there is no verdict without speech-to-text: the check
+        // waits for the next run and changes nothing
+        Assert.Equal(ResultStatus.Deferred, result.Status);
+        Assert.False(result.Changed);
+        Assert.StartsWith("Couldn't check yet: speech-to-text unavailable", result.Explanation, StringComparison.Ordinal);
+        var fingerprint = SubtitleFiles.Fingerprint(await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
+        Assert.True(processor.NeedsCheck(path, fingerprint, "openai"));
+        Assert.True(processor.IsDeferred(path));
         Assert.Equal("openai", processor.RequestRerun(result.Id).RerunWith);
+
+        // Next run, with speech-to-text back, a verdict is recorded
+        var again = await processor.ProcessAsync(job, audio, audio, new Policies(ChangePolicy.Review, ChangePolicy.Review, new CleanupSettings()), TestContext.Current.CancellationToken);
+        Assert.Equal(ResultStatus.InSync, again.Status);
+        Assert.False(processor.NeedsCheck(path, SubtitleFiles.Fingerprint(await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken)), "fake"));
+    }
+
+    [Fact]
+    public async Task A_bad_request_is_not_deferred()
+    {
+        var path = Path.Combine(_dir, "Invented Film (2019).en.srt");
+        File.WriteAllBytes(path, SubtitleWriter.ToBytes(PipelineTests.Story()));
+        var processor = new SubtitleProcessor(new ResultStore(Path.Combine(_dir, "results.json")), new SubtitleFiles(Path.Combine(_dir, "originals")));
+        var job = new SubtitleJob(Guid.NewGuid(), "Invented Film", Path.Combine(_dir, "Invented Film (2019).mkv"), path, "eng", TimeSpan.FromMinutes(25), 0);
+        var audio = new PipelineTests.Shifted(PipelineTests.Story(), 0);
+
+        var result = await processor.ProcessAsync(job, audio, new Flaky("deepgram", Fail(FailureClass.BadRequest)), new Policies(ChangePolicy.Review, ChangePolicy.Review, new CleanupSettings()), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ResultStatus.Unreliable, result.Status);
     }
 
     private static SpeechFailure F(DateTimeOffset at, bool recovered = false, string failure = "Transient", string provider = "deepgram")
@@ -349,7 +446,7 @@ public sealed class SpeechResilienceTests : IDisposable
         var five = four.Append(F(now.AddHours(-5))).ToList();
         health = SpeechHealth.Classify("deepgram", five, 100, [], now.AddMinutes(-5), now);
         Assert.True(health.Systemic);
-        Assert.Equal("Deepgram has failed 5 times since yesterday — check the key, the network or the provider's status page.", health.Problem);
+        Assert.Equal("Deepgram has failed 5 times since yesterday — check the key, the network, your credit or the provider's status page.", health.Problem);
 
         // Older than a day, recovered, or another service's: transitory
         var old = Enumerable.Range(0, 9).Select(i => F(now.AddDays(-2).AddHours(-i))).ToList();
@@ -380,6 +477,42 @@ public sealed class SpeechResilienceTests : IDisposable
         var refused = new[] { F(now.AddHours(-1), failure: "Authentication") };
         Assert.Equal("Deepgram refused the key — check it under Services.", SpeechHealth.Classify("deepgram", refused, 50, [], now.AddHours(-2), now).Problem);
         Assert.False(SpeechHealth.Classify("deepgram", refused, 50, [], now.AddMinutes(-10), now).Systemic);
+    }
+
+    [Fact]
+    public void Each_service_gets_its_own_advice_and_a_problem_clears_after_three_successes()
+    {
+        var now = new DateTimeOffset(2026, 9, 26, 10, 0, 0, TimeSpan.Zero);
+        List<SpeechFailure> Five(string provider) => [.. Enumerable.Range(0, 5).Select(i => F(now.AddHours(-i), provider: provider))];
+
+        Assert.Equal("The local service isn't answering at http://127.0.0.1:8000/v1 (5 times since yesterday) — is the service running?", SpeechHealth.Classify("local", Five("local"), 10, [], null, now, localAddress: "http://127.0.0.1:8000/v1").Problem);
+        Assert.StartsWith("The built-in speech-to-text keeps failing (5 times since yesterday) — use Download again", SpeechHealth.Classify("builtin", Five("builtin"), 10, [], null, now).Problem, StringComparison.Ordinal);
+        Assert.Contains("your credit", SpeechHealth.Classify("openai", Five("openai"), 10, [], null, now).Problem!, StringComparison.Ordinal);
+
+        Assert.True(SpeechHealth.Classify("local", Five("local"), 10, [], null, now, successesInARow: 2).Systemic);
+        Assert.False(SpeechHealth.Classify("local", Five("local"), 10, [], null, now, successesInARow: 3).Systemic);
+    }
+
+    [Fact]
+    public void The_banner_goes_once_the_service_works_again()
+    {
+        var log = new SpeechErrorLog(_dir, new Clock()) { LocalAddress = () => "http://127.0.0.1:8000/v1" };
+        var failure = SpeechErrorLog.FailureOf("local", Fail(FailureClass.NoConnection), recovered: false, 5, "r1");
+        for (var i = 0; i < 5; i++)
+        {
+            log.RecordCall("local", "r1", failure);
+        }
+
+        Assert.Contains("isn't answering at http://127.0.0.1:8000/v1", log.Health()[0].Problem!, StringComparison.Ordinal);
+        log.RecordCall("local", "r2", null);
+        log.RecordCall("local", "r2", null);
+        Assert.True(log.Health()[0].Systemic);
+        log.RecordCall("local", "r2", null);
+        Assert.False(log.Health()[0].Systemic);
+
+        // Transient failures a retry recovered never make a banner
+        log.RecordCall("local", "r2", SpeechErrorLog.FailureOf("local", Fail(FailureClass.Transient), recovered: true, 2, "r2"));
+        Assert.False(log.Health()[0].Systemic);
     }
 
     [Fact]

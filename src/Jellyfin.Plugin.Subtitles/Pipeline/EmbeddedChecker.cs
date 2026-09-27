@@ -79,6 +79,7 @@ public sealed class EmbeddedChecker
         ArgumentNullException.ThrowIfNull(job);
         // A failure is tried again only after a while: each try reads the whole video
         return _results.Get(IdFor(job.VideoPath, job.StreamIndex)) is not { } r
+            || r.Status == ResultStatus.Deferred
             || (r.Status != ResultStatus.Added && r.Status != ResultStatus.Undone
                 && (!string.Equals(r.Fingerprint, job.Fingerprint, StringComparison.Ordinal)
                     || (r.Status == ResultStatus.Failed ? _clock.GetUtcNow() - r.Time >= SubtitleFinder.SearchAgainAfter : r.Version < SubtitleProcessor.CurrentVersion)));
@@ -123,6 +124,11 @@ public sealed class EmbeddedChecker
             .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;
+        if (outcome.Deferred)
+        {
+            return Save(result with { Status = ResultStatus.Deferred, Stage = outcome.Stage, SpeechFallback = outcome.SpeechFallback, Explanation = "The " + track + ": " + outcome.Note });
+        }
+
         if (outcome.WrongLanguageSuspected || model.Status != SyncStatus.Corrected)
         {
             var status = outcome.WrongLanguageSuspected ? ResultStatus.WrongLanguage : model.Status == SyncStatus.InSync ? ResultStatus.InSync : ResultStatus.Unreliable;

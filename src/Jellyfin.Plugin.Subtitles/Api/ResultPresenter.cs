@@ -163,6 +163,7 @@ public static partial class ResultPresenter
         [ResultStatus.Generated] = "Generated",
         [ResultStatus.NoSpeech] = "No speech",
         [ResultStatus.Replaced] = "Replaced",
+        [ResultStatus.Deferred] = "Couldn't check yet",
     };
 
     private static readonly string[] SubtitleFlags = ["forced", "foreign", "sdh", "cc", "hi", "default", "generated"];
@@ -181,7 +182,9 @@ public static partial class ResultPresenter
     /// <param name="identity">What the video is, from Jellyfin, or <c>null</c> to read it from the file name.</param>
     /// <param name="now">The current time.</param>
     /// <param name="zone">The time zone for relative times and dates.</param>
-    /// <param name="canRerun">Whether "Rerun with …" applies (see <see cref="SubtitleProcessor.CanRerun"/>).</param>
+    /// <param name="canRerun">Whether "Rerun with …" applies: the check fell back or failed (see
+    /// <see cref="SubtitleProcessor.CanRerun"/>) and the service first chosen can be used now (see
+    /// <see cref="SpeechFallback.Usable"/>).</param>
     /// <returns>The view.</returns>
     public static ResultView Present(SubtitleResult r, VideoIdentity? identity, DateTimeOffset now, TimeZoneInfo zone, bool canRerun)
     {
@@ -199,7 +202,7 @@ public static partial class ResultPresenter
             NerdStats(r, zone),
             RelativeTime.Format(r.Time, now, zone),
             canRerun,
-            rerunFrom is null ? null : "Rerun with " + ServiceName(rerunFrom),
+            rerunFrom is not null && (canRerun || r.RerunWith is not null) ? RerunLabel(rerunFrom) : null,
             r.RerunWith is not null);
     }
 
@@ -377,6 +380,7 @@ public static partial class ResultPresenter
                 : "Generated from a transcript",
             ResultStatus.NoSpeech => "No speech to transcribe, so nothing was generated",
             ResultStatus.Replaced => "Replaced by a subtitle found later",
+            ResultStatus.Deferred => "Couldn't check yet: speech-to-text unavailable — tried again on the next run",
             _ => StatusText(r.Status),
         };
         var open = r.Findings.Count(f => f.Suggestion is not null || f.From is not null);
@@ -467,6 +471,15 @@ public static partial class ResultPresenter
         Add("Pipeline version", r.Version > 0 ? r.Version.ToString(CultureInfo.InvariantCulture) : null);
         return stats;
     }
+
+    /// <summary>
+    /// The label of the button that runs a check again with the service first chosen ("Rerun with Deepgram", "Rerun with
+    /// OpenAI", "Rerun with the local service", "Rerun with built-in").
+    /// </summary>
+    /// <param name="provider">The service id.</param>
+    /// <returns>The label.</returns>
+    public static string RerunLabel(string provider)
+        => "Rerun with " + (provider == SpeechToTextFactory.BuiltIn ? "built-in" : ServiceName(provider));
 
     /// <summary>
     /// A speech-to-text service's name for people, in the middle of a sentence (<c>Deepgram</c>, <c>the local service</c>).

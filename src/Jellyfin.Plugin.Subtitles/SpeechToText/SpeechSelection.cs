@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net.Http;
 using Jellyfin.Plugin.Subtitles.Configuration;
 using Jellyfin.Plugin.Subtitles.Pricing;
@@ -78,32 +79,37 @@ internal static class SpeechSelection
 
         // A mixed transcript (some chunks from one service, some from another) would be cached under the wrong service, so
         // full transcripts don't fall back
-        var standIn = forSubtitles ? null : SpeechFallback.Choose(config.FallBackToFree, tier.Provider, config.LocalServiceUrl, config.AllowBuiltInDownload, BuiltInModelInstalled(builtIn) is not null);
-        if (standIn is null)
+        var chain = forSubtitles ? [] : SpeechFallback.Chain(config.FallBackToFree, tier.Provider, config.LocalServiceUrl, config.AllowBuiltInDownload, BuiltInModelInstalled(builtIn) is not null);
+        if (chain.Count == 0)
         {
             return service;
         }
 
-        return new FallbackSpeechToText(service, () =>
+        return new FallbackSpeechToText(service, [.. chain.Select(standIn => (standIn, (Func<ISpeechToText?>)(() =>
         {
             var model = standIn == SpeechToTextFactory.BuiltIn ? BuiltInModelInstalled(builtIn) ?? string.Empty : string.Empty;
             var (free, _) = SpeechToTextFactory.Create(standIn, model, config.LocalServiceUrl, paidAllowed: false, config.AllowBuiltInDownload, keys, http, builtIn);
             return free is null ? null : Retrying(free, errors, run);
-        });
+        })))]);
     }
 
     /// <summary>
-    /// A remote service with its transient failures retried (the built-in service runs here and isn't).
+    /// A remote service with its transient failures retried; the built-in service (which runs here, with its own time
+    /// limit) isn't retried, but its calls and failures are counted too.
     /// </summary>
     /// <param name="service">The service.</param>
     /// <param name="errors">Where calls and failures are counted.</param>
     /// <param name="run">The run.</param>
     /// <returns>The service to call.</returns>
     internal static ISpeechToText Retrying(ISpeechToText service, SpeechErrorLog? errors, string? run)
-        => service.Id == SpeechToTextFactory.BuiltIn ? service : new RetryingSpeechToText(service, errors, run);
+        => new RetryingSpeechToText(service, errors, run, maxAttempts: service.Id == SpeechToTextFactory.BuiltIn ? 1 : SpeechRetry.MaxAttempts);
 
-    // The built-in model already installed (the default first), if any: a fallback never starts a download
-    private static string? BuiltInModelInstalled(BuiltInHost? builtIn)
+    /// <summary>
+    /// The built-in model already installed (the default first), if any: a fallback never starts a download.
+    /// </summary>
+    /// <param name="builtIn">The built-in speech-to-text.</param>
+    /// <returns>The model, or <c>null</c>.</returns>
+    internal static string? BuiltInModelInstalled(BuiltInHost? builtIn)
         => builtIn is null || builtIn.Platform is null || builtIn.Problem is not null ? null
             : builtIn.IsInstalled("base") ? "base"
             : builtIn.IsInstalled("small") ? "small"

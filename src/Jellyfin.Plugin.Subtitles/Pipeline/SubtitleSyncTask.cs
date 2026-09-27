@@ -177,8 +177,9 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
         var jobs = videos.SubtitleFiles().Where(j => batch is null || batch.ChecksFile(j.ItemId, _processor.Knows(j.SubtitlePath))).ToList();
         var todo = new List<SubtitleJob>();
 
-        // Checks asked to run again with the speech-to-text service first chosen go first (someone is waiting)
-        foreach (var job in jobs.OrderByDescending(j => _processor.RerunWith(j.SubtitlePath) is not null))
+        // Checks asked to run again with the speech-to-text service first chosen go first (someone is waiting); checks that
+        // couldn't be done for want of speech-to-text go last, so they never crowd out new files
+        foreach (var job in jobs.OrderBy(j => _processor.RerunWith(j.SubtitlePath) is not null ? 0 : _processor.IsDeferred(j.SubtitlePath) ? 2 : 1))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try

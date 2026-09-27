@@ -69,6 +69,7 @@ internal sealed class RetryingSpeechToText : ISpeechToText
     private readonly Func<TimeSpan, CancellationToken, Task> _wait;
     private readonly Func<double> _jitter;
     private readonly TimeProvider _clock;
+    private readonly int _maxAttempts;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RetryingSpeechToText"/> class.
@@ -79,8 +80,11 @@ internal sealed class RetryingSpeechToText : ISpeechToText
     /// <param name="wait">Waits between attempts (tests pass one that doesn't).</param>
     /// <param name="jitter">A source of values in [0, 1).</param>
     /// <param name="clock">Clock (for <see cref="SpeechRetry.MaxElapsed"/>).</param>
-    public RetryingSpeechToText(ISpeechToText inner, SpeechErrorLog? log = null, string? run = null, Func<TimeSpan, CancellationToken, Task>? wait = null, Func<double>? jitter = null, TimeProvider? clock = null)
+    /// <param name="maxAttempts">The most attempts (1 to only count calls and failures: the built-in service, which runs
+    /// here and has its own time limit).</param>
+    public RetryingSpeechToText(ISpeechToText inner, SpeechErrorLog? log = null, string? run = null, Func<TimeSpan, CancellationToken, Task>? wait = null, Func<double>? jitter = null, TimeProvider? clock = null, int maxAttempts = SpeechRetry.MaxAttempts)
     {
+        _maxAttempts = Math.Clamp(maxAttempts, 1, SpeechRetry.MaxAttempts);
         _clock = clock ?? TimeProvider.System;
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _log = log;
@@ -110,7 +114,7 @@ internal sealed class RetryingSpeechToText : ISpeechToText
             {
                 last = ex;
                 var delay = SpeechRetry.DelayBefore(attempts, ex.Failure, ex.RetryAfter, _jitter());
-                if (delay is { } d && _clock.GetElapsedTime(started) + d > SpeechRetry.MaxElapsed)
+                if (attempts >= _maxAttempts || (delay is { } d && _clock.GetElapsedTime(started) + d > SpeechRetry.MaxElapsed))
                 {
                     delay = null;
                 }
@@ -129,6 +133,7 @@ internal sealed class RetryingSpeechToText : ISpeechToText
                         StatusCode = ex.StatusCode,
                         RetryAfter = ex.RetryAfter,
                         Attempts = attempts,
+                        ServiceBroken = ex.ServiceBroken,
                     };
                 }
 

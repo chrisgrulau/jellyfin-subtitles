@@ -58,7 +58,7 @@ public sealed class BuiltInHost : IDisposable
     /// <param name="model">Model setting value (<c>base</c> or <c>small</c>).</param>
     /// <returns>The service.</returns>
     public ISpeechToText Create(string model)
-        => new BuiltInSpeechToText(Installer, _work, Platform ?? throw new InvalidOperationException("No build for this server."), model);
+        => new BuiltInSpeechToText(Installer, _work, Platform ?? throw new InvalidOperationException("No build for this server."), model, () => StartInstall(model));
 
     /// <summary>Gets a value indicating whether a background download (see <see cref="StartInstall"/>) is running.</summary>
     public bool Installing => _background.Running;

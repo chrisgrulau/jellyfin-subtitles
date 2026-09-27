@@ -364,4 +364,121 @@ public sealed class BuiltInTests : IDisposable
         Assert.False(Directory.Exists(legacy));
         Assert.True(Directory.Exists(target));
     }
+
+    // A release whose program is the given shell script
+    private static (BuiltInSource Source, Dictionary<string, byte[]> Served) Scripted(string script)
+        => Release(
+            Zip(new() { ["whisper-cli"] = script, ["libggml.so"] = "library", ["LICENSE-whisper.cpp.txt"] = "MIT" }),
+            new() { ["whisper-cli"] = Sha(script), ["libggml.so"] = Sha("library"), ["LICENSE-whisper.cpp.txt"] = Sha("MIT") });
+
+    private static float[] Second() => new float[Audio.AudioFormat.SampleRate];
+
+    [Fact]
+    public async Task A_program_that_cannot_start_with_intact_files_is_a_server_problem_not_a_repair()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var files = Release();
+        using var handler = new FakeServer(files.Served);
+        using var installer = new BuiltInInstaller(_dir, files.Source, handler);
+        var repairs = 0;
+        var service = new BuiltInSpeechToText(installer, Path.Combine(_dir, "work"), "linux-x64", "base", () => repairs++);
+
+        // "program" isn't a real executable: it can't be started
+        var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken));
+
+        Assert.True(ex.ServiceBroken);
+        Assert.NotEqual(Jellyfin.Plugin.Common.Resilience.FailureClass.BadRequest, ex.Failure);
+        Assert.Contains("files are intact", ex.Message, StringComparison.Ordinal);
+        Assert.False(installer.NeedsRepair);
+        Assert.Equal(0, repairs);
+    }
+
+    [Fact]
+    public async Task A_program_that_cannot_start_because_its_install_is_damaged_is_downloaded_again()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var files = Release();
+        using var handler = new FakeServer(files.Served);
+        using var installer = new BuiltInInstaller(_dir, files.Source, handler);
+        var (program, _) = await installer.EnsureAsync("linux-x64", "base", CancellationToken.None);
+        File.SetUnixFileMode(program, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        var repairs = 0;
+        var service = new BuiltInSpeechToText(installer, Path.Combine(_dir, "work"), "linux-x64", "base", () => repairs++);
+
+        var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken));
+
+        Assert.True(ex.ServiceBroken);
+        Assert.Contains("downloaded again", ex.Message, StringComparison.Ordinal);
+        Assert.True(installer.NeedsRepair);
+        Assert.Equal(1, repairs);
+        Assert.False(installer.IsInstalled("linux-x64", "base"));
+
+        // The repair (in the background, through the same installer) puts it back, runnable
+        await installer.EnsureAsync("linux-x64", "base", CancellationToken.None);
+        Assert.False(installer.NeedsRepair);
+        Assert.True(File.GetUnixFileMode(program).HasFlag(UnixFileMode.UserExecute));
+        Assert.True(await installer.VerifyAsync("linux-x64", "base", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task One_crash_is_a_failure_for_that_audio_and_repeated_crashes_check_the_install()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var files = Scripted("#!/bin/sh\nkill -SEGV $$\n");
+        using var handler = new FakeServer(files.Served);
+        using var installer = new BuiltInInstaller(_dir, files.Source, handler);
+        var service = new BuiltInSpeechToText(installer, Path.Combine(_dir, "work"), "linux-x64", "base", () => { });
+
+        var first = await Assert.ThrowsAsync<SpeechToTextException>(() => service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken));
+        Assert.False(first.ServiceBroken);
+        Assert.Contains("crashed", first.Message, StringComparison.Ordinal);
+
+        var second = await Assert.ThrowsAsync<SpeechToTextException>(() => service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken));
+        Assert.True(second.ServiceBroken);
+        Assert.Contains("keeps crashing", second.Message, StringComparison.Ordinal);
+        Assert.Contains("files are intact", second.Message, StringComparison.Ordinal);
+        Assert.False(installer.NeedsRepair);
+    }
+
+    [Theory]
+    [InlineData("#!/bin/sh\nexit 3\n", "failed (exit code 3)")]
+    [InlineData("#!/bin/sh\nkill -KILL $$\n", "out of memory")]
+    public async Task An_ordinary_failure_or_a_kill_is_a_failure_for_that_audio_only(string script, string said)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var files = Scripted(script);
+        using var handler = new FakeServer(files.Served);
+        using var installer = new BuiltInInstaller(_dir, files.Source, handler);
+        var repairs = 0;
+        var service = new BuiltInSpeechToText(installer, Path.Combine(_dir, "work"), "linux-x64", "base", () => repairs++);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => service.TranscribeAsync(Second(), "en", TestContext.Current.CancellationToken));
+            Assert.False(ex.ServiceBroken);
+            Assert.Equal(Jellyfin.Plugin.Common.Resilience.FailureClass.Transient, ex.Failure);
+            Assert.Contains(said, ex.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(0, repairs);
+        Assert.True(BuiltInSpeechToText.IsCrash(139));
+        Assert.True(BuiltInSpeechToText.WasKilled(137));
+        Assert.False(BuiltInSpeechToText.IsCrash(1));
+    }
 }

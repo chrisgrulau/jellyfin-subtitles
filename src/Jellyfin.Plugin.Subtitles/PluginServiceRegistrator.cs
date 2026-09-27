@@ -52,6 +52,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             var log = new SpeechErrorLog(DataFolder(sp));
             var activity = sp.GetRequiredService<SubtitleActivity>();
             log.Systemic = h => _ = activity.NotifySpeechProblemAsync(h);
+            log.LocalAddress = () => SubtitlesPlugin.Instance?.Configuration.LocalServiceUrl;
             return log;
         });
         serviceCollection.AddSingleton(sp =>

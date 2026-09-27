@@ -57,12 +57,17 @@ public static class SpeechHealth
     /// <summary>Runs in a row with a call failing for good that make a problem systemic.</summary>
     public const int FailedRuns = 3;
 
+    /// <summary>Successes in a row that clear a systemic problem.</summary>
+    public const int SuccessesToClear = 3;
+
     /// <summary>
     /// Classifies a service's recent record. Systemic: at least <see cref="FailuresForSystemic"/> calls failed for good in
     /// the last 24 hours; or at least half of the calls in that time failed for good (with at least
     /// <see cref="MinimumCalls"/> calls); or calls failed for good on <see cref="FailedRuns"/> runs in a row; or the key was
     /// refused (or the provider's allowance used up) with no success since. Anything else, including failures a retry
-    /// recovered, is transitory.
+    /// recovered, is transitory; and a problem clears once the service has succeeded <see cref="SuccessesToClear"/> times
+    /// in a row. What to tell someone depends on the service: a paid one's key, network, credit or status page; whether the
+    /// local service is running at its address; whether the built-in one needs downloading again or can run here.
     /// </summary>
     /// <param name="provider">The service id.</param>
     /// <param name="failures">Its failures (any age; only the window counts).</param>
@@ -70,8 +75,10 @@ public static class SpeechHealth
     /// <param name="runsNewestFirst">Calls and failures for good per run, newest run first.</param>
     /// <param name="lastSuccess">When a call last succeeded, if known.</param>
     /// <param name="now">The current time.</param>
+    /// <param name="successesInARow">Calls that succeeded in a row, most recent last.</param>
+    /// <param name="localAddress">The local service's address, for its message.</param>
     /// <returns>The health.</returns>
-    public static ProviderHealth Classify(string provider, IEnumerable<SpeechFailure> failures, int calls, IReadOnlyList<(int Calls, int Failed)> runsNewestFirst, DateTimeOffset? lastSuccess, DateTimeOffset now)
+    public static ProviderHealth Classify(string provider, IEnumerable<SpeechFailure> failures, int calls, IReadOnlyList<(int Calls, int Failed)> runsNewestFirst, DateTimeOffset? lastSuccess, DateTimeOffset now, int successesInARow = 0, string? localAddress = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(failures);
@@ -84,15 +91,29 @@ public static class SpeechHealth
         var name = NameOf(provider);
         var refused = mine.Where(f => !f.Recovered && f.Failure is nameof(FailureClass.Authentication) or nameof(FailureClass.ProviderLimit))
             .OrderByDescending(f => f.Time).FirstOrDefault(f => lastSuccess is null || f.Time > lastSuccess);
-        var check = " — check the key, the network or the provider's status page.";
-        var problem = refused is not null && now - refused.Time <= Window
-                ? (refused.Failure == nameof(FailureClass.Authentication)
-                    ? name + " refused the key — check it under Services."
-                    : name + " says its allowance or credit is used up — check your account with it.")
-            : failed >= FailuresForSystemic ? string.Create(CultureInfo.InvariantCulture, $"{name} has failed {failed} times since yesterday{check}")
-            : calls >= MinimumCalls && failed >= calls * FailingShare ? string.Create(CultureInfo.InvariantCulture, $"{failed} of {calls} calls to {name} failed since yesterday{check}")
-            : inARow >= FailedRuns ? string.Create(CultureInfo.InvariantCulture, $"{name} failed on each of the last {inARow} runs{check}")
+        var how = string.Create(CultureInfo.InvariantCulture, $"{failed} time{(failed == 1 ? string.Empty : "s")} since yesterday");
+        var why = refused is not null && now - refused.Time <= Window ? "refused"
+            : failed >= FailuresForSystemic ? "count"
+            : calls >= MinimumCalls && failed >= calls * FailingShare ? string.Create(CultureInfo.InvariantCulture, $"{failed} of {calls} calls since yesterday")
+            : inARow >= FailedRuns ? string.Create(CultureInfo.InvariantCulture, $"on each of the last {inARow} runs")
             : null;
+        if (why is not null and not "refused" and not "count")
+        {
+            how = why;
+        }
+
+        var problem = why is null || successesInARow >= SuccessesToClear ? null
+            : why == "refused" ? (refused!.Failure == nameof(FailureClass.Authentication)
+                ? name + " refused the key — check it under Services."
+                : name + " says its allowance or credit is used up — check your account with it.")
+            : provider switch
+            {
+                SpeechToTextFactory.Local => string.IsNullOrWhiteSpace(localAddress)
+                    ? $"The local service isn't answering ({how}) — is the service running?"
+                    : $"The local service isn't answering at {localAddress.Trim()} ({how}) — is the service running?",
+                SpeechToTextFactory.BuiltIn => $"The built-in speech-to-text keeps failing ({how}) — use Download again under Services, or check that this server's CPU and memory can run it.",
+                _ => $"{name} has failed {how} — check the key, the network, your credit or the provider's status page.",
+            };
         return new ProviderHealth(provider, name, problem is not null, problem, failed, recovered, calls, inARow, mine.Count > 0 ? mine.Max(f => f.Time) : null);
     }
 
@@ -156,6 +177,9 @@ public sealed class SpeechErrorLog
     /// </summary>
     public Action<ProviderHealth>? Systemic { get; set; }
 
+    /// <summary>Gets or sets where the local service's address comes from (the settings), for its message.</summary>
+    public Func<string?>? LocalAddress { get; set; }
+
     /// <summary>
     /// The record of a failed call.
     /// </summary>
@@ -205,6 +229,11 @@ public sealed class SpeechErrorLog
             if (!failed)
             {
                 record.LastSuccess = now;
+                record.SuccessesInARow++;
+            }
+            else
+            {
+                record.SuccessesInARow = 0;
             }
 
             if (run is not null)
@@ -230,7 +259,7 @@ public sealed class SpeechErrorLog
                 var list = LoadFailures();
                 list.Add(stamped);
                 Append(stamped, list);
-                if (failed && HealthOf(provider, list, calls, now) is { Systemic: true } health)
+                if (failed && HealthOf(provider, list, calls, now, Address()) is { Systemic: true } health)
                 {
                     systemic = health;
                 }
@@ -281,17 +310,31 @@ public sealed class SpeechErrorLog
             Rotate(failures, force: false);
             var calls = LoadCalls();
             return [.. calls.Keys.Concat(failures.Select(f => f.Provider)).Distinct(StringComparer.Ordinal)
-                .Select(p => HealthOf(p, failures, calls, now))
+                .Select(p => HealthOf(p, failures, calls, now, Address()))
                 .OrderByDescending(h => h.Systemic).ThenBy(h => h.Provider, StringComparer.Ordinal)];
         }
     }
 
-    private static ProviderHealth HealthOf(string provider, List<SpeechFailure> failures, Dictionary<string, CallRecord> calls, DateTimeOffset now)
+    private static ProviderHealth HealthOf(string provider, List<SpeechFailure> failures, Dictionary<string, CallRecord> calls, DateTimeOffset now, string? localAddress)
     {
         calls.TryGetValue(provider, out var record);
         var inWindow = record?.Hours.Where(h => now - h.Hour <= SpeechHealth.Window).Sum(h => h.Calls) ?? 0;
         var runs = record?.Runs.Select(r => (r.Calls, r.Failed)).ToList() ?? [];
-        return SpeechHealth.Classify(provider, failures, inWindow, runs, record?.LastSuccess, now);
+        return SpeechHealth.Classify(provider, failures, inWindow, runs, record?.LastSuccess, now, record?.SuccessesInARow ?? 0, localAddress);
+    }
+
+    private string? Address()
+    {
+        try
+        {
+            return LocalAddress?.Invoke();
+        }
+#pragma warning disable CA1031 // Only for a message
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
     }
 
     private List<SpeechFailure> LoadFailures()
@@ -421,6 +464,9 @@ public sealed class SpeechErrorLog
 
         /// <summary>Gets or sets when a call last succeeded.</summary>
         public DateTimeOffset? LastSuccess { get; set; }
+
+        /// <summary>Gets or sets how many calls in a row have succeeded (a systemic problem clears after a few).</summary>
+        public int SuccessesInARow { get; set; }
     }
 
     /// <summary>Calls in one hour.</summary>

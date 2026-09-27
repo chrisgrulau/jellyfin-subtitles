@@ -32,6 +32,12 @@ public sealed record SyncOutcome(SyncModel Model, string Stage, bool WrongLangua
     /// </summary>
     public SpeechFallbackNote? SpeechFallback { get; init; }
 
+    /// <summary>
+    /// Gets a value indicating whether no verdict could be reached: the line-start stage couldn't decide and
+    /// speech-to-text, which was needed, couldn't be used. The check is tried again on the next run.
+    /// </summary>
+    public bool Deferred { get; init; }
+
     /// <summary>Gets the speech-to-text service that actually transcribed (a stand-in's when one was used), or <c>null</c>.</summary>
     public string? SpeechUsed => Transcripts.Count > 0 ? Transcripts[0].Transcript.Provider : null;
 
@@ -134,9 +140,13 @@ public sealed class SyncCheck
         }
         catch (SpeechToTextException ex)
         {
-            return new SyncOutcome(first, "line starts", false, "Speech-to-text failed: " + ex.Message)
+            // A verdict that needed speech-to-text isn't recorded without it (unless the request itself was bad): the line
+            // starts' own conclusion stands when they decided, and otherwise the check waits for the next run
+            var deferred = first.Status == SyncStatus.Unreliable && ex.Failure != Jellyfin.Plugin.Common.Resilience.FailureClass.BadRequest;
+            return new SyncOutcome(first, "line starts", false, deferred ? "Couldn't check yet: speech-to-text unavailable (" + ex.Message.TrimEnd('.') + "). Tried again on the next run." : "Speech-to-text failed: " + ex.Message)
             {
-                SpeechFallback = new SpeechFallbackNote(_speech.Id, null, SpeechHealth.NameOf(_speech.Id) + " failed, so the check went on without speech-to-text: " + ex.Message),
+                Deferred = deferred,
+                SpeechFallback = new SpeechFallbackNote(_speech.Id, null, SpeechHealth.NameOf(_speech.Id) + " failed" + (deferred ? ", so the check waits for the next run: " : ", so the check went on without speech-to-text: ") + ex.Message),
             };
         }
     }

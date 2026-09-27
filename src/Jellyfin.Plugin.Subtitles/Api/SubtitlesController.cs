@@ -155,7 +155,18 @@ public class SubtitlesController : ControllerBase
     public ActionResult<ResultsPage> ResultsPageOf([FromQuery] int offset = 0, [FromQuery] int limit = ResultQuery.DefaultPage, [FromQuery] string? filter = null, [FromQuery] string? q = null)
     {
         var now = DateTimeOffset.UtcNow;
-        return ResultQuery.Page(_processor.Ordered(), filter, q?.Length > 200 ? q[..200] : q, offset, limit, r => ResultPresenter.Present(r, IdentityOf(r), now, TimeZoneInfo.Local, SubtitleProcessor.CanRerun(r)));
+        var usable = UsableNow();
+        return ResultQuery.Page(_processor.Ordered(), filter, q?.Length > 200 ? q[..200] : q, offset, limit, r => ResultPresenter.Present(r, IdentityOf(r), now, TimeZoneInfo.Local, SubtitleProcessor.CanRerun(r) && usable(r.SpeechFallback!.From)));
+    }
+
+    // Which speech-to-text services can be used now (a key set and paid use allowed, the local address set, the built-in
+    // one allowed and installed): "Rerun with …" is offered only for those
+    private Func<string, bool> UsableNow()
+    {
+        var config = SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration();
+        var paidAllowed = SpendingLimit.AllowsPaidUsage(Pricing.Spending.LimitsOf(config).Overall);
+        var builtInInstalled = SpeechSelection.BuiltInModelInstalled(_builtIn) is not null;
+        return provider => SpeechFallback.Usable(provider, _keys.Get(provider) is not null, paidAllowed, config.LocalServiceUrl, config.AllowBuiltInDownload, builtInInstalled);
     }
 
     // What the result's video is, from the library (by item, else by the video's path), remembered for a while; null
@@ -199,6 +210,11 @@ public class SubtitlesController : ControllerBase
     {
         try
         {
+            if (_processor.Get(id)?.SpeechFallback?.From is { } from && !UsableNow()(from))
+            {
+                return Conflict(SpeechHealth.NameOf(from) + " can't be used now (its key, address or download isn't set up), so the check can't be run again with it.");
+            }
+
             return _processor.RequestRerun(id);
         }
         catch (InvalidOperationException ex)
@@ -681,7 +697,8 @@ public class SubtitlesController : ControllerBase
             _builtIn.Platform is not null && _builtIn.Problem is null,
             _builtIn.Platform is null
                 ? "The built-in speech-to-text has no build for this server's system. Use a local speech-to-text service or a cloud service instead."
-                : _builtIn.Problem);
+                : _builtIn.Problem,
+            _builtIn.Installer.NeedsRepair);
 
     /// <summary>
     /// Where the built-in speech-to-text's download stands (SUB-25): <c>idle</c>, <c>downloading</c>, <c>verifying</c>,
@@ -894,7 +911,9 @@ public sealed record TestResult(bool Ok, string Message, bool Downloading = fals
 /// </summary>
 /// <param name="Available">Whether it can be downloaded and run.</param>
 /// <param name="Problem">Why not, in plain language.</param>
-public sealed record BuiltInStatus(bool Available, string? Problem);
+/// <param name="NeedsRepair">Whether its files were found damaged after it failed to start, and haven't been downloaded
+/// again yet (the page offers Download again).</param>
+public sealed record BuiltInStatus(bool Available, string? Problem, bool NeedsRepair = false);
 
 /// <summary>
 /// This month's spending on paid services.

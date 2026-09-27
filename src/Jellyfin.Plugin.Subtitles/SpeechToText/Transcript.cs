@@ -111,4 +111,10 @@ public sealed class SpeechToTextException : Exception
 
     /// <summary>Gets how many attempts were made before giving up (1 when it wasn't retried).</summary>
     public int Attempts { get; init; } = 1;
+
+    /// <summary>
+    /// Gets a value indicating whether the service itself is out of order (the built-in program couldn't be started, or
+    /// its files are being repaired), rather than this one call failing: it isn't asked again for the rest of the run.
+    /// </summary>
+    public bool ServiceBroken { get; init; }
 }

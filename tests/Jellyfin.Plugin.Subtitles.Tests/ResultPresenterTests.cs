@@ -209,6 +209,30 @@ public class ResultPresenterTests
         Assert.False(view.RerunQueued);
         Assert.True(ResultPresenter.Present(r with { RerunWith = "deepgram" }, null, Now, TimeZoneInfo.Utc, canRerun: true).RerunQueued);
         Assert.Null(ResultPresenter.Present(R(ResultStatus.InSync), null, Now, TimeZoneInfo.Utc, canRerun: false).RerunLabel);
+
+        // Hidden when the service first chosen can't be used now (no key, address or download; or it was removed)
+        var hidden = ResultPresenter.Present(r, null, Now, TimeZoneInfo.Utc, canRerun: false);
+        Assert.False(hidden.CanRerun);
+        Assert.Null(hidden.RerunLabel);
+    }
+
+    [Theory]
+    [InlineData("deepgram", "Rerun with Deepgram")]
+    [InlineData("openai", "Rerun with OpenAI")]
+    [InlineData("local", "Rerun with the local service")]
+    [InlineData("builtin", "Rerun with built-in")]
+    public void The_rerun_button_names_the_service_first_chosen(string provider, string label)
+    {
+        Assert.Equal(label, ResultPresenter.RerunLabel(provider));
+        var r = R(ResultStatus.Unreliable) with { SpeechFallback = new SpeechFallbackNote(provider, null, "x") };
+        Assert.Equal(label, ResultPresenter.Present(r, null, Now, TimeZoneInfo.Utc, canRerun: true).RerunLabel);
+    }
+
+    [Fact]
+    public void A_deferred_check_says_it_will_be_tried_again()
+    {
+        Assert.Equal("Couldn't check yet", ResultPresenter.StatusText(ResultStatus.Deferred));
+        Assert.Equal("Couldn't check yet: speech-to-text unavailable — tried again on the next run", ResultPresenter.Summary(R(ResultStatus.Deferred)));
     }
 
     [Fact]

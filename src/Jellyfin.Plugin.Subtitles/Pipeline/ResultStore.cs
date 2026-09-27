@@ -59,6 +59,12 @@ public enum ResultStatus
 
     /// <summary>A generated subtitle was replaced by one found later (the generated file was removed; a copy is kept).</summary>
     Replaced,
+
+    /// <summary>
+    /// Couldn't check yet: the check needed speech-to-text and none could be used (the chosen service and every free
+    /// stand-in failed, or none is set up). No verdict is recorded and nothing is changed; it is tried again on the next run.
+    /// </summary>
+    Deferred,
 }
 
 /// <summary>
@@ -318,7 +324,7 @@ public sealed class ResultStore : IDisposable
                 return 0;
             }
 
-            var gone = all.Values.Where(r => r.Status != ResultStatus.NotFound
+            var gone = all.Values.Where(r => r.Status != ResultStatus.NotFound && !(r.Status == ResultStatus.Deferred && r.Id.StartsWith("find-", StringComparison.Ordinal))
                 && (r.Id.StartsWith(SubtitleGenerator.IdPrefix, StringComparison.Ordinal) ? r.VideoPath : r.SubtitlePath) is { } path
                 && !fileExists(path)
                 && Path.GetDirectoryName(path) is { } folder && folderExists(folder)).ToList();

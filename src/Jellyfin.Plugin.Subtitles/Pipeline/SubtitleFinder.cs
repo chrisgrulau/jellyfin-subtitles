@@ -137,6 +137,7 @@ public sealed class SubtitleFinder
     {
         ArgumentNullException.ThrowIfNull(job);
         return _results.Get(IdFor(job.VideoPath, job.Language)) is not { } r
+            || r.Status == ResultStatus.Deferred
             || (r.Status is ResultStatus.NotFound or ResultStatus.Failed or ResultStatus.CantWrite && _clock.GetUtcNow() - r.Time >= SearchAgainAfter);
     }
 
@@ -193,6 +194,7 @@ public sealed class SubtitleFinder
         }
 
         var notes = new List<string>();
+        SyncOutcome? deferred = null;
         (ScoredCandidate Candidate, SubtitleDocument Document, SyncOutcome Outcome, double Fit)? best = null;
         foreach (var candidate in ranked)
         {
@@ -223,6 +225,13 @@ public sealed class SubtitleFinder
 
             var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
                 .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
+            if (outcome.Deferred)
+            {
+                deferred ??= outcome;
+                notes.Add(candidate.Candidate.ReleaseName + ": couldn't be checked (speech-to-text unavailable)");
+                continue;
+            }
+
             if (outcome.WrongLanguageSuspected || outcome.Model.Status == SyncStatus.Unreliable)
             {
                 notes.Add(candidate.Candidate.ReleaseName + ": doesn't line up with the audio");
@@ -239,6 +248,17 @@ public sealed class SubtitleFinder
             {
                 break;
             }
+        }
+
+        if (best is null && deferred is not null)
+        {
+            // Nothing could be judged without speech-to-text: no "nothing fits" verdict; searched again on the next run
+            return Save(result with
+            {
+                Status = ResultStatus.Deferred,
+                SpeechFallback = deferred.SpeechFallback,
+                Explanation = "Couldn't check yet: speech-to-text unavailable, so the candidates couldn't be judged (" + string.Join("; ", notes) + "). Searched again on the next run.",
+            });
         }
 
         if (best is not { } b)
