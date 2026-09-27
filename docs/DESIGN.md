@@ -436,6 +436,35 @@ missing or stale, or it would go over the limit; the run then carries on with th
 When budgets are enforced, the estimated cost of each call is reserved before it is made, atomically across concurrent
 jobs, and the actual cost is settled afterwards, so parallel jobs can't overshoot the limit together.
 
+### One budget page (Shoal AI)
+
+The currency, the overall monthly limit and a limit per paid service are set in Shoal AI when it is installed and
+allows this plugin (**Allow Subtitles to use this budget for paid speech-to-text**, on by default there). Keys stay here.
+
+- **Metering:** `Spending.Meter` gives `MeteredSpeechToText` (single calls and whole videos alike) common's
+  `BridgedSpendMeter`: each call is still priced here, from the audio length and `prices.json`, then reserved and settled
+  on Shoal AI's ledger through its spending entry point (common's `SpendingBridgeClient`, version 1), which converts it
+  with its exchange rates and checks its overall limit and the service's own limit. Deepgram is `deepgram` there;
+  OpenAI speech-to-text is `openai-speech` (apart from OpenAI's text models).
+- **Falling back:** if Shoal AI isn't installed, speaks another contract version, or doesn't allow this plugin
+  (`not-installed`, `unsupported-version`, `not-allowed`), the call is metered on this plugin's own ledger with its own
+  currency and limit, exactly as before. A refusal by Shoal AI's limits stops the call; so does Shoal AI not answering
+  (`transient`), since its limits wouldn't see spending here. Each reservation is settled in the ledger that made it: a
+  call is counted once. While Shoal AI is installed, paid services count as usable whatever this plugin's own limit is
+  (`Spending.PaidMayBeUsed`); the limit that applies decides at each call.
+- **This month's earlier spending:** before its first reservation there (and when the settings page loads),
+  `SpendCarry` reports this plugin's own spending this month to Shoal AI as one total per service and currency, which
+  replaces what it reported before, so the month counts it once however often it is sent. The simpler alternative,
+  showing both until the month ends, would let the two together overshoot the limit. The own ledger keeps its entries
+  for when it has to fall back.
+- **Settings page:** `GET Subtitles/Spending` returns Shoal AI's summary with `SetInAi` (currency, overall limit, this
+  month's spending of all its paid services, per service with `ProviderLimits`, the rates behind them). The page then
+  shows "Spending limits are set in Shoal AI" with a link to its page and hides the currency, monthly limit, "No
+  spending limit" and the taxes-and-fees percentage (still saved as they were). Shoal AI installed but not answering
+  still counts as its budget (`Problem` says why the figures are missing); otherwise the page shows its own settings.
+- **Interrupted calls:** a reservation on Shoal AI's ledger left open for an hour (the server stopped mid-call) is
+  settled at its estimate there.
+
 ## Working with the other plugins
 
 Plugins never share C# types. The Subtitles plugin offers a JSON-in/JSON-out entry point (speech-to-text for Ingest, e.g.
@@ -457,7 +486,8 @@ works, just without AI tiebreakers.
   - The stretch must start at 0 or later and be longer than 0 and at most 180 seconds.
   - The language, if given, must be a two- or three-letter code.
 - **Transcribing:** the audio is read with Jellyfin's ffmpeg (first audio track, 16 kHz mono), as for snippets. The
-  tier's service transcribes it, and a paid service is wrapped in `MeteredSpeechToText` under the caller's purpose. A
+  tier's service transcribes it, and a paid service is wrapped in `MeteredSpeechToText` under the caller's purpose
+  (metered on Shoal AI's budget when it keeps it, as above). A
   semaphore lets only one transcription run at a time, so the built-in service never runs twice at once.
 
 ## New videos
