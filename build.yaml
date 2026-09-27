@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.17.1.0"
+version: "0.18.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,5 +14,5 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.17.1-alpha: actions on a result whose file was replaced or removed say so plainly and clear it (no more server
-  error); results for removed or replaced videos are cleared promptly and hidden from the list.
+  0.18.0-alpha: fix subtitles made for a different cut section by section (off until switched on; changes wait for
+  review), from the full transcript.
