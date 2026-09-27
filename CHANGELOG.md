@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.2-alpha] - 2026-09-27
+
 ### Fixed
 
 - **Hidden parts of the settings page stay hidden.** Page styles that lay elements out (flex rows, Jellyfin's buttons)
