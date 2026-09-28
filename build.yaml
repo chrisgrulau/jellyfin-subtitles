@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Subtitles"
 guid: "95265809-b7a4-4721-8baf-6739c8e6287b"
-version: "0.18.1.0"
+version: "0.19.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -14,5 +14,5 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Subtitles.dll"
 changelog: >
-  0.18.1-alpha: results no longer say applied or declined changes are waiting for review; a bulk action that can't
-  apply says why.
+  0.19.0-alpha: every subtitle language the audio is in is found, synced, checked and generated in that language;
+  subtitles in another language are left alone; built-in speech-to-text build 2 is a smaller download.
