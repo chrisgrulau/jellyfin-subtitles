@@ -962,11 +962,12 @@
             : st.State === 'verifying' ? 'Checking the download…'
             : st.State === 'installed' ? 'Downloaded and ready.'
             : st.State === 'failed' ? 'The download failed: ' + (st.Error || 'unknown error') + (allowed ? ' Press Download now to try again.' : '')
+            : allowed && st.Update ? 'An update is ready: a new build of the program replaces the one downloaded before (a few MB; the model is kept). It downloads, checked the same way, on next use, or press Update now.'
             : allowed ? 'Not downloaded yet.' : '';
           box.hidden = !builtInAvailable || !text.textContent;
           if (button) {
             button.hidden = !builtInAvailable || !allowed || busy || st.State === 'installed';
-            button.querySelector('span').textContent = builtInRepair || st.State === 'failed' ? 'Download again' : 'Download now';
+            button.querySelector('span').textContent = builtInRepair || st.State === 'failed' ? 'Download again' : st.Update ? 'Update now' : 'Download now';
           }
         }
 
