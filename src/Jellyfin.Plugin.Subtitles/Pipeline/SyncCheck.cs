@@ -38,6 +38,12 @@ public sealed record SyncOutcome(SyncModel Model, string Stage, bool WrongLangua
     /// </summary>
     public bool Deferred { get; init; }
 
+    /// <summary>
+    /// Gets a value indicating whether the subtitle is in another language than the audio: it wasn't compared with what
+    /// is said (at most with speech starts, see <see cref="SyncCheck.RunOtherLanguageAsync"/>).
+    /// </summary>
+    public bool OtherLanguage { get; init; }
+
     /// <summary>Gets the speech-to-text service that actually transcribed (a stand-in's when one was used), or <c>null</c>.</summary>
     public string? SpeechUsed => Transcripts.Count > 0 ? Transcripts[0].Transcript.Provider : null;
 
@@ -65,6 +71,12 @@ public sealed class SyncCheck
 
     /// <summary>The stage name when lines were matched by meaning (the wording differs, so it isn't audited).</summary>
     public const string ByMeaningStage = "lines by meaning";
+
+    /// <summary>The stage name when a subtitle in another language than the audio was timed by speech starts alone.</summary>
+    public const string OtherLanguageStage = "speech starts (other language)";
+
+    /// <summary>The stage name when a subtitle in another language than the audio was left alone without a check.</summary>
+    public const string OtherLanguageSkipped = "not checked (other language)";
 
     private readonly IAudioSource _audio;
     private readonly ISpeechToText? _speech;
@@ -97,7 +109,8 @@ public sealed class SyncCheck
     /// </summary>
     /// <param name="subtitles">The subtitle.</param>
     /// <param name="duration">The video's length.</param>
-    /// <param name="language">Two-letter language of the subtitle (and the audio), or <c>null</c>.</param>
+    /// <param name="language">Two-letter language of the audio (the subtitle is in the same language), or <c>null</c>.
+    /// A subtitle in another language than the audio goes to <see cref="RunOtherLanguageAsync"/> instead.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome.</returns>
     public async Task<SyncOutcome> RunAsync(SubtitleDocument subtitles, TimeSpan duration, string? language, CancellationToken cancellationToken)
@@ -149,6 +162,35 @@ public sealed class SyncCheck
                 SpeechFallback = new SpeechFallbackNote(_speech.Id, null, SpeechHealth.NameOf(_speech.Id) + " failed" + (deferred ? ", so the check waits for the next run: " : ", so the check went on without speech-to-text: ") + ex.Message),
             };
         }
+    }
+
+    /// <summary>
+    /// Checks a subtitle in another language than the audio. It is never compared with what is said: speech-to-text
+    /// would be asked for the wrong language and nothing it heard could match, and matching by meaning isn't reliable
+    /// enough to move a translation. With <paramref name="bySpeechStarts"/> off its timing is left alone (nothing is
+    /// read); on (experimental), the language-independent speech-start stage runs alone, with its usual confidence gates,
+    /// and the caller holds any correction for review.
+    /// </summary>
+    /// <param name="subtitles">The subtitle.</param>
+    /// <param name="duration">The video's length.</param>
+    /// <param name="subtitleLanguage">The subtitle's language (for the explanation).</param>
+    /// <param name="audioLanguage">The audio's language (for the explanation).</param>
+    /// <param name="bySpeechStarts">Whether to check the timing by speech starts.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The outcome, marked <see cref="SyncOutcome.OtherLanguage"/>.</returns>
+    public async Task<SyncOutcome> RunOtherLanguageAsync(SubtitleDocument subtitles, TimeSpan duration, string? subtitleLanguage, string? audioLanguage, bool bySpeechStarts, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(subtitles);
+        var which = $"This subtitle is in {SpokenLanguage.NameOf(subtitleLanguage)} but the audio is in {SpokenLanguage.NameOf(audioLanguage)}";
+        if (!bySpeechStarts)
+        {
+            var left = new SyncModel(SyncStatus.Unreliable, 1, 0, 0, [], which + ", so its timing can't be checked against what is said and was left alone. (Timing for subtitles in another language than the audio is planned; an experimental check by speech starts can be switched on in the advanced settings.)");
+            return new SyncOutcome(left, OtherLanguageSkipped, false, null) { OtherLanguage = true };
+        }
+
+        var first = await new Synchroniser(_audio, _detectorLag).SolveAsync(subtitles, duration, cancellationToken).ConfigureAwait(false);
+        var note = which + ": timing checked by speech starts alone (experimental), never by words; any correction waits for review.";
+        return new SyncOutcome(first, OtherLanguageStage, false, note) { OtherLanguage = true };
     }
 
     // Stage 3: exact words didn't line up, so the matcher pairs what was heard with the subtitle lines by meaning. Its

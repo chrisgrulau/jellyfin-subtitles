@@ -134,8 +134,8 @@ public class CandidateTests
     [Fact]
     public void Language_is_guessed_from_common_words()
     {
-        Assert.Equal("eng", LanguageGuesser.Guess(English)?.Language);
-        Assert.Equal("fre", LanguageGuesser.Guess(French)?.Language);
+        Assert.Equal("en", LanguageGuesser.Guess(English)?.Language);
+        Assert.Equal("fr", LanguageGuesser.Guess(French)?.Language);
         Assert.Null(LanguageGuesser.Guess("Too short to tell."));
     }
 

@@ -201,7 +201,8 @@ public sealed partial class SubtitleFindTask : IScheduledTask
             .OrderBy(j => j.Video.Season == 0)
             .Take(Math.Max(1, config.MaxFindsPerRun))
             .ToList();
-        LogStarting(_logger, jobs.Count, speech?.Id ?? "none");
+        var perLanguage = FindRules.PerLanguage(jobs.Select(j => j.Language));
+        LogStarting(_logger, jobs.Count, speech?.Id ?? "none", perLanguage);
         foreach (var w in waiting)
         {
             _finder.NoteWaiting(w);
@@ -301,8 +302,8 @@ public sealed partial class SubtitleFindTask : IScheduledTask
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: speech-to-text not used: {Problem}")]
     private static partial void LogNoSpeech(ILogger logger, string problem);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: searching for {Count} missing subtitles (speech-to-text: {Speech})")]
-    private static partial void LogStarting(ILogger logger, int count, string speech);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: searching for {Count} missing subtitles ({Languages}; speech-to-text: {Speech})")]
+    private static partial void LogStarting(ILogger logger, int count, string speech, string languages);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Shoal Subtitles: {Name}: {Status}. {Explanation}")]
     private static partial void LogResult(ILogger logger, string name, ResultStatus status, string explanation);

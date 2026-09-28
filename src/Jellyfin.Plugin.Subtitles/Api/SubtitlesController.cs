@@ -156,7 +156,7 @@ public class SubtitlesController : ControllerBase
     /// </summary>
     /// <param name="offset">How many matching results to skip.</param>
     /// <param name="limit">How many to return (1 to 100; default 15).</param>
-    /// <param name="filter">Empty for everything; <c>waiting</c>, <c>wholefile</c>, <c>queued</c>, <c>fellback</c>, or a status name.</param>
+    /// <param name="filter">Empty for everything; <c>waiting</c>, <c>wholefile</c>, <c>queued</c>, <c>fellback</c>, a language (<c>lang:FR</c>), or a status name.</param>
     /// <param name="q">Text to find in the name or the files' paths.</param>
     /// <returns>The page.</returns>
     [HttpGet("Results/Page")]
@@ -441,7 +441,11 @@ public class SubtitlesController : ControllerBase
         }
 
         var track = AudioChoice.For(audio, subtitle.Language);
-        return new SubtitleJob(video.Id, r.Name, video.Path, r.SubtitlePath, subtitle.Language, TimeSpan.FromTicks(video.RunTimeTicks ?? 0), track, audio[track].Language);
+        var scope = JellyfinLibraries.Scope(_library, SubtitlesPlugin.Instance?.Configuration ?? new PluginConfiguration(), _serverConfig);
+        return new SubtitleJob(video.Id, r.Name, video.Path, r.SubtitlePath, subtitle.Language, TimeSpan.FromTicks(video.RunTimeTicks ?? 0), track, audio[track].Language)
+        {
+            LibraryLanguage = scope.LanguagesForPath(video.Path).Codes[0],
+        };
     }
 
     /// <summary>

@@ -23,7 +23,21 @@ public sealed record ResultRow(SubtitleResult Result, ResultView View);
 /// <param name="WholeFile">Results the whole-file check flagged.</param>
 /// <param name="Queued">Results queued for a whole-file check, a fix by section or a rerun.</param>
 /// <param name="FellBack">Results whose speech-to-text fell back or failed.</param>
-public sealed record ResultTally(int All, IReadOnlyDictionary<string, int> ByStatus, int Waiting, int WholeFile, int Queued, int FellBack);
+public sealed record ResultTally(int All, IReadOnlyDictionary<string, int> ByStatus, int Waiting, int WholeFile, int Queued, int FellBack)
+{
+    /// <summary>Gets the counts per subtitle language, most results first.</summary>
+    public IReadOnlyList<LanguageTally> Languages { get; init; } = [];
+}
+
+/// <summary>
+/// Counts for one subtitle language.
+/// </summary>
+/// <param name="Code">The two-letter code, in capitals (as the results list shows it), e.g. <c>FR</c>.</param>
+/// <param name="Name">The language's English name, e.g. <c>French</c>.</param>
+/// <param name="Results">Results for subtitles in this language.</param>
+/// <param name="Missing">Searches in this language that found nothing fitting (the video still has no subtitle in it).</param>
+/// <param name="OtherLanguage">Subtitles in this language whose timing was left alone because the audio is in another language.</param>
+public sealed record LanguageTally(string Code, string Name, int Results, int Missing, int OtherLanguage);
 
 /// <summary>
 /// One page of results.
@@ -48,11 +62,32 @@ public static class ResultQuery
     /// <summary>The filters besides a status name.</summary>
     public static readonly IReadOnlyList<string> Filters = ["waiting", "wholefile", "queued", "fellback"];
 
+    /// <summary>What a language filter starts with (<c>lang:FR</c>: results for subtitles in French).</summary>
+    public const string LanguageFilter = "lang:";
+
+    /// <summary>
+    /// The language a result's subtitle is in (two-letter, capitals), from its file name, when that names a language.
+    /// An embedded track's result names the video instead, so it has none.
+    /// </summary>
+    /// <param name="r">The result.</param>
+    /// <returns>The code, or <c>null</c>.</returns>
+    public static string? LanguageOf(SubtitleResult r)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        if (r.Id.StartsWith("emb-", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return SpeechToText.Languages.ToTwoLetter(ResultPresenter.LanguageOf(r.SubtitlePath))?.ToUpperInvariant();
+    }
+
     /// <summary>
     /// Whether a result is shown for a filter and a search.
     /// </summary>
     /// <param name="r">The result.</param>
-    /// <param name="filter">Empty for everything; <c>waiting</c>, <c>wholefile</c>, <c>queued</c>, <c>fellback</c>, or a status name.</param>
+    /// <param name="filter">Empty for everything; <c>waiting</c>, <c>wholefile</c>, <c>queued</c>, <c>fellback</c>, a language
+    /// (<c>lang:FR</c>), or a status name.</param>
     /// <param name="search">Text to find in the name or the files' paths (any case), or empty.</param>
     /// <returns><c>true</c> if it is shown.</returns>
     public static bool Matches(SubtitleResult r, string? filter, string? search)
@@ -65,6 +100,7 @@ public static class ResultQuery
             "wholefile" => r.Findings.Any(DiscrepancyReview.IsWholeFile),
             "queued" => r.WholeFileRequested || r.SectionFixRequested || r.RerunWith is not null,
             "fellback" => r.SpeechFallback is not null,
+            var lang when lang.StartsWith(LanguageFilter, StringComparison.Ordinal) => string.Equals(LanguageOf(r), lang[LanguageFilter.Length..].Trim().ToUpperInvariant(), StringComparison.Ordinal),
             var status => string.Equals(r.Status.ToString(), status, StringComparison.Ordinal),
         };
         var text = search?.Trim();
@@ -135,7 +171,15 @@ public static class ResultQuery
             all.Count(r => r.PendingReview),
             all.Count(r => r.Findings.Any(DiscrepancyReview.IsWholeFile)),
             all.Count(r => r.WholeFileRequested || r.SectionFixRequested || r.RerunWith is not null),
-            all.Count(r => r.SpeechFallback is not null));
+            all.Count(r => r.SpeechFallback is not null))
+        {
+            Languages = [.. all.Select(r => (Code: LanguageOf(r), r.Status))
+                .Where(x => x.Code is not null)
+                .GroupBy(x => x.Code!, StringComparer.Ordinal)
+                .Select(g => new LanguageTally(g.Key, SpokenLanguage.NameOf(g.Key), g.Count(), g.Count(x => x.Status == ResultStatus.NotFound), g.Count(x => x.Status == ResultStatus.OtherLanguage)))
+                .OrderByDescending(t => t.Results)
+                .ThenBy(t => t.Code, StringComparer.Ordinal)],
+        };
     }
 }
 

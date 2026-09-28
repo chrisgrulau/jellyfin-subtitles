@@ -82,7 +82,7 @@ public sealed partial class SubDlSource : ICandidateSource
             return [];
         }
 
-        var query = new List<string> { "api_key=" + Uri.EscapeDataString(_key), "languages=" + lang.ToUpperInvariant(), "subs_per_page=30" };
+        var query = new List<string> { "api_key=" + Uri.EscapeDataString(_key), "languages=" + LanguageCodes(lang), "subs_per_page=30" };
         if (ids.ImdbId is { } imdb && ImdbPattern().IsMatch(imdb))
         {
             query.Add("imdb_id=" + imdb);
@@ -157,6 +157,25 @@ public sealed partial class SubDlSource : ICandidateSource
 
         _wanted.TryGetValue(candidate.Id, out var ids);
         return Pick(zip, ids, candidate.Language);
+    }
+
+    /// <summary>
+    /// SubDL's language codes for a language: mostly its two-letter code in capitals, but Norwegian is <c>NO</c> whichever
+    /// written form is wanted, and Portuguese and Chinese have more than one code (<c>BR_PT</c> for Brazilian
+    /// Portuguese, <c>ZH_BG</c> for Chinese in Big5), all of which are asked for.
+    /// </summary>
+    /// <param name="twoLetter">The two-letter code.</param>
+    /// <returns>The codes, comma separated.</returns>
+    public static string LanguageCodes(string twoLetter)
+    {
+        ArgumentNullException.ThrowIfNull(twoLetter);
+        return twoLetter.ToUpperInvariant() switch
+        {
+            "NB" or "NN" or "NO" => "NO",
+            "PT" => "PT,BR_PT",
+            "ZH" => "ZH,ZH_BG",
+            var code => code,
+        };
     }
 
     /// <summary>

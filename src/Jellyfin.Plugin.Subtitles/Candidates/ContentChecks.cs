@@ -25,7 +25,7 @@ public static class ContentChecks
     /// </summary>
     /// <param name="video">The video.</param>
     /// <param name="document">The parsed subtitle.</param>
-    /// <param name="language">The language wanted (ISO 639-2).</param>
+    /// <param name="language">The language wanted (any form: <c>fre</c>, <c>fra</c> and <c>fr</c> are the same).</param>
     /// <returns>The assessment.</returns>
     public static ContentAssessment Assess(VideoFacts video, SubtitleDocument document, string language)
     {
@@ -72,24 +72,32 @@ public static class ContentChecks
         }
 
         var text = string.Join('\n', document.Cues.Select(c => SubtitleMarkup.ToPlainText(c.Text)));
+        var wanted = SpeechToText.Languages.ToTwoLetter(language);
+        var name = Pipeline.SpokenLanguage.NameOf(wanted ?? language);
+
+        // The writing system first (any language with one clear script): Cyrillic text isn't English, Latin text isn't Greek
+        if (LanguageGuesser.ScriptFor(wanted) is { } expected && LanguageGuesser.ScriptOf(text) is { } script && script != expected)
+        {
+            reasons.Add("text is written in " + script + " script, not the " + expected + " script " + name + " uses");
+            return new ContentAssessment(adjustment, true, reasons);
+        }
+
         if (LanguageGuesser.Guess(text) is { } guess)
         {
-            if (string.Equals(guess.Language, language, StringComparison.Ordinal))
+            if (LanguageGuesser.SameFamily(guess.Language, wanted))
             {
                 adjustment += 0.05;
                 reasons.Add("text is in the expected language");
             }
-            else if (LanguageGuessable(language))
+            else if (LanguageGuesser.KnowsWordsOf(wanted))
             {
+                // Only a language whose words the guesser knows: otherwise it could be confusing a closely related
+                // language for one it knows
                 rejected = true;
-                reasons.Add("text looks like " + guess.Language + ", not " + language);
+                reasons.Add("text looks like " + Pipeline.SpokenLanguage.NameOf(guess.Language) + ", not " + name);
             }
         }
 
         return new ContentAssessment(adjustment, rejected, reasons);
     }
-
-    // Only reject on a language mismatch when the wanted language is one the guesser knows; otherwise it could be
-    // confusing a closely related language for one it knows
-    private static bool LanguageGuessable(string language) => language is "eng" or "fre" or "spa" or "ger" or "ita" or "por" or "dut";
 }

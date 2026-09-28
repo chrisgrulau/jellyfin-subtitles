@@ -118,15 +118,7 @@ public sealed class SubtitleGenerator
     {
         ArgumentNullException.ThrowIfNull(job);
         ArgumentNullException.ThrowIfNull(wanted);
-        if (Languages.ToTwoLetter(job.Language) is not { } language)
-        {
-            return false;
-        }
-
-        var audio = string.IsNullOrWhiteSpace(job.AudioLanguage) || job.AudioLanguage.Trim() is "und" or "unk" or "mis" or "zxx" ? null : job.AudioLanguage;
-        return audio is not null
-            ? string.Equals(Languages.ToTwoLetter(audio), language, StringComparison.Ordinal)
-            : wanted.Count > 0 && string.Equals(Languages.ToTwoLetter(wanted[0]), language, StringComparison.Ordinal);
+        return SpokenLanguage.Matches(job.Language, job.AudioLanguage, wanted.Count > 0 ? wanted[0] : null);
     }
 
     /// <summary>
@@ -293,7 +285,7 @@ public sealed class SubtitleGenerator
 
         var service = ServiceName(full.Provider) + (string.IsNullOrEmpty(full.Model) || full.Model == "default" ? string.Empty : " (" + full.Model + ")");
         var words = TranscriptCues.SpeechWords(full.Words);
-        var cues = TranscriptCues.Build(words);
+        var cues = TranscriptCues.Build(words, CueRules.For(Languages.ToTwoLetter(job.Language)));
         if (words.Count < Math.Max(MinWords, MinWordsPerHour * job.Duration.TotalHours) || cues.Count == 0)
         {
             return Save(result with

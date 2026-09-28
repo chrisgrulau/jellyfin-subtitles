@@ -65,6 +65,13 @@ public enum ResultStatus
     /// stand-in failed, or none is set up). No verdict is recorded and nothing is changed; it is tried again on the next run.
     /// </summary>
     Deferred,
+
+    /// <summary>
+    /// The subtitle is in another language than the audio, so its timing can't be checked by what is said: it is left
+    /// alone (or, with the experimental setting on, its speech starts couldn't settle it). Timing for these is planned
+    /// with translation.
+    /// </summary>
+    OtherLanguage,
 }
 
 /// <summary>

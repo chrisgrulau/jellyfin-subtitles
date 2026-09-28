@@ -21,7 +21,8 @@ ISubtitleSource → ICandidateScorer → (download top N) → IAudioCheck → IS
 
 Release group, source (WEB-DL, BluRay …), streaming service, resolution, edition, REPACK/PROPER; frame rate (23.976 vs
 25 fps is the usual cause of drift); last cue vs video running time; cue density; uploader and download signals;
-machine-/AI-translated flags; hearing-impaired and forced preferences; language check of the text itself.
+machine-/AI-translated flags; hearing-impaired and forced preferences; language check of the text itself (its writing
+system for any language, common words for some; see [Languages](#languages)).
 
 ### 3. Audio check and synchronisation
 
@@ -49,7 +50,8 @@ machine-/AI-translated flags; hearing-impaired and forced preferences; language 
   shifts under 0.2 s are left alone. Calibrated on real videos with a local faster-whisper service: shifts and frame-rate
   changes recovered in 30 of 30 cases, including every dense comedy the line-start stage had to leave; subtitles for
   another episode or film rejected in 16 of 16; about 10 s per video on a small GPU. Word matching also catches
-  subtitles in the wrong language (nothing matches), which the language-independent stage can't.
+  subtitles in the wrong language (nothing matches), which the language-independent stage can't. Only subtitles in
+  the audio's language get this stage; see [Languages](#languages).
   Subtitles made for a different cut, whose anchors split into clusters along the timeline, are left for the
   [fix by section](#fix-by-section-different-cuts), which uses a full transcript.
 
@@ -158,7 +160,8 @@ Stage 4, part 1: the last resort when no subtitle can be found.
   after a comma, semicolon, colon or dash in its second half, if there is one). Lines are balanced, preferring a break
   after punctuation. A cue runs from its first word's start to its last word's end, lengthened into the following
   silence towards 1 s and towards 20 characters a second, never beyond 7 s, and ends at least 80 ms before the next cue
-  (words packed closer than that push the next cue on). Chinese, Japanese and Korean words are joined without spaces.
+  (words packed closer than that push the next cue on). Chinese and Japanese words are joined without spaces (Korean
+  keeps its spaces), and their lines are shorter (`CueRules.For`; see [Languages](#languages)).
 - **Quality guard:** fewer than 20 words an hour (at least 3) after dropping sound descriptions records `NoSpeech`
   ("No speech to transcribe") and writes nothing.
 - **File and naming:** `<video name>.<two-letter language>.generated.srt` beside the video (`SubtitleGenerator.PathFor`),
@@ -706,10 +709,110 @@ Which languages a video's subtitles are wanted in (`LanguageSettings.Choose`, pe
 4. Otherwise English.
 
 The walk carries each video's languages, so checks, searches, embedded tracks, generation and the whole-file check all
-use the video's own library's list (an untagged audio track is taken to be in that list's first language). Where no
-single video is concerned, the union over the libraries worked on is used. The settings page lists what is in effect
-per library, and where it came from.
+use the video's own library's list. Where no single video is concerned, the union over the libraries worked on is used.
+The settings page lists what is in effect per library, and where it came from. A language named twice in different
+forms (`fre`, `fra`, `French`) counts once (`Recognised` keeps the first form), so it isn't searched for twice.
 
-Same-language subtitles for any language the providers support. Different audio and subtitle languages are on the
-roadmap: identify both languages, transcribe, translate (Whisper can translate straight to English), and synchronise
-mainly on the speech/silence pattern, with fuzzy text matching as a secondary signal.
+### The audio's language (`SpokenLanguage`)
+
+Every stage that compares a subtitle with what is said works only on a subtitle in the audio's language:
+
+- **The audio's language** (`SpokenLanguage.Heard`): the chosen audio stream's tag (`AudioChoice.For`: the first stream
+  in the subtitle's language, else the default, else the first) when it names a language; a missing, `und`, `unk`,
+  `mis`, `zxx` or unrecognised tag means the library's first wanted language (plugin setting, library, server, English).
+  The walk sets `LibraryLanguage` on every `SubtitleJob` and `EmbeddedJob` (and the controller's `JobFor` does too).
+- **Same language** (`Matches`: both known and equal) is required to search for a missing subtitle
+  (`FindRules.AudioIsIn` in `LibraryVideos.Missing`), to generate one (`SubtitleGenerator.AudioMatches`), for the
+  whole-file check and the fix by section (`WholeFileChecker.SameLanguage`), and to copy out an embedded track
+  (`LibraryVideos.EmbeddedTracks` skips one whose language `Differs`).
+- **Another language** (`Differs`: both known and different): a subtitle file beside the video in a wanted language
+  that isn't the audio's is never lined up by words (`SyncCheck.RunOtherLanguageAsync`): speech-to-text would be told the
+  wrong language (or translate), nothing heard could match, and matching by meaning isn't reliable enough to move a
+  translation. See [Subtitles in another language than the audio](#subtitles-in-another-language-than-the-audio).
+- **Speech-to-text's language** (`SubtitleJob.SpeechLanguage`, `FindJob.SpeechLanguage`, `EmbeddedJob.SpeechLanguage`):
+  the audio's language, or the subtitle's when the audio's isn't known (only reached for same-language subtitles). The
+  same code goes to the wording audit, the whole-file check's AI confirmation and the line matcher
+  (`subtitleLanguage`), whose instructions say the lines and the speech are in that language and ask for reasons in
+  English.
+
+### Per stage
+
+- **Finding.** Jellyfin's `ISubtitleManager.SearchSubtitles` takes the three-letter code in either ISO 639-2 form
+  (Jellyfin's `FindLanguageInfo` knows both). SubDL gets its own codes (`SubDlSource.LanguageCodes`: two-letter in
+  capitals, `NO` for any Norwegian, `PT,BR_PT` for Portuguese, `ZH,ZH_BG` for Chinese). Added files are named with the
+  two-letter code (`Film.fr.srt`), or the three-letter one for a language without one.
+- **Scoring the text** (`ContentChecks`, `LanguageGuesser`). Codes are compared in their two-letter form, so `fra`,
+  `fre` and `French` agree (before, a wanted `fra` or `deu` was never recognised or rejected). First the writing system:
+  a language with one clear script (`ScriptFor`: Cyrillic, Greek, Arabic, Hebrew, CJK, Hangul, Thai, Devanagari, or
+  Latin for the languages known to use it; none for Serbian) rejects text whose letters are at least 80 % in another
+  script (of at least 200 letters). Then common words, for English, French, Spanish, German, Italian, Portuguese, Dutch,
+  Swedish, Danish, Norwegian, Polish, Finnish and Turkish: a clear winner (15 % of words, 1.5× the best language outside
+  its family) that isn't the wanted language rejects the subtitle, but only when the wanted language's words are known;
+  Swedish, Danish and Norwegian form one family and aren't told apart.
+- **Timing by speech starts** is language-independent. **Timing by words** (`TranscriptAligner.Anchors`) matches
+  scripts written without spaces (Chinese characters, kana, Thai, Lao, Khmer, Myanmar) character by character on both
+  sides: a heard word is split into characters timed by their place in it. The word-time lag (0.28 s for whisper.cpp)
+  was calibrated on English; other languages use the same value until there is field data.
+- **Wording audit and whole-file check.** `SpokenText` splits English contractions and reads English number words
+  only for English (or an unknown language). Negations are counted per language (`NegationsFor`: English, French without
+  "ne", which speech drops, Spanish, Italian, Portuguese, German, Dutch, Swedish, Danish, Norwegian, Polish); a
+  language without a list has no negation rule, so its lines are never flagged for one; a lone "no"/"non"/"não"/"nie"
+  followed by a comma or stop is an answer, not a negation. Where number words aren't read (`ReadsNumberWords`), only
+  a number heard in the place of another number is a difference ("veinticinco" written for "25" heard isn't). Names
+  aren't told by capitals in German. The whole-file check skips languages written without spaces
+  (`SpokenLanguage.WrittenWithoutSpaces`; `WholeFileChecker.NoSpaces`), since it compares words.
+- **Generating.** The full transcript is asked for the audio's language (which is the subtitle's), cached under it, and
+  the file named `<video>.<two-letter>.generated.srt`. `CueRules.For` makes Chinese and Japanese lines 16 characters
+  (9 and 7 characters a second) and Korean 20 (12 a second); lines are wrapped between two Chinese or Japanese
+  characters, and Korean words keep their spaces.
+- **Clean-up.** Speaker labels in any alphabet (`\p{Lu}`), full-width brackets (`（…）`, `【…】`, `［…］`) as sound
+  descriptions, and credit lines in French, Spanish, German, Italian, Portuguese, Dutch, the Scandinavian languages and
+  Polish besides English (near the start or end only, as before). Site adverts are language-independent.
+- **Counting.** The download ledger and **Subtitle downloads per day** are shared by all languages; **Searches per run**
+  (`MaxFindsPerRun`) and the nightly generation limit count one per video and language. The search's log line counts
+  searches per language (`FindRules.PerLanguage`). The results tally has per-language counts (`ResultTally.Languages`:
+  results, searches that found nothing, subtitles left for their language), shown in the page's summary line ("still
+  missing: French 3, English 1") and as a `lang:FR` filter (also for bulk actions).
+
+## Subtitles in another language than the audio
+
+Part of the roadmap's "subtitles in a different language from the audio (translation)". What is there now, and the
+plan.
+
+### Now
+
+- **Left alone by default.** `SubtitleProcessor.ProcessAsync` sends a subtitle whose language `Differs` from the
+  audio's to `SyncCheck.RunOtherLanguageAsync`, which reads no audio and returns `Unreliable` with the stage
+  `not checked (other language)`; the result is `OtherLanguage` ("Not the audio's language": "In another language than
+  the audio, so its timing was left alone"), with only the harmless clean-up (as for `WrongLanguage`), no wording
+  audit and nothing learnt for calibration. It isn't checked again unless the file changes, the audio turns out to be
+  in its language, or the experimental setting is switched on (`SubtitleProcessor.NeedsCheck(SubtitleJob, …)`). A
+  subtitle checked by an earlier version while its languages weren't told apart (`Unreliable` or `WrongLanguage`) is
+  checked once more.
+- **Experimental: speech starts alone** (`TimeOtherLanguages`, off; Advanced → Checking). The existing speech-start
+  stage (`Synchroniser`) runs alone, with its usual gates (margin 0.03 and 6 standard deviations, offsets under 0.5 s
+  at the same frame rate left alone), stage `speech starts (other language)`. In sync: `InSync`. A correction is
+  always `Proposed` (waits for review, whatever the timing policy). Unclear: `OtherLanguage`. Speech-to-text is never
+  called. Its calibration (48/48 wrong pairings rejected) was on same-language subtitles; a translation's lines start
+  where the speech does, so the signal is the same, but the lines are split differently, so it is marked experimental
+  until there is field data.
+- **Not searched for, not generated.** A missing subtitle in a language the audio isn't in isn't searched for (there is
+  nothing to check a download against yet), and embedded tracks in another language aren't copied out.
+
+### Plan
+
+1. **VAD-first timing.** Speech starts (the current stage) first, then a speech/silence profile compared with the
+   cues' coverage, per stretch, so a translation's timing can be settled and, with the fix by section's segmentation,
+   cut by cut. Field data from the experimental setting decides whether its corrections can be applied without review.
+2. **Whisper's translate-to-English as a shortcut.** For English subtitles on audio in another language, whisper.cpp
+   and OpenAI-compatible services can translate speech straight to English (`--translate` / `/audio/translations`),
+   with segment times. Its words won't match a human translation exactly, so the anchors come from the line matcher
+   (by meaning, `MeaningAligner`) rather than exact word runs, gated as matches by meaning are now (always reviewed).
+   Needs a `translate` flag on `ISpeechToText` and a separate cache key.
+3. **MT/LLM translation.** For other pairs: transcribe in the audio's language, translate the phrases with the AI
+   plugin (or a translation service) into the subtitle's language, then match by meaning as in 2. The same step can
+   generate a translated subtitle where none is found (a `*.<lang>.generated.srt` labelled as translated), within the
+   AI plugin's budget.
+4. **Searching for translations.** Once timing can be checked, `LibraryVideos.Missing` also yields languages the audio
+   isn't in (behind a setting), each candidate checked by 1 (and 2 or 3 where available) and added only with a
+   confident fit.

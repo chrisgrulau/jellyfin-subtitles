@@ -25,7 +25,14 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Duration">The video's length.</param>
 /// <param name="AudioStream">Which audio stream to listen to.</param>
 /// <param name="AudioLanguage">That audio stream's language tag, if it has one.</param>
-public sealed record FindJob(Guid ItemId, string Name, string VideoPath, VideoFacts Video, string Language, TimeSpan Duration, int AudioStream, string? AudioLanguage = null);
+public sealed record FindJob(Guid ItemId, string Name, string VideoPath, VideoFacts Video, string Language, TimeSpan Duration, int AudioStream, string? AudioLanguage = null)
+{
+    /// <summary>
+    /// Gets the language speech-to-text is told to expect when checking candidates (two-letter): the audio's, taken to be
+    /// the wanted language when the audio stream has no usable tag. A search is only made for a language the audio is in.
+    /// </summary>
+    public string? SpeechLanguage => SpokenLanguage.IsUnknown(AudioLanguage) ? Languages.ToTwoLetter(Language) : Languages.ToTwoLetter(AudioLanguage);
+}
 
 /// <summary>
 /// The day's download allowance is used up; searching stops until tomorrow.
@@ -252,7 +259,7 @@ public sealed class SubtitleFinder
             }
 
             var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
-                .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
+                .RunAsync(document, job.Duration, job.SpeechLanguage, cancellationToken).ConfigureAwait(false);
             if (outcome.Deferred)
             {
                 deferred ??= outcome;

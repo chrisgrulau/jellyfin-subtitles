@@ -126,6 +126,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool FixDifferentCuts { get; set; } = Pipeline.SectionFixer.OnByDefault;
 
     /// <summary>
+    /// Gets or sets a value indicating whether a subtitle in another language than the video's audio has its timing
+    /// checked by speech starts alone (experimental, off by default). Such a subtitle is never compared with what is said;
+    /// off, its timing is left alone and its result says so. On, the language-independent speech-start check runs with
+    /// its usual confidence gates, and any correction waits for review.
+    /// </summary>
+    public bool TimeOtherLanguages { get; set; }
+
+    /// <summary>
     /// Gets or sets the currency costs and limits are shown and set in (ISO 4217, e.g. <c>AUD</c>). Providers charge in
     /// their own currency (usually US dollars); charges are converted with the European Central Bank's daily rates.
     /// </summary>
@@ -281,5 +289,5 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <see cref="Pipeline.RunStart.PoliciesFor"/>).
     /// </summary>
     /// <returns>The policies.</returns>
-    public Pipeline.Policies Policies() => new(TimingFixes, TextChanges, Cleanup ?? new CleanupSettings());
+    public Pipeline.Policies Policies() => new(TimingFixes, TextChanges, Cleanup ?? new CleanupSettings(), TimeOtherLanguages: TimeOtherLanguages);
 }

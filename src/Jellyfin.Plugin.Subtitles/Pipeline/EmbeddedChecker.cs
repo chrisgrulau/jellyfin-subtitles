@@ -24,7 +24,17 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Duration">The video's length.</param>
 /// <param name="AudioStream">Which audio stream to listen to.</param>
 /// <param name="Fingerprint">What identifies this version of the video (size, time, track) without reading it.</param>
-public sealed record EmbeddedJob(Guid ItemId, string Name, string VideoPath, int StreamIndex, string? Codec, string Language, TimeSpan Duration, int AudioStream, string Fingerprint);
+public sealed record EmbeddedJob(Guid ItemId, string Name, string VideoPath, int StreamIndex, string? Codec, string Language, TimeSpan Duration, int AudioStream, string Fingerprint)
+{
+    /// <summary>Gets the chosen audio stream's language tag, if it has one.</summary>
+    public string? AudioLanguage { get; init; }
+
+    /// <summary>Gets the first language wanted for the video's library (the audio's, when its stream has no usable tag).</summary>
+    public string? LibraryLanguage { get; init; }
+
+    /// <summary>Gets the language speech-to-text is told to expect (two-letter): the audio's, else the track's.</summary>
+    public string? SpeechLanguage => SpokenLanguage.Heard(AudioLanguage, LibraryLanguage) ?? Languages.ToTwoLetter(Language);
+}
 
 /// <summary>
 /// Checks text subtitle tracks inside videos (opt-in: copying a track out reads the whole file). The video is never
@@ -121,7 +131,7 @@ public sealed class EmbeddedChecker
         }
 
         var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
-            .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
+            .RunAsync(document, job.Duration, job.SpeechLanguage, cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         var explanation = outcome.Note is null ? model.Explanation : model.Explanation + " " + outcome.Note;
         if (outcome.Deferred)

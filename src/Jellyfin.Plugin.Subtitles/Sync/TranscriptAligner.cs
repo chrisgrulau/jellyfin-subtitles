@@ -74,7 +74,8 @@ public static partial class TranscriptAligner
         var anchors = new List<Anchor>();
         foreach (var (start, transcript) in transcripts)
         {
-            var heard = transcript.Words.Select(w => (Word: Normalise(w.Text), w.Start)).Where(w => w.Word.Length > 0).ToList();
+            // Scripts written without spaces (Chinese, Japanese, Thai …) are matched character by character on both sides
+            var heard = transcript.Words.SelectMany(HeardUnits).Where(w => w.Word.Length > 0).ToList();
             var seen = new Dictionary<string, int>(StringComparer.Ordinal);
             for (var j = 0; j + 2 < heard.Count; j++)
             {
@@ -192,7 +193,7 @@ public static partial class TranscriptAligner
         foreach (var cue in document.Cues)
         {
             var text = NotSpoken().Replace(SubtitleMarkup.ToPlainText(cue.Text), " ");
-            var tokens = WordPattern().Matches(text).Select(m => (m.Index, Word: Normalise(m.Value))).Where(t => t.Word.Length > 0).ToList();
+            var tokens = Units(text).Where(t => t.Word.Length > 0).ToList();
             if (tokens.Count == 0)
             {
                 continue;
@@ -212,6 +213,81 @@ public static partial class TranscriptAligner
         return words;
     }
 
+    /// <summary>
+    /// Whether a character belongs to a script written without spaces between words (Chinese characters, Japanese kana,
+    /// Thai, Lao, Khmer, Myanmar), whose text is matched character by character.
+    /// </summary>
+    /// <param name="c">The character.</param>
+    /// <returns><c>true</c> for such a script.</returns>
+    public static bool Unspaced(char c)
+        => c is (>= '\u3040' and < '\u3100') or (>= '\u3400' and < '\uA000') or (>= '\uF900' and < '\uFB00') or (>= '\uFF66' and < '\uFFA0')
+            or (>= '\u0E00' and < '\u0F00') or (>= '\u1000' and < '\u10A0') or (>= '\u1780' and < '\u1800');
+
+    // The units matched in a text, with where each starts: words, except that each character of a script written without
+    // spaces is a unit of its own
+    private static IEnumerable<(int Index, string Word)> Units(string text)
+    {
+        foreach (Match m in WordPattern().Matches(text))
+        {
+            if (!m.Value.Any(Unspaced))
+            {
+                yield return (m.Index, Normalise(m.Value));
+                continue;
+            }
+
+            var run = new StringBuilder();
+            var runStart = m.Index;
+            for (var i = 0; i < m.Value.Length; i++)
+            {
+                var c = m.Value[i];
+                if (Unspaced(c))
+                {
+                    if (run.Length > 0)
+                    {
+                        yield return (runStart, Normalise(run.ToString()));
+                        run.Clear();
+                    }
+
+                    yield return (m.Index + i, c.ToString());
+                    runStart = m.Index + i + 1;
+                }
+                else
+                {
+                    if (run.Length == 0)
+                    {
+                        runStart = m.Index + i;
+                    }
+
+                    run.Append(c);
+                }
+            }
+
+            if (run.Length > 0)
+            {
+                yield return (runStart, Normalise(run.ToString()));
+            }
+        }
+    }
+
+    // A heard word's units, each timed by its place in the word (a word of an unspaced script is split into characters)
+    private static IEnumerable<(string Word, double Start)> HeardUnits(TranscribedWord w)
+    {
+        var text = w.Text ?? string.Empty;
+        var units = text.Any(Unspaced) ? Units(text).ToList() : [];
+        if (units.Count <= 1)
+        {
+            yield return (units.Count == 1 ? units[0].Word : Normalise(text), w.Start);
+            yield break;
+        }
+
+        var length = Math.Max(1, text.Length);
+        var span = Math.Max(0, w.End - w.Start);
+        foreach (var (index, word) in units)
+        {
+            yield return (word, w.Start + (span * index / length));
+        }
+    }
+
     private static double Median(IEnumerable<double> values)
     {
         var v = values.Order().ToList();
@@ -219,7 +295,7 @@ public static partial class TranscriptAligner
     }
 
     // Sound descriptions, music symbols and upper-case speaker labels ("JOHN:") aren't spoken
-    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|[♪♫#]|^\s*-?\s*[A-Z][A-Z .'\-]{1,24}:", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|（[^）]*）|【[^】]*】|［[^］]*］|[♪♫#]|^\s*-?\s*\p{Lu}[\p{Lu}\p{M} .'\-]{1,24}:", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
     private static partial Regex NotSpoken();
 
     [GeneratedRegex(@"[\p{L}\p{Nd}]+(?:['’][\p{L}]+)?", RegexOptions.None, matchTimeoutMilliseconds: 1000)]

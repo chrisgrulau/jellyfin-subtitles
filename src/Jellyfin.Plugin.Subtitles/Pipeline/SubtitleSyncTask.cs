@@ -194,7 +194,7 @@ public sealed partial class SubtitleSyncTask : IScheduledTask
                     continue;
                 }
 
-                if (_processor.NeedsCheck(job.SubtitlePath, fingerprint, speech?.Id ?? string.Empty))
+                if (_processor.NeedsCheck(job, fingerprint, speech?.Id ?? string.Empty, policies.TimeOtherLanguages))
                 {
                     todo.Add(job);
                 }

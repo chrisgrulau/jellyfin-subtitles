@@ -5,6 +5,46 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Subtitles in any language the audio is in.** Each subtitle language is looked after for the videos whose audio is
+  in it (an audio track tagged with it, or an untagged one when it is the library's first language): searching,
+  checking, generating, the wording audit and the whole-file check all work in that language, and speech-to-text is
+  told the audio's language. The results can be filtered by language, and the summary line counts subtitles still
+  missing per language.
+- **Subtitles in another language than the audio are marked, never lined up by words.** French subtitles for an
+  English film, say, used to be checked against English speech with speech-to-text listening for French. Now their
+  timing is left alone and the result says **Not the audio's language**. A subtitle checked that way before is checked
+  once more. Missing subtitles in a language the audio isn't in aren't searched for, and embedded tracks in another
+  language aren't copied out (translation is planned; see docs/DESIGN.md).
+- **Experimental: timing subtitles in another language by speech starts** (Advanced → Checking, off by default). The
+  language-independent speech-start check runs alone for them, with its usual confidence gates; any correction waits
+  for review, and speech-to-text is never used.
+- **Checking a download's language works for more languages.** Text in the wrong alphabet (Cyrillic offered as
+  English, Latin offered as Greek) is turned down in any language, and Swedish, Danish, Norwegian, Polish, Finnish and
+  Turkish are now recognised by their common words too.
+- **Chinese, Japanese and Thai** are lined up with speech character by character (they have no spaces between words,
+  so word matching never found anything), and generated Chinese and Japanese lines are shorter and shown for longer.
+- **Clean-up in more languages:** speaker labels in any alphabet (`JOSÉ:`, `ДИМА:`), full-width brackets as sound
+  descriptions (`（笑）`), and credit lines in French, Spanish, German, Italian, Portuguese, Dutch, the Scandinavian
+  languages and Polish.
+
+### Fixed
+
+- **A subtitle language set as `fra`, `deu` or `nld` is recognised in the download's text.** The text check only knew
+  the other three-letter forms (`fre`, `ger`, `dut`), so French, German or Dutch subtitles set up that way never got
+  the "expected language" bonus, and English text offered as German was never turned down.
+- **A language named twice in different forms** (`fre, French`) is searched for once, not twice.
+- **The whole-file check's negation and number rules no longer assume English.** Negations are counted in the
+  subtitle's language (English, French, Spanish, Italian, Portuguese, German, Dutch, the Scandinavian languages,
+  Polish) and not at all in others, and outside English a number written in words ("veinticinco") where digits were
+  heard ("25") is no longer a difference.
+- **Generated Korean subtitles keep the spaces between words.**
+- **SubDL is asked in its own language codes** (Norwegian `NO` for any form, Brazilian Portuguese and Big5 Chinese
+  included).
+- **Searches per run** and **Subtitle downloads per day** say how they count languages: each video counts once per
+  language it's missing, and all languages share the download limit.
+
 ## [0.18.1-alpha] - 2026-09-28
 
 ### Fixed

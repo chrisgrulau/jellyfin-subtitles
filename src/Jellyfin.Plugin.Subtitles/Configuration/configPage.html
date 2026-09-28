@@ -41,7 +41,7 @@
       #SubtitlesConfigPage .st-InSync, #SubtitlesConfigPage .st-Corrected, #SubtitlesConfigPage .st-Added, #SubtitlesConfigPage .st-Generated { color: var(--subs-ok); }
       #SubtitlesConfigPage .st-Proposed { color: var(--subs-info); }
       #SubtitlesConfigPage .st-WrongLanguage, #SubtitlesConfigPage .st-Failed, #SubtitlesConfigPage .st-CantWrite { color: var(--subs-bad); }
-      #SubtitlesConfigPage .st-Unreliable, #SubtitlesConfigPage .st-Deferred { color: var(--subs-warn); }
+      #SubtitlesConfigPage .st-Unreliable, #SubtitlesConfigPage .st-Deferred, #SubtitlesConfigPage .st-OtherLanguage { color: var(--subs-warn); }
       #SubtitlesConfigPage .subs-chips { white-space: normal; }
       #SubtitlesConfigPage .subs-chip { display: inline-block; margin: 0 .3em .25em 0; padding: .05em .45em; border-radius: 999px; background: var(--subs-soft); font-size: .9em; white-space: nowrap; cursor: default; border: 1px solid transparent; }
       #SubtitlesConfigPage .subs-chip.subs-pending { border: 1px dashed var(--subs-info); background: transparent; }
@@ -248,7 +248,7 @@
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="Languages">Subtitle languages</label>
             <input id="Languages" type="text" is="emby-input" placeholder="Each library's own" />
-            <div class="fieldDescription">Comma separated: codes or names (e.g. <code>eng, fr, German</code>). Anything that isn't a language is ignored and noted in the log. Leave it empty to use each library's subtitle download languages (Jellyfin's library settings), or else the server's preferred metadata language, or else English; what is in effect is shown under Libraries.</div>
+            <div class="fieldDescription">Comma separated: codes or names (e.g. <code>eng, fr, German</code>). Anything that isn't a language is ignored and noted in the log. Leave it empty to use each library's subtitle download languages (Jellyfin's library settings), or else the server's preferred metadata language, or else English; what is in effect is shown under Libraries. Each language is looked after for the videos whose audio is in it; audio with no language tag is taken to be in the first one. Subtitles in a language the audio isn't in are left as they are for now (translation is planned).</div>
           </div>
 
           <fieldset class="subs-libraries">
@@ -515,15 +515,22 @@
               <input id="MaxEmbeddedPerRun" type="number" min="1" max="200" step="1" is="emby-input" />
               <div class="fieldDescription">Default 10.</div>
             </div>
+            <div class="checkboxContainer checkboxContainer-withDescription">
+              <label class="emby-checkbox-label">
+                <input id="TimeOtherLanguages" type="checkbox" is="emby-checkbox" />
+                <span>Experimental: check the timing of subtitles in another language than the audio</span>
+              </label>
+              <div class="fieldDescription checkboxFieldDescription">A subtitle in another language than the video's audio (French subtitles for an English film, say) is never compared with what is said. Off, its timing is left as it is and its result says so. On, its timing is checked by when speech starts alone, which works in any language but is less sure; any correction waits for your review. Off by default.</div>
+            </div>
             <div class="inputContainer">
-              <label class="inputLabel inputLabelUnfocused" for="MaxFindsPerRun">Videos searched per run</label>
+              <label class="inputLabel inputLabelUnfocused" for="MaxFindsPerRun">Searches per run</label>
               <input id="MaxFindsPerRun" type="number" min="1" max="1000" step="1" is="emby-input" />
-              <div class="fieldDescription">Default 20. A video nothing fits is searched again after 30 days.</div>
+              <div class="fieldDescription">Default 20. Each video counts once for each language it's missing. A search nothing fits is made again after 30 days.</div>
             </div>
             <div class="inputContainer">
               <label class="inputLabel inputLabelUnfocused" for="MaxDownloadsPerDay">Subtitle downloads per day</label>
               <input id="MaxDownloadsPerDay" type="number" min="0" max="10000" step="1" is="emby-input" />
-              <div class="fieldDescription">Default 10. Providers such as OpenSubtitles count every download against your account's daily allowance (about 20 on a free OpenSubtitles account), and downloads you make yourself in Jellyfin use the same allowance, so keep this well below it. When the provider says the allowance is used up, the search stops for the day. Up to three candidates are downloaded per video, fewer when the first fits.</div>
+              <div class="fieldDescription">Default 10. Providers such as OpenSubtitles count every download against your account's daily allowance (about 20 on a free OpenSubtitles account), and downloads you make yourself in Jellyfin use the same allowance, so keep this well below it. When the provider says the allowance is used up, the search stops for the day. Up to three candidates are downloaded per video and language, fewer when the first fits; all languages share this limit.</div>
             </div>
 
             <h3 class="sectionTitle">Clean-up</h3>
@@ -1057,7 +1064,7 @@
           }
         });
 
-        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large', CantWrite: "Can't write here", Declined: 'Declined', Generated: 'Generated', NoSpeech: 'No speech to transcribe', Replaced: 'Replaced by a found subtitle', Deferred: "Couldn't check yet" };
+        var statusNames = { InSync: 'In sync', Corrected: 'Corrected', Proposed: 'Waiting for review', Unreliable: 'Unclear', WrongLanguage: "Doesn't match speech", Failed: 'Failed', Undone: 'Undone', Added: 'Added', NotFound: 'Nothing fitting found', TooLarge: 'Too large', CantWrite: "Can't write here", Declined: 'Declined', Generated: 'Generated', NoSpeech: 'No speech to transcribe', Replaced: 'Replaced by a found subtitle', Deferred: "Couldn't check yet", OtherLanguage: "Not the audio's language" };
 
         // What the whole-file check found, by kind
         var findingNames = { 'missing-line': ['missing line', 'missing lines'], extra: ['line with nothing heard', 'lines with nothing heard'], 'not-in-video': ['not in this cut of the video', 'not in this cut of the video'], name: ['name', 'names'], number: ['number', 'numbers'], negation: ['negation', 'negations'], words: ['line with words missing', 'lines with words missing'] };
@@ -1116,7 +1123,7 @@
         // Subtitle files beside videos that aren't generated can be compared whole with a full transcript
         function wholeCheckable(r) {
           return !r.WholeFileRequested && r.Id.indexOf('gen-') !== 0 && r.Id.indexOf('emb-') !== 0 && !/\.generated\.[^.\\/]+$/i.test(r.SubtitlePath || '') &&
-            ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'Added', 'Declined', 'Undone'].indexOf(r.Status) >= 0 && !(r.Status === 'Undone' && r.Id.indexOf('find-') === 0);
+            ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'OtherLanguage', 'Added', 'Declined', 'Undone'].indexOf(r.Status) >= 0 && !(r.Status === 'Undone' && r.Id.indexOf('find-') === 0);
         }
 
         // Subtitles whose timing check was unclear, or settled with few matching words, can be fixed by section
@@ -1135,7 +1142,7 @@
 
         // The main actions stay on the row; checking again and checking the whole file are in the row's detail
         function mainActions(r, v) {
-          var editable = ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'Added'].indexOf(r.Status) >= 0 && r.Id.indexOf('gen-') !== 0;
+          var editable = ['InSync', 'Corrected', 'Proposed', 'Unreliable', 'WrongLanguage', 'OtherLanguage', 'Added'].indexOf(r.Status) >= 0 && r.Id.indexOf('gen-') !== 0;
           var applicable = r.PendingReview && (r.Status === 'Proposed' || Object.keys(r.CleanupPending || {}).length || (r.Findings || []).some(function (f) { return f.Suggestion; }));
           return (applicable ? button('res-apply subs-primary', 'Apply', r.Id, 'Apply everything waiting (lines with nothing heard are removed only one by one)') : '') +
             (r.PendingReview ? button('res-decline', 'Decline', r.Id) : '') +
@@ -1185,14 +1192,24 @@
         function renderResults() {
           var filter = page.querySelector('#ResFilter'), chosen = filter.value, t = results.tally;
           var present = t ? t.ByStatus : {};
+          var langs = (t && t.Languages) || [];
           filter.innerHTML = '<option value="">Everything</option><option value="waiting">Waiting for review</option><option value="wholefile">Differs from what is said (whole file)</option><option value="queued">Queued</option><option value="fellback">Speech-to-text fell back</option>' +
-            Object.keys(present).map(function (k) { return '<option value="' + esc(k) + '">' + esc(statusNames[k] || k) + ' (' + present[k] + ')</option>'; }).join('');
-          filter.value = chosen && (['waiting', 'wholefile', 'queued', 'fellback'].indexOf(chosen) >= 0 || present[chosen]) ? chosen : '';
+            Object.keys(present).map(function (k) { return '<option value="' + esc(k) + '">' + esc(statusNames[k] || k) + ' (' + present[k] + ')</option>'; }).join('') +
+            (langs.length > 1 ? langs.map(function (l) { return '<option value="lang:' + esc(l.Code) + '">In ' + esc(l.Name) + ' (' + l.Results + ')</option>'; }).join('') : '');
+          var langChosen = chosen && chosen.indexOf('lang:') === 0 && langs.length > 1 && langs.some(function (l) { return 'lang:' + l.Code === chosen; });
+          filter.value = chosen && (['waiting', 'wholefile', 'queued', 'fellback'].indexOf(chosen) >= 0 || present[chosen] || langChosen) ? chosen : '';
           var summary = [];
           if (t) {
             summary.push(t.All + ' checked');
             if (t.Waiting) { summary.push(t.Waiting + ' waiting for review'); }
             if (t.FellBack) { summary.push(t.FellBack + ' fell back'); }
+            // Searches that found nothing yet, per language (only worth naming languages when there are several)
+            var missing = langs.filter(function (l) { return l.Missing > 0; });
+            if (missing.length) {
+              summary.push('still missing: ' + missing.map(function (l) { return (langs.length > 1 ? l.Name + ' ' : '') + l.Missing; }).join(', '));
+            }
+            var other = langs.reduce(function (n, l) { return n + (l.OtherLanguage || 0); }, 0);
+            if (other) { summary.push(other + ' not in the audio\'s language'); }
           }
           page.querySelector('#ResultsSummary').textContent = t && t.All ? summary.join(' · ') : 'Nothing checked yet.';
           page.querySelector('#Results').innerHTML = results.items.length
@@ -1871,6 +1888,7 @@
             page.querySelector('#MaxGenerateHours').value = config.MaxGenerateHours == null ? 4 : config.MaxGenerateHours;
             page.querySelector('#CheckWholeFile').checked = config.CheckWholeFile === true;
             page.querySelector('#FixDifferentCuts').checked = config.FixDifferentCuts === true;
+            page.querySelector('#TimeOtherLanguages').checked = config.TimeOtherLanguages === true;
             page.querySelector('#MaxWholeFileChecksPerNight').value = config.MaxWholeFileChecksPerNight == null ? 5 : config.MaxWholeFileChecksPerNight;
             page.querySelector('#TuneConfidence').checked = config.TuneConfidence === true;
             page.querySelector('#WriteToActivityLog').checked = config.WriteToActivityLog !== false;
@@ -1915,6 +1933,7 @@
             config.MaxGenerateHours = isNaN(hours) ? 4 : Math.max(0, Math.min(24, hours));
             config.CheckWholeFile = page.querySelector('#CheckWholeFile').checked;
             config.FixDifferentCuts = page.querySelector('#FixDifferentCuts').checked;
+            config.TimeOtherLanguages = page.querySelector('#TimeOtherLanguages').checked;
             var wholePerNight = parseInt(page.querySelector('#MaxWholeFileChecksPerNight').value, 10);
             config.MaxWholeFileChecksPerNight = isNaN(wholePerNight) ? 5 : Math.max(0, Math.min(200, wholePerNight));
             config.TuneConfidence = page.querySelector('#TuneConfidence').checked;
