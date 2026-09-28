@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.0-alpha] - 2026-09-28
+
 ### Added
 
 - **Subtitles in any language the audio is in.** Each subtitle language is looked after for the videos whose audio is
