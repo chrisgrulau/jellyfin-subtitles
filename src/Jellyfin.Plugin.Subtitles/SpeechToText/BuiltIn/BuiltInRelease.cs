@@ -84,6 +84,9 @@ public sealed record BuiltInSource(Uri BaseUrl, string Version, IReadOnlyList<Bu
 
 /// <summary>
 /// The published release (checksums in <c>BuiltInRelease.Checksums.cs</c>, written by <c>tools/builtin_checksums.py</c>).
+/// To adopt a new build, publish it by tagging (<c>whisper-v&lt;version&gt;-&lt;build&gt;</c>, see
+/// <c>.github/workflows/whisper.yml</c>), then run the tool with that tag and commit its output: the tag becomes the
+/// install folder, so servers download and verify the new program on next use and remove the earlier one.
 /// </summary>
 internal static partial class BuiltInRelease
 {

@@ -183,7 +183,8 @@ public sealed class BuiltInProgress
 /// <param name="BytesTotal">Bytes to download in all (while downloading or verifying).</param>
 /// <param name="Percent">Whole percent done, while downloading or verifying.</param>
 /// <param name="Error">Why the last download failed, when the state is <c>failed</c>.</param>
-public sealed record BuiltInInstallStatus(string State, long BytesDone, long BytesTotal, int? Percent, string? Error);
+/// <param name="Update">When idle: the model is there but the program is an earlier build, replaced on next use.</param>
+public sealed record BuiltInInstallStatus(string State, long BytesDone, long BytesTotal, int? Percent, string? Error, bool Update = false);
 
 /// <summary>
 /// Runs one piece of background work at a time: asking again while it runs joins it rather than starting another

@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Built-in speech-to-text build 2 is a smaller download.** The Linux builds of the program stored libwhisper,
+  libggml and libggml-base three times each (their `.so`, `.so.N` and `.so.N.M` links were packed as copies); now each
+  library is packed once, under the name the program asks for, with symbols stripped and the library search limited to
+  the program's own folder. The Linux x64 download drops from 9.8 MB to about 6.9 MB and arm64 from 7.1 MB to about
+  4.2 MB (the model, 82 or 190 MB, is unchanged). Every CPU variant is still included and chosen at run time, so no
+  newer instruction set (AVX, AVX2, AVX-512) is needed. Every file is still checked against SHA-256 values built into
+  the plugin, before it's installed and before every run.
+- **An earlier build updates itself.** A server that allowed the built-in speech-to-text and has an earlier build
+  downloads only the new program (a few MB; the model is kept) the next time it's used, or on **Update now** on the
+  settings page, which says an update is ready. The new program is verified like a first download; only then is the
+  earlier one removed. If the update can't be downloaded, nothing is run and the earlier files stay until it can. The
+  fallback to the built-in speech-to-text keeps working meanwhile.
+
 ## [0.18.1-alpha] - 2026-09-28
 
 ### Fixed
