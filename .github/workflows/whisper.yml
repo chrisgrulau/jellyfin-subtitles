@@ -4,8 +4,12 @@ name: Whisper
 # it, with the speech models, as a release of this repository: the one place the plugin downloads them from. The plugin
 # compiles in the SHA-256 of every file listed in whisper-files.json.
 #
-# Tag whisper-v<whisper.cpp version>-<build number> (e.g. whisper-v1.9.4-1) to publish. Pull requests that change this
+# Tag whisper-v<whisper.cpp version>-<build number> (e.g. whisper-v1.9.4-2) to publish. Pull requests that change this
 # workflow build and test everything without publishing.
+#
+# Build 2 (whisper-v1.9.4-2) packs each Linux library once, under the name the loader asks for (its SONAME), with
+# symbols stripped and RUNPATH $ORIGIN only. Build 1 stored every libwhisper/libggml/libggml-base three times (the
+# .so -> .so.N -> .so.N.M symlinks were copied as files) and carried the runner's build folder in its RUNPATH.
 
 on:
   push:
@@ -95,8 +99,10 @@ jobs:
           fi
           case "${{ matrix.platform }}" in
             linux-*)
-              # Libraries next to the program; C++ runtime linked in, so only glibc (2.35+) is needed
-              flags+=(-DCMAKE_BUILD_RPATH='$ORIGIN' -DCMAKE_INSTALL_RPATH='$ORIGIN'
+              # Libraries next to the program, found through RUNPATH $ORIGIN only (never the runner's build folder). The
+              # program and its three libraries have the C++ runtime linked in; the CPU variants (loaded as modules) use
+              # the system's libstdc++, which is always there where Jellyfin's .NET runs. glibc 2.35+ is needed.
+              flags+=(-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN'
                       "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
                       "-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc") ;;
             windows-*)
@@ -122,9 +128,33 @@ jobs:
           mkdir -p out
           bin=build/bin; [[ -d build/bin/Release ]] && bin=build/bin/Release
           shopt -s nullglob
-          for f in "$bin"/whisper-cli "$bin"/whisper-cli.exe "$bin"/*.so "$bin"/*.so.* "$bin"/*.dll "$bin"/*.dylib; do
-            if [[ -f "$f" ]]; then cp -L "$f" out/; fi
+          for f in "$bin"/whisper-cli "$bin"/whisper-cli.exe "$bin"/*.dll "$bin"/*.dylib; do
+            if [[ -f "$f" && ! -L "$f" ]]; then cp "$f" out/; fi
           done
+          # Linux: each library once, under its SONAME (the name the program and the other libraries ask for), so
+          # libggml.so.0.23.0 becomes libggml.so.0 and the libggml.so / libggml.so.0 links are left out. The CPU variants
+          # have no SONAME and keep their names (ggml finds them by name next to the program).
+          for f in "$bin"/*.so "$bin"/*.so.*; do
+            [[ -L "$f" ]] && continue
+            soname=$(readelf -d "$f" | sed -n 's/.*Library soname: \[\(.*\)\]/\1/p')
+            name=${soname:-$(basename "$f")}
+            test ! -e "out/$name" || { echo "::error::$name packed twice"; exit 1; }
+            cp "$f" "out/$name"
+          done
+          if [[ "${{ matrix.platform }}" == linux-* ]]; then
+            strip --strip-unneeded out/whisper-cli out/*.so*
+            # Every library asked for is packed or a system one; nothing searches anywhere but next to the program
+            for f in out/whisper-cli out/*.so*; do
+              readelf -d "$f" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | while read -r need; do
+                case "$need" in
+                  libc.so.6|libm.so.6|libstdc++.so.6|libgcc_s.so.1|ld-linux-*) ;;
+                  *) test -f "out/$need" || { echo "::error::$(basename "$f") needs $need, which isn't packed"; exit 1; } ;;
+                esac
+              done
+              rpath=$(readelf -d "$f" | sed -n 's/.*R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')
+              test -z "$rpath" || test "$rpath" = '$ORIGIN' || { echo "::error::$(basename "$f") has RUNPATH $rpath"; exit 1; }
+            done
+          fi
           ls -la out
           test -e out/whisper-cli || test -e out/whisper-cli.exe
 
@@ -155,11 +185,23 @@ jobs:
           set -euo pipefail
           cp src/LICENSE out/LICENSE-whisper.cpp.txt
           py=$(command -v python3 || command -v python)
+          # Deflate at its highest level: the plugin's extractor (.NET's ZipArchive) reads nothing better. No file may be
+          # packed twice (build 1 held each Linux library three times).
           cd out && "$py" -c "
-          import os, zipfile
-          with zipfile.ZipFile('../whisper-cli-${{ matrix.platform }}.zip', 'w', zipfile.ZIP_DEFLATED) as z:
-              for n in sorted(os.listdir('.')):
+          import hashlib, os, sys, zipfile
+          names = sorted(os.listdir('.'))
+          seen = {}
+          for n in names:
+              if os.path.islink(n) or not os.path.isfile(n):
+                  sys.exit(n + ' is not a plain file')
+              h = hashlib.sha256(open(n, 'rb').read()).hexdigest()
+              if h in seen:
+                  sys.exit(n + ' is the same file as ' + seen[h])
+              seen[h] = n
+          with zipfile.ZipFile('../whisper-cli-${{ matrix.platform }}.zip', 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for n in names:
                   z.write(n, n)
+          print(os.path.getsize('../whisper-cli-${{ matrix.platform }}.zip'), 'bytes')
           "
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

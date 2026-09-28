@@ -105,15 +105,19 @@ internal static class SpeechSelection
         => new RetryingSpeechToText(service, errors, run, maxAttempts: service.Id == SpeechToTextFactory.BuiltIn ? 1 : SpeechRetry.MaxAttempts);
 
     /// <summary>
-    /// The built-in model already installed (the default first), if any: a fallback never starts a download.
+    /// The built-in model already installed (the default first), if any: a fallback never starts downloading a model. A
+    /// model installed with an earlier build of the program still counts: its first use replaces only the program (a few
+    /// megabytes, verified like the first download), which the administrator already allowed.
     /// </summary>
     /// <param name="builtIn">The built-in speech-to-text.</param>
     /// <returns>The model, or <c>null</c>.</returns>
     internal static string? BuiltInModelInstalled(BuiltInHost? builtIn)
         => builtIn is null || builtIn.Platform is null || builtIn.Problem is not null ? null
-            : builtIn.IsInstalled("base") ? "base"
-            : builtIn.IsInstalled("small") ? "small"
+            : Ready(builtIn, "base") ? "base"
+            : Ready(builtIn, "small") ? "small"
             : null;
+
+    private static bool Ready(BuiltInHost builtIn, string model) => builtIn.IsInstalled(model) || builtIn.UpdatePending(model);
 
     /// <summary>
     /// A service kept within the spending limits when it is paid (as the settings page's Test uses it); a free one as is.

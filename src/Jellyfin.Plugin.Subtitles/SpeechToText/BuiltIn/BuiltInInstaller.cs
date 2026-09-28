@@ -223,6 +223,38 @@ public sealed class BuiltInInstaller : IDisposable
             && p.Files!.Keys.All(f => File.Exists(Path.Combine(_folder, _source.Version, platform, f)))
             && File.Exists(Path.Combine(_folder, "models", m.Name));
 
+    /// <summary>
+    /// Whether an earlier release's program for a platform is on disk (not checked): a build this plugin no longer runs,
+    /// such as build 1, whose Linux libraries were stored three times over. The next <see cref="EnsureAsync"/> downloads
+    /// and verifies this release's program in its place and then removes the earlier one; the model is kept.
+    /// </summary>
+    /// <param name="platform">Platform.</param>
+    /// <returns><c>true</c> if an earlier build is there.</returns>
+    public bool HasEarlierBuild(string platform)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(platform);
+        if (!Directory.Exists(_folder))
+        {
+            return false;
+        }
+
+        return EarlierVersions().Any(dir => Directory.Exists(Path.Combine(dir, platform)));
+    }
+
+    /// <summary>
+    /// Whether a model is installed and only the program needs updating from an earlier release (see
+    /// <see cref="HasEarlierBuild"/>): the administrator already allowed the download, and the update is only the
+    /// program, a few megabytes.
+    /// </summary>
+    /// <param name="platform">Platform.</param>
+    /// <param name="model">Model setting value.</param>
+    /// <returns><c>true</c> if the program is from an earlier release and the model is there.</returns>
+    public bool IsUpdatable(string platform, string model)
+        => _source.Program(platform) is not null && _source.Model(model) is { } m
+            && File.Exists(Path.Combine(_folder, "models", m.Name))
+            && !IsInstalled(platform, model)
+            && HasEarlierBuild(platform);
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -509,16 +541,32 @@ public sealed class BuiltInInstaller : IDisposable
     private static SpeechToTextException Integrity(string what)
         => new("The built-in speech-to-text download was refused: " + what + ". Nothing was run.") { Failure = FailureClass.BadRequest };
 
-    // Earlier releases' programs are no longer used
+    // Earlier releases' program folders (whisper-v<version>-<build>), named like this release's but not it
+    private IEnumerable<string> EarlierVersions()
+        => Directory.EnumerateDirectories(_folder).Where(dir => Path.GetFileName(dir) is { } name
+            && name.StartsWith("whisper-v", StringComparison.Ordinal) && !string.Equals(name, _source.Version, StringComparison.Ordinal));
+
+    // Earlier releases' programs are no longer used, once this release's is in place. A link is removed itself, never
+    // followed: only what the plugin put in its own folder is deleted.
     private void RemoveOldVersions()
     {
-        foreach (var dir in Directory.EnumerateDirectories(_folder))
+        foreach (var dir in EarlierVersions().ToList())
         {
-            var name = Path.GetFileName(dir);
-            if (name.StartsWith("whisper-v", StringComparison.Ordinal) && !string.Equals(name, _source.Version, StringComparison.Ordinal))
+            if (new DirectoryInfo(dir).LinkTarget is not null)
             {
-                DeleteQuietly(dir);
+                try
+                {
+                    Directory.Delete(dir);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Left for the next attempt
+                }
+
+                continue;
             }
+
+            DeleteQuietly(dir);
         }
     }
 }

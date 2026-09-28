@@ -99,7 +99,14 @@ to hold exactly the listed files, as plain names; installs into a `0700` folder 
 every file again before each run, fetching anything that no longer matches. `BuiltInSpeechToText` runs it with
 `ArgumentList`, absolute paths, half the CPUs (at most 8), below-normal priority and a time limit of 2 minutes plus 5×
 the audio length, and kills the process tree on cancel. Linux and Windows builds carry every CPU variant (SSE4.2 up to
-AVX-512 / SVE2) and pick one at run time. Word times come from whisper.cpp's DTW token timings, less 0.28 s, which
+AVX-512 / SVE2) and pick one at run time; each Linux library is packed once, under its SONAME, stripped, with
+RUNPATH `$ORIGIN` only (build 2; build 1 held each of libwhisper, libggml and libggml-base three times, as copies of
+their links, which a static build can't avoid without losing the run-time CPU choice: ggml loads its CPU variants as
+modules, which needs shared libraries). A new build has a new tag, which is also its install folder: a server with an
+earlier build (and its model) downloads only the new program on next use (the settings page shows an update), verifies
+it like a first install, and only then removes the earlier folder (a link there is removed, never followed). A refused
+or failed download leaves the earlier folder in place and runs nothing; `tools/builtin_checksums.py` refuses a release
+whose zip holds the same file twice. Word times come from whisper.cpp's DTW token timings, less 0.28 s, which
 lines them up with the local-service word times the synchroniser was calibrated on.
 
 - **Explicit permission first.** Nothing is downloaded until an administrator allows it on the settings page, which says

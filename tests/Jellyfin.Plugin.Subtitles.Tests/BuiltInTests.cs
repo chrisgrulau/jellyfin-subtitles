@@ -297,7 +297,7 @@ public sealed class BuiltInTests : IDisposable
         return ms.ToArray();
     }
 
-    private static (BuiltInSource Source, Dictionary<string, byte[]> Served) Release(byte[]? zip = null, Dictionary<string, string>? files = null)
+    private static (BuiltInSource Source, Dictionary<string, byte[]> Served) Release(byte[]? zip = null, Dictionary<string, string>? files = null, string version = "whisper-v0-1")
     {
         zip ??= Zip(new() { ["whisper-cli"] = "program", ["libggml.so"] = "library", ["LICENSE-whisper.cpp.txt"] = "MIT" });
         files ??= new() { ["whisper-cli"] = Sha("program"), ["libggml.so"] = Sha("library"), ["LICENSE-whisper.cpp.txt"] = Sha("MIT") };
@@ -308,7 +308,7 @@ public sealed class BuiltInTests : IDisposable
             new("ggml-base-q8_0.bin", Convert.ToHexStringLower(SHA256.HashData(model)), model.Length, null),
         };
         var served = new Dictionary<string, byte[]> { ["whisper-cli-linux-x64.zip"] = zip, ["ggml-base-q8_0.bin"] = model };
-        return (new BuiltInSource(Base, "whisper-v0-1", downloads, ["github.com", "objects.example.test"]), served);
+        return (new BuiltInSource(Base, version, downloads, ["github.com", "objects.example.test"]), served);
     }
 
     private sealed class FakeServer(Dictionary<string, byte[]> files) : HttpMessageHandler
@@ -332,6 +332,140 @@ public sealed class BuiltInTests : IDisposable
             return Task.FromResult(files.TryGetValue(name, out var body)
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) }
                 : new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    // Build 1's layout: every Linux library three times, once per name its links had
+    private string EarlierBuild(string? root = null, bool withModel = true)
+    {
+        root ??= _dir;
+        var dir = Path.Combine(root, "whisper-v0-0", "linux-x64");
+        Directory.CreateDirectory(dir);
+        foreach (var name in new[] { "whisper-cli", "libggml.so", "libggml.so.0", "libggml.so.0.23.0", "LICENSE-whisper.cpp.txt" })
+        {
+            File.WriteAllText(Path.Combine(dir, name), "old " + name);
+        }
+
+        if (withModel)
+        {
+            Directory.CreateDirectory(Path.Combine(root, "models"));
+            File.WriteAllText(Path.Combine(root, "models", "ggml-base-q8_0.bin"), "model");
+        }
+
+        return dir;
+    }
+
+    [Fact]
+    public async Task An_earlier_build_is_detected_then_replaced_by_this_release_keeping_the_model()
+    {
+        var old = EarlierBuild();
+        var files = Release();
+        using var handler = new FakeServer(files.Served);
+        using var installer = new BuiltInInstaller(_dir, files.Source, handler);
+
+        Assert.True(installer.HasEarlierBuild("linux-x64"));
+        Assert.False(installer.HasEarlierBuild("linux-arm64"));
+        Assert.False(installer.IsInstalled("linux-x64", "base"));
+        Assert.True(installer.IsUpdatable("linux-x64", "base"));
+
+        var (program, model) = await installer.EnsureAsync("linux-x64", "base", CancellationToken.None);
+
+        // Only the program was downloaded, verified like a first install; the earlier build is gone, the model kept
+        Assert.Equal(["whisper-cli-linux-x64.zip"], handler.Requests.Select(u => u.Segments[^1]));
+        Assert.Equal("program", await File.ReadAllTextAsync(program, TestContext.Current.CancellationToken));
+        Assert.Equal(Path.Combine(_dir, "whisper-v0-1", "linux-x64", "whisper-cli"), program);
+        Assert.Equal("model", await File.ReadAllTextAsync(model, TestContext.Current.CancellationToken));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(old)));
+        Assert.False(installer.HasEarlierBuild("linux-x64"));
+        Assert.False(installer.IsUpdatable("linux-x64", "base"));
+        Assert.True(installer.IsInstalled("linux-x64", "base"));
+        Assert.Equal(["LICENSE-whisper.cpp.txt", "libggml.so", "whisper-cli"], Directory.GetFiles(Path.GetDirectoryName(program)!).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_refused_update_keeps_the_earlier_build_and_installs_nothing()
+    {
+        var old = EarlierBuild();
+        var files = Release();
+        files.Served["whisper-cli-linux-x64.zip"] = Zip(new() { ["whisper-cli"] = "tampered" });
+        using var handler = new FakeServer(files.Served);
+        using var installer = new BuiltInInstaller(_dir, files.Source, handler);
+
+        var ex = await Assert.ThrowsAsync<SpeechToTextException>(() => installer.EnsureAsync("linux-x64", "base", CancellationToken.None));
+
+        Assert.Contains("refused", ex.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(_dir, "whisper-v0-1", "linux-x64")));
+        Assert.True(File.Exists(Path.Combine(old, "libggml.so.0.23.0")));
+        Assert.True(installer.IsUpdatable("linux-x64", "base"));
+    }
+
+    [Fact]
+    public void Without_its_model_an_earlier_build_is_not_an_update()
+    {
+        var folder = Path.Combine(_dir, "builtin");
+        EarlierBuild(folder, withModel: false);
+        var files = Release();
+        using var handler = new FakeServer(files.Served);
+        using var host = new BuiltInHost(_dir, new BuiltInInstaller(folder, files.Source, handler), "linux-x64");
+        var installer = host.Installer;
+
+        Assert.True(installer.HasEarlierBuild("linux-x64"));
+        Assert.False(installer.IsUpdatable("linux-x64", "base"));
+        Assert.False(host.UpdatePending("base"));
+        Assert.Null(SpeechSelection.BuiltInModelInstalled(host));
+        Assert.False(host.Status("base").Update);
+    }
+
+    [Fact]
+    public void An_earlier_build_with_its_model_is_shown_as_an_update_and_still_counts_for_fallback()
+    {
+        var folder = Path.Combine(_dir, "builtin");
+        EarlierBuild(folder);
+        var files = Release();
+        using var handler = new FakeServer(files.Served);
+        using var host = new BuiltInHost(_dir, new BuiltInInstaller(folder, files.Source, handler), "linux-x64");
+
+        Assert.False(host.IsInstalled("base"));
+        Assert.True(host.UpdatePending("base"));
+        Assert.False(host.UpdatePending("small"));
+        Assert.Equal("base", SpeechSelection.BuiltInModelInstalled(host));
+        var status = host.Status("base");
+        Assert.Equal(BuiltInProgress.Idle, status.State);
+        Assert.True(status.Update);
+
+        // A server that can't run the program has nothing to update
+        using var unable = new BuiltInHost(_dir, new BuiltInInstaller(folder, files.Source, handler), "linux-x64") { Problem = "can't run here" };
+        Assert.False(unable.UpdatePending("base"));
+    }
+
+    [Fact]
+    public async Task Removing_an_earlier_build_never_follows_a_link()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var outside = Path.Combine(_dir + "-outside");
+        Directory.CreateDirectory(Path.Combine(outside, "linux-x64"));
+        var keep = Path.Combine(outside, "linux-x64", "keep.txt");
+        await File.WriteAllTextAsync(keep, "keep", TestContext.Current.CancellationToken);
+        try
+        {
+            Directory.CreateDirectory(_dir);
+            Directory.CreateSymbolicLink(Path.Combine(_dir, "whisper-v0-0"), outside);
+            var files = Release();
+            using var handler = new FakeServer(files.Served);
+            using var installer = new BuiltInInstaller(_dir, files.Source, handler);
+
+            await installer.EnsureAsync("linux-x64", "base", CancellationToken.None);
+
+            Assert.False(Directory.Exists(Path.Combine(_dir, "whisper-v0-0")));
+            Assert.True(File.Exists(keep));
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
         }
     }
 

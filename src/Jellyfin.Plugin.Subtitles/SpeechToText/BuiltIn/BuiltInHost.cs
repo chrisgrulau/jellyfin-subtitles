@@ -114,11 +114,24 @@ public sealed class BuiltInHost : IDisposable
     public bool IsInstalled(string model) => Platform is { } platform && Installer.IsInstalled(platform, model);
 
     /// <summary>
+    /// Whether a model is installed with an earlier release's program, which this plugin no longer runs (after the
+    /// plugin was updated to a new build of the program): the next use, Test or Download now replaces the program,
+    /// verified, and keeps the model.
+    /// </summary>
+    /// <param name="model">Model setting value.</param>
+    /// <returns><c>true</c> if only the program needs updating.</returns>
+    public bool UpdatePending(string model) => Platform is { } platform && Problem is null && Installer.IsUpdatable(platform, model);
+
+    /// <summary>
     /// Where the download stands for a model, for the settings page.
     /// </summary>
     /// <param name="model">Model setting value.</param>
     /// <returns>The status.</returns>
-    public BuiltInInstallStatus Status(string model) => Installer.Progress.Report(IsInstalled(model));
+    public BuiltInInstallStatus Status(string model)
+    {
+        var status = Installer.Progress.Report(IsInstalled(model));
+        return status.State == BuiltInProgress.Idle && UpdatePending(model) ? status with { Update = true } : status;
+    }
 
     /// <inheritdoc />
     public void Dispose()

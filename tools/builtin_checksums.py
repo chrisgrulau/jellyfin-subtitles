@@ -4,9 +4,10 @@
 The built-in speech-to-text only runs files whose SHA-256 is compiled into the plugin, so a new whisper.cpp build or
 model is adopted by running this against its release and committing the result:
 
-    tools/builtin_checksums.py whisper-v1.9.4-1
+    tools/builtin_checksums.py whisper-v1.9.4-2
 
 It downloads whisper-files.json and SHA256SUMS from that release, checks one against the other, and writes the C# file.
+It refuses a release whose program zip holds the same file twice (build 1 stored each Linux library three times).
 """
 
 import hashlib
@@ -61,6 +62,8 @@ def main():
         if sums.get(name) != entry["sha256"]:
             sys.exit(f"{name}: whisper-files.json and SHA256SUMS disagree")
         files = entry.get("files")
+        if files is not None and len(set(files.values())) != len(files):
+            sys.exit(f"{name} holds the same file more than once (libraries packed as copies of their links?)")
         if files is None:
             lines.append(f"        new({cs(name)}, {cs(entry['sha256'])}, {entry['bytes']}, null),")
         else:
