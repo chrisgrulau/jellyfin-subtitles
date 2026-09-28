@@ -110,7 +110,8 @@ public static class MeaningAligner
             var words = new List<TranscribedWord>();
             void Flush()
             {
-                var text = string.Join(' ', words.Select(w => w.Text.Trim()).Where(w => w.Length > 0));
+                // Joined as a subtitle line would be (no spaces between Chinese or Japanese words)
+                var text = Generation.TranscriptCues.Join(words.Select(w => w with { Text = w.Text.Trim() }).Where(w => w.Text.Length > 0));
                 if (text.Length > 0)
                 {
                     phrases.Add(new HeardPhrase(phrases.Count, Math.Round(start + words[0].Start, 2), Shorten(text)));

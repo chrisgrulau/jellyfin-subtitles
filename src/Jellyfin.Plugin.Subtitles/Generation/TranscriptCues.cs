@@ -16,6 +16,20 @@ public sealed record CueRules
     /// <summary>Gets the default rules.</summary>
     public static CueRules Default { get; } = new();
 
+    /// <summary>
+    /// The rules for a language: Chinese and Japanese lines are shorter and read more slowly (each character is a word or
+    /// most of one), and Korean lines a little shorter; every other language uses <see cref="Default"/>.
+    /// </summary>
+    /// <param name="language">The two-letter language, if known.</param>
+    /// <returns>The rules.</returns>
+    public static CueRules For(string? language) => language switch
+    {
+        "zh" => new CueRules { MaxLineLength = 16, MaxCharsPerSecond = 9, MinSentenceCue = 5 },
+        "ja" => new CueRules { MaxLineLength = 16, MaxCharsPerSecond = 7, MinSentenceCue = 5 },
+        "ko" => new CueRules { MaxLineLength = 20, MaxCharsPerSecond = 12, MinSentenceCue = 6 },
+        _ => Default,
+    };
+
     /// <summary>Gets the longest line, in characters (a cue has at most two lines).</summary>
     public int MaxLineLength { get; init; } = 42;
 
@@ -94,8 +108,8 @@ public static class TranscriptCues
     }
 
     /// <summary>
-    /// Wraps text into one line, or two lines of at most <paramref name="maxLine"/> characters split at a space (as even as
-    /// possible, preferring a split after punctuation).
+    /// Wraps text into one line, or two lines of at most <paramref name="maxLine"/> characters split at a space, or between
+    /// two Chinese or Japanese characters (as even as possible, preferring a split after punctuation).
     /// </summary>
     /// <param name="text">The text, on one line.</param>
     /// <param name="maxLine">The longest line.</param>
@@ -110,22 +124,28 @@ public static class TranscriptCues
 
         int? best = null;
         var bestScore = double.MaxValue;
-        for (var i = 0; i < text.Length; i++)
+        var dropsSpace = false;
+        for (var i = 1; i < text.Length; i++)
         {
-            if (text[i] != ' ' || i > maxLine || text.Length - i - 1 > maxLine)
+            // At a space (which goes), or between two characters of a script written without spaces (nothing goes)
+            var space = text[i] == ' ';
+            var between = !space && IsUnspaced(text[i - 1]) && IsUnspaced(text[i]);
+            var rest = text.Length - i - (space ? 1 : 0);
+            if (!(space || between) || i > maxLine || rest > maxLine)
             {
                 continue;
             }
 
-            var score = Math.Abs(i - (text.Length - i - 1)) - (i > 0 && ",.;:?!".Contains(text[i - 1], StringComparison.Ordinal) ? 8 : 0);
+            var score = Math.Abs(i - rest) - (",.;:?!，。、？！".Contains(text[i - 1], StringComparison.Ordinal) ? 8 : 0);
             if (score < bestScore)
             {
                 bestScore = score;
                 best = i;
+                dropsSpace = space;
             }
         }
 
-        return best is { } at ? text[..at] + "\n" + text[(at + 1)..] : null;
+        return best is { } at ? text[..at] + "\n" + text[(at + (dropsSpace ? 1 : 0))..] : null;
     }
 
     /// <summary>
@@ -150,13 +170,16 @@ public static class TranscriptCues
         return sb.ToString();
     }
 
-    // Chinese, Japanese and Korean words are written without spaces between them
-    private static bool IsCjk(char c) => c is (>= '぀' and <= 'ヿ') or (>= '㐀' and <= '鿿') or (>= '가' and <= '힯') or (>= '＀' and <= '￯');
+    // Chinese and Japanese words are written without spaces between them (Korean has spaces between words)
+    private static bool IsCjk(char c) => c is (>= '぀' and <= 'ヿ') or (>= '㐀' and <= '鿿') or (>= '＀' and <= '￯');
+
+    // Characters a line can be split between without a space: Chinese and Japanese, and their full-width punctuation
+    private static bool IsUnspaced(char c) => IsCjk(c) || c is (>= '\u3000' and <= '\u303F');
 
     private static bool EndsSentence(string word)
     {
         var bare = word.TrimEnd('"', '\'', '\u201d', '\u2019', ')');
-        return bare.EndsWith('.') || bare.EndsWith('?') || bare.EndsWith('!') || bare.EndsWith('\u2026');
+        return bare.EndsWith('.') || bare.EndsWith('?') || bare.EndsWith('!') || bare.EndsWith('\u2026') || bare.EndsWith('。') || bare.EndsWith('？') || bare.EndsWith('！');
     }
 
     private static bool EndsClause(string word) => word.EndsWith(',') || word.EndsWith(';') || word.EndsWith(':') || word.EndsWith('—') || word.EndsWith('–');

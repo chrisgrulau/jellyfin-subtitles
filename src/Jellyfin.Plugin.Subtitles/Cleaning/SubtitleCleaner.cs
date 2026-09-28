@@ -342,18 +342,29 @@ public static partial class SubtitleCleaner
     [GeneratedRegex(@"opensubtitles|osdb\.link|advertise your (?:product|brand)|become (?:a )?vip member|please rate (?:this|these) subtitles?|\byify\b|\byts\.[a-z]{2,3}\b|addic7ed|subscene|podnapisi|\bsubdl\b", RegexOptions.IgnoreCase)]
     private static partial Regex SiteAdvert();
 
-    // Credit wording; only trusted near the start or end of the file
-    [GeneratedRegex(@"subtitles? (?:by|provided by|created by|ripped by|downloaded from)|sync(?:ed|hronized)? (?:and|&) correct(?:ed|ions)? by|(?:ripped|encoded|translated|transcribed|corrected|resynced|timed) by\b|downloaded from", RegexOptions.IgnoreCase)]
+    // Credit wording, in English and the languages subtitles are most often shared in (French, Spanish, German, Italian,
+    // Portuguese, Dutch, the Scandinavian languages, Polish); only trusted near the start or end of the file
+    [GeneratedRegex(@"subtitles? (?:by|provided by|created by|ripped by|downloaded from)|sync(?:ed|hronized)? (?:and|&) correct(?:ed|ions)? by|(?:ripped|encoded|translated|transcribed|corrected|resynced|timed) by\b|downloaded from"
+        + @"|sous-titres? (?:par|réalisés? par|traduits? par)|sous-titrage(?: par|\s?:)|traduction(?: par|\s?:)|synchro(?:nisation)?(?: par|\s?:)"
+        + @"|subt[ií]tulos?(?: por| hechos por| traducidos por|\s?:)|subtitulado por|traducido por|traducci[oó]n(?: por|\s?:)|sincronizado por|sincronizaci[oó]n(?: por|\s?:)"
+        + @"|untertitel(?: von|\s?:)|übersetzt von|übersetzung(?: von|\s?:)|synchronisiert von"
+        + @"|sottotitoli(?: di| a cura di| creati da|\s?:)|tradotto da|traduzione(?: di|\s?:)|sincronizzato da|revisione(?: di|\s?:)"
+        + @"|legendas?(?: por| feitas? por|\s?:)|legendado por|traduzido por|tradu[cç][aã]o(?: por|\s?:)|sincroniza[cç][aã]o(?: por|\s?:)"
+        + @"|ondertiteling(?: door|\s?:)|ondertiteld door|vertaald door|vertaling(?: door|\s?:)|gesynchroniseerd door"
+        + @"|undertext(?:er)?(?: av|\s?:)|översatt av|undertekst(?:er)?(?: af| av|\s?:)|oversat af|oversatt av|tekstet av"
+        + @"|napisy(?: by|\s?:)|tłumaczenie(?: by|\s?:)|przetłumaczył[a]?\b", RegexOptions.IgnoreCase)]
     private static partial Regex CreditLine();
 
     [GeneratedRegex(@"(?:https?://|www\.)\S+|\b[\w-]+\.(?:com|org|net|to|io|tv|cc|me|info|link)\b", RegexOptions.IgnoreCase)]
     private static partial Regex WebAddress();
 
-    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)")]
+    // Brackets and parentheses, also the full-width ones Chinese and Japanese subtitles use
+    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|（[^）]*）|【[^】]*】|［[^］]*］")]
     private static partial Regex Descriptions();
 
-    // Leading upper-case speaker label, optionally after markup or a dash: "JOHN: Hi" → "Hi", "- MARY: Hi" → "- Hi"
-    [GeneratedRegex(@"^((?:<[^>]+>|\{[^}]*\}|-\s*)*)[A-Z][A-Z0-9 .'\-]{0,24}:\s+")]
+    // Leading upper-case speaker label, optionally after markup or a dash: "JOHN: Hi" → "Hi", "- MARY: Hi" → "- Hi",
+    // "JOSÉ: Hola", "ДИМА: Привет" (capitals of any alphabet)
+    [GeneratedRegex(@"^((?:<[^>]+>|\{[^}]*\}|-\s*)*)\p{Lu}[\p{Lu}\p{M}0-9 .'\-]{0,24}:\s+")]
     private static partial Regex SpeakerLabel();
 
     // Override tags that make an ASS event a sign or karaoke: position, movement, origin, karaoke, transform, fade, clip,

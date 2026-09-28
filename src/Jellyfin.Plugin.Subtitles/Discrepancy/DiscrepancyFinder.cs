@@ -615,6 +615,14 @@ public static partial class DiscrepancyFinder
             heardNumbers.RemoveAll(j => h.Tokens[j].Norm == "1");
         }
 
+        // Where numbers said in words aren't read (any language but English), "veinticinco" written for a "25" heard is
+        // the same number: only a number in the place of another number counts
+        if (!SpokenText.ReadsNumberWords(o.Language) && (saidNumbers.Count == 0 || heardNumbers.Count == 0))
+        {
+            saidNumbers.Clear();
+            heardNumbers.Clear();
+        }
+
         if (saidNumbers.Count + heardNumbers.Count > 0)
         {
             string? fix = saidNumbers.Count == 1 && heardNumbers.Count == 1 ? ReplaceWords(text, saidNumbers[0].Surface, h.Surface(heardNumbers[0])) : null;
@@ -635,7 +643,7 @@ public static partial class DiscrepancyFinder
             && near.Sum(n => lines[n].Tokens.Count(t => t.Negation)) != near.Sum(n => byLine[n].Count(j => h.Tokens[j].Negation)))
         {
             var extraNot = inserted.Where(j => h.Tokens[j].Negation && HeardNegation(j)).ToList();
-            var reason = string.Create(CultureInfo.InvariantCulture, $"The line has {saidNot} negation{(saidNot == 1 ? string.Empty : "s")} (not, never, no …) where {heardNot} {(heardNot == 1 ? "was" : "were")} heard.");
+            var reason = string.Create(CultureInfo.InvariantCulture, $"The line has {saidNot} negation{(saidNot == 1 ? string.Empty : "s")} ({SpokenText.NegationExamples(o.Language)} …) where {heardNot} {(heardNot == 1 ? "was" : "were")} heard.");
             // Its confidence: the extra negation heard; or, for one the line has that wasn't heard, the least of the words heard
             // in its place and either side ("have" for "haven't")
             var unheard = said.Select((t, k) => (t, k)).Where(x => x.t.Negation && SaidNegation(x.k)).SelectMany(x => saidBlock[x.k].Evidence).ToList();

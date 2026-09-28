@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Net;
 using Jellyfin.Plugin.Common.Resilience;
 
@@ -54,4 +57,31 @@ public static class FindRules
     /// <param name="isGenerated">The track is a generated subtitle file (see <see cref="SubtitleGenerator.IsGenerated"/>).</param>
     /// <returns><c>true</c> if it counts.</returns>
     public static bool Counts(bool isForced, bool isText, bool countImages, bool isGenerated) => !isGenerated && Counts(isForced, isText, countImages);
+
+    /// <summary>
+    /// Whether a missing subtitle in a language is searched for: only when the video's chosen audio stream is in that
+    /// language, or has no usable tag and the language is the library's first (see <see cref="SpokenLanguage"/>). A
+    /// subtitle in another language than the audio couldn't be checked against it; translation is planned.
+    /// </summary>
+    /// <param name="language">The wanted language.</param>
+    /// <param name="audioTag">The chosen audio stream's language tag.</param>
+    /// <param name="libraryLanguage">The first language wanted for the video's library.</param>
+    /// <returns><c>true</c> to search.</returns>
+    public static bool AudioIsIn(string? language, string? audioTag, string? libraryLanguage) => SpokenLanguage.Matches(language, audioTag, libraryLanguage);
+
+    /// <summary>
+    /// How many searches there are per language, for the log: <c>en 12, fr 3</c> (most first), or <c>none</c>.
+    /// </summary>
+    /// <param name="languages">Each search's language.</param>
+    /// <returns>The counts.</returns>
+    public static string PerLanguage(IEnumerable<string?> languages)
+    {
+        ArgumentNullException.ThrowIfNull(languages);
+        var counts = languages.Select(l => SpeechToText.Languages.ToTwoLetter(l) ?? l ?? "?")
+            .GroupBy(l => l, StringComparer.Ordinal)
+            .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => g.Key + " " + g.Count().ToString(CultureInfo.InvariantCulture))
+            .ToList();
+        return counts.Count == 0 ? "none" : string.Join(", ", counts);
+    }
 }

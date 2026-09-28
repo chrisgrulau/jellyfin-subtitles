@@ -64,7 +64,7 @@ internal sealed class LibraryVideos
                 }
 
                 var audio = AudioChoice.For(v.Audio, sub.Language);
-                yield return new SubtitleJob(v.Item.Id, v.Item.Name, v.Video.Path, sub.Path, sub.Language, v.Duration, audio, v.Audio[audio].Language);
+                yield return new SubtitleJob(v.Item.Id, v.Item.Name, v.Video.Path, sub.Path, sub.Language, v.Duration, audio, v.Audio[audio].Language) { LibraryLanguage = v.Languages[0] };
             }
         }
     }
@@ -88,15 +88,29 @@ internal sealed class LibraryVideos
                     continue;
                 }
 
+                // A track in another language than the audio can't be checked against it (and a corrected copy would be
+                // added without review), so it isn't copied out
+                var audio = AudioChoice.For(v.Audio, sub.Language);
+                if (SpokenLanguage.Differs(sub.Language, v.Audio[audio].Language, v.Languages[0]))
+                {
+                    continue;
+                }
+
                 beside.Add(lang);
-                yield return new EmbeddedJob(v.Item.Id, v.Item.Name, v.Video.Path, sub.Index, sub.Codec, sub.Language!, v.Duration, AudioChoice.For(v.Audio, sub.Language), EmbeddedChecker.FingerprintOf(v.Video.Path, sub.Index));
+                yield return new EmbeddedJob(v.Item.Id, v.Item.Name, v.Video.Path, sub.Index, sub.Codec, sub.Language!, v.Duration, audio, EmbeddedChecker.FingerprintOf(v.Video.Path, sub.Index))
+                {
+                    AudioLanguage = v.Audio[audio].Language,
+                    LibraryLanguage = v.Languages[0],
+                };
             }
         }
     }
 
     /// <summary>
     /// Videos with no subtitle (beside them or inside) that counts in a language wanted for their library (a generated one
-    /// doesn't), with the language of the audio stream that goes with it.
+    /// doesn't), with the language of the audio stream that goes with it. Only languages the video's audio is in are
+    /// searched for (an audio stream in that language, or an untagged one when it is the library's first language): a
+    /// subtitle in another language couldn't be checked against the audio (see <see cref="SpokenLanguage"/>).
     /// </summary>
     /// <param name="countImages">Whether picture-based subtitles count as having one.</param>
     /// <returns>The searches to make.</returns>
@@ -110,6 +124,11 @@ internal sealed class LibraryVideos
                 if (Languages.ToTwoLetter(language) is { } two && !have.Contains(two))
                 {
                     var audio = AudioChoice.For(v.Audio, language);
+                    if (!FindRules.AudioIsIn(language, v.Audio[audio].Language, v.Languages[0]))
+                    {
+                        continue;
+                    }
+
                     yield return new FindJob(v.Item.Id, v.Item.Name, v.Video.Path, VideoFactsReader.Read(v.Video), language, v.Duration, audio, v.Audio[audio].Language);
                 }
             }

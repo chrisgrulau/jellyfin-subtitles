@@ -26,17 +26,65 @@ public sealed record SpokenToken(string Norm, string Surface, int Word, int Last
 /// Normalises subtitle text and transcript words the same way, so the comparison sees differences that matter (names,
 /// numbers, negations, missing words) rather than spelling conventions: case and punctuation are ignored, English
 /// contractions are split, numbers said in words become digits, and sound descriptions, music and speaker labels in a
-/// subtitle aren't spoken. Deterministic and language-light: the English rules apply to English (or an unknown language);
-/// other languages get case, punctuation and digits only. Names aren't told apart in German (every noun has a capital)
-/// or in text that is all one case.
+/// subtitle aren't spoken. Deterministic and language-light: the English rules (contractions, numbers said in words)
+/// apply to English (or an unknown language); other languages get case, punctuation and digits only. Negations are
+/// counted for the languages <see cref="NegationsFor"/> lists and not at all for others. Names aren't told apart in
+/// German (every noun has a capital) or in text that is all one case.
 /// </summary>
 public static partial class SpokenText
 {
-    /// <summary>The negations.</summary>
+    /// <summary>The negations (English).</summary>
     public static readonly IReadOnlySet<string> Negations = new HashSet<string>(StringComparer.Ordinal)
     {
         "not", "no", "never", "nothing", "nobody", "none", "neither", "nor", "nowhere",
     };
+
+    // Negations per language (two-letter), as normalised (lower case, letters only). Words that are also common in other
+    // senses are left out (French "personne" is also "person"; spoken French drops "ne", so only its partner counts). A
+    // language not listed has no negation rule: its lines are never flagged for a negation.
+    private static readonly Dictionary<string, IReadOnlySet<string>> NegationsByLanguage = new(StringComparer.Ordinal)
+    {
+        ["en"] = Negations,
+        ["fr"] = Words("pas jamais rien aucun aucune non ni nulle"),
+        ["es"] = Words("no nunca nada nadie jamás ni ninguno ninguna ningún tampoco"),
+        ["it"] = Words("non mai niente nulla nessuno nessuna né neanche nemmeno"),
+        ["pt"] = Words("não nunca nada ninguém nem nenhum nenhuma jamais"),
+        ["de"] = Words("nicht nie niemals nichts niemand kein keine keinen keinem keiner keines weder"),
+        ["nl"] = Words("niet nooit niets niemand geen nergens noch"),
+        ["sv"] = Words("inte aldrig ingen inget inga ingenting ej"),
+        ["da"] = Words("ikke aldrig ingen intet ingenting"),
+        ["no"] = Words("ikke aldri ingen intet ingenting"),
+        ["nb"] = Words("ikke aldri ingen intet ingenting"),
+        ["nn"] = Words("ikkje aldri ingen inkje ingenting"),
+        ["pl"] = Words("nie nigdy nic nikt żaden żadna żadne"),
+    };
+
+    // A lone "no" (followed by a comma or a stop) answers rather than negates
+    private static readonly HashSet<string> Interjections = new(StringComparer.Ordinal) { "no", "non", "não", "nie" };
+
+    /// <summary>
+    /// The negations of a language, for the whole-file check's negation rule: English for English or an unknown
+    /// language; none for a language without a list (the rule is off for it).
+    /// </summary>
+    /// <param name="language">The two-letter language, if known.</param>
+    /// <returns>The negations, as normalised.</returns>
+    public static IReadOnlySet<string> NegationsFor(string? language)
+        => language is null ? Negations : NegationsByLanguage.TryGetValue(language, out var set) ? set : new HashSet<string>();
+
+    /// <summary>
+    /// Whether numbers said in words are read as digits for a language (English, or an unknown language); elsewhere only a
+    /// number in the place of another number counts as a difference.
+    /// </summary>
+    /// <param name="language">The two-letter language, if known.</param>
+    /// <returns><c>true</c> if number words are read.</returns>
+    public static bool ReadsNumberWords(string? language) => language is null or "en";
+
+    /// <summary>
+    /// A few of a language's negations, for a message (<c>not, never, no</c>).
+    /// </summary>
+    /// <param name="language">The two-letter language, if known.</param>
+    /// <returns>The examples.</returns>
+    public static string NegationExamples(string? language) => string.Join(", ", NegationsFor(language).Take(3));
 
     private static readonly HashSet<string> Titles = new(StringComparer.OrdinalIgnoreCase) { "Mr.", "Mrs.", "Ms.", "Dr.", "St.", "Prof.", "Sgt.", "Lt.", "Capt.", "Col." };
 
@@ -195,7 +243,8 @@ public static partial class SpokenText
             sentenceStart = EndsSentence(word) || (parts.Count == 0 && sentenceStart);
         }
 
-        return english ? JoinNumbers(raw) : [.. raw.Select(r => Token(r.Norm, r.Surface, r.Word, r.Word, r.Name, false))];
+        var negations = NegationsFor(language);
+        return english ? JoinNumbers(raw, negations) : [.. raw.Select(r => Token(r.Norm, r.Surface, r.Word, r.Word, r.Name, r.Ends, negations))];
     }
 
     /// <summary>
@@ -206,11 +255,13 @@ public static partial class SpokenText
     public static string Normalise(string word)
         => string.Concat(Split((word ?? string.Empty).Replace('’', '\'').Trim('\'', '.', ','), false).Select(p => p.Norm));
 
-    private static SpokenToken Token(string norm, string surface, int word, int last, bool name, bool alone)
+    private static SpokenToken Token(string norm, string surface, int word, int last, bool name, bool alone, IReadOnlySet<string> negations)
     {
         var number = IsDigits(norm);
-        return new SpokenToken(norm, surface, word, last, name && !number, number, Negations.Contains(norm) && !(alone && norm == "no"));
+        return new SpokenToken(norm, surface, word, last, name && !number, number, negations.Contains(norm) && !(alone && Interjections.Contains(norm)));
     }
+
+    private static HashSet<string> Words(string words) => new(words.Split(' '), StringComparer.Ordinal);
 
     // A word's parts: an English contraction split into its words; digits with separators joined ("1,000" is "1000")
     private static IEnumerable<(string Norm, string Surface)> Split(string part, bool english)
@@ -259,7 +310,7 @@ public static partial class SpokenText
 
     // English numbers said in words become digits: "twenty-five" 25, "one hundred and five" 105, "nineteen ninety" 1990,
     // "a thousand" 1000. A run ends at punctuation, so "two, three" stays two numbers.
-    private static List<SpokenToken> JoinNumbers(List<(string Norm, string Surface, int Word, bool Name, bool Ends)> raw)
+    private static List<SpokenToken> JoinNumbers(List<(string Norm, string Surface, int Word, bool Name, bool Ends)> raw, IReadOnlySet<string> negations)
     {
         var result = new List<SpokenToken>(raw.Count);
         var i = 0;
@@ -273,7 +324,7 @@ public static partial class SpokenText
                 continue;
             }
 
-            result.Add(Token(raw[i].Norm, raw[i].Surface, raw[i].Word, raw[i].Word, raw[i].Name, raw[i].Ends));
+            result.Add(Token(raw[i].Norm, raw[i].Surface, raw[i].Word, raw[i].Word, raw[i].Name, raw[i].Ends, negations));
             i++;
         }
 
@@ -398,7 +449,7 @@ public static partial class SpokenText
     }
 
     // Sound descriptions, music notes and upper-case speaker labels ("JOHN:") aren't spoken
-    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|[♪♫]|^\s*-?\s*[A-Z][A-Z .&'\-]{1,24}:", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|（[^）]*）|【[^】]*】|［[^］]*］|[♪♫]|^\s*-?\s*\p{Lu}[\p{Lu}\p{M} .&'\-]{1,24}:", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
     private static partial Regex NotSpoken();
 
     [GeneratedRegex(@"[\p{L}\p{M}\p{Nd}]+(?:['.,][\p{L}\p{M}\p{Nd}]+)*'?", RegexOptions.None, matchTimeoutMilliseconds: 1000)]

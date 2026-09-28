@@ -115,6 +115,34 @@ All three tasks work on every film and show library unless you untick some under
 each library uses its own subtitle download languages from Jellyfin's library settings (then the server's preferred
 metadata language, then English), and the page shows what is in effect for each library.
 
+### Languages
+
+Every language works the same way, as long as the subtitle is in the language that is spoken:
+
+- **Each language is looked after for the videos whose audio is in it.** A video is searched for (and generated for)
+  in a language when one of its audio tracks is tagged with that language; an audio track with no language tag is
+  taken to be in the library's first subtitle language. Checks listen to the audio track in the subtitle's language, and
+  speech-to-text is told that language.
+- **A subtitle in another language than the audio** (French subtitles for an English film, say) is never lined up by
+  its words: speech-to-text would be listening for the wrong language and nothing could match. Its timing is left as it
+  is, and its result says **Not the audio's language**. An experimental setting (Advanced → **Check the timing of
+  subtitles in another language than the audio**, off by default) checks such a subtitle by when speech starts alone,
+  which works in any language; any correction it finds waits for your review. Searching for subtitles in another
+  language than the audio (translation) is planned.
+- **Checking a download's text:** a subtitle whose letters are in the wrong alphabet (Cyrillic offered as English,
+  Latin offered as Greek) is turned down in any language; English, French, Spanish, German, Italian, Portuguese, Dutch,
+  Swedish, Danish, Norwegian, Polish, Finnish and Turkish are also recognised by their common words (Swedish, Danish
+  and Norwegian aren't told apart from each other).
+- **Clean-up** recognises speaker labels in any alphabet (`JOSÉ:`, `ДИМА:`), the full-width brackets of Chinese and
+  Japanese sound descriptions (`（笑）`), and credit lines in the languages subtitles are most often shared in.
+- **Chinese, Japanese and Thai**, written without spaces, are lined up with speech character by character; generated
+  Chinese and Japanese lines are shorter (16 characters) and shown for longer. The whole-file check, which compares
+  words, skips them.
+- **The whole-file check** reads numbers said in words ("twenty-five") only in English; in other languages only a
+  number heard in the place of another counts. Negations are counted in English, French, Spanish, Italian, Portuguese,
+  German, Dutch, Swedish, Danish, Norwegian and Polish, and not at all in other languages.
+- The results can be shown per language, and the summary line counts subtitles still missing per language.
+
 ## Generated subtitles
 
 When the search found nothing that fits a video in one of your languages, and **Generate subtitles when none can be
@@ -278,7 +306,8 @@ has no effect yet.
 3. Full transcription: last-resort subtitles (done), whole-file check of doubtful subtitles (done), automatic
    confidence calibration (done, off by default), timing fixed by section for subtitles made for a different cut (done,
    off by default).
-4. More languages; later, subtitles in a different language from the audio.
+4. More languages (done: any language the audio is in); later, subtitles in a different language from the audio
+   (translation; timing by speech starts is there as an experiment, see [Languages](#languages)).
 
 ## What it stores and sends
 

@@ -124,16 +124,11 @@ public sealed class WholeFileChecker
     {
         ArgumentNullException.ThrowIfNull(job);
         ArgumentNullException.ThrowIfNull(wanted);
-        if (Languages.ToTwoLetter(job.Language) is not { } language)
-        {
-            return false;
-        }
-
-        var audio = string.IsNullOrWhiteSpace(job.AudioLanguage) || job.AudioLanguage.Trim() is "und" or "unk" or "mis" or "zxx" ? null : job.AudioLanguage;
-        return audio is not null
-            ? string.Equals(Languages.ToTwoLetter(audio), language, StringComparison.Ordinal)
-            : wanted.Count > 0 && string.Equals(Languages.ToTwoLetter(wanted[0]), language, StringComparison.Ordinal);
+        return SpokenLanguage.Matches(job.Language, job.AudioLanguage, wanted.Count > 0 ? wanted[0] : null);
     }
+
+    /// <summary>Why a subtitle in a language written without spaces can't be checked.</summary>
+    public const string NoSpaces = "The whole-file check compares lines word by word, so it can't check a language written without spaces between words (such as Chinese, Japanese or Thai) yet.";
 
     /// <summary>Why a subtitle not in a wanted language matching the audio's can't be checked.</summary>
     public const string NotInLanguage = "Only subtitles in a wanted language that matches the audio can be checked against a full transcript.";
@@ -174,6 +169,7 @@ public sealed class WholeFileChecker
         var language = Languages.ToTwoLetter(job.Language);
         return language is null || !wanted.Any(w => string.Equals(Languages.ToTwoLetter(w), language, StringComparison.Ordinal)) || !SameLanguage(job, wanted)
             ? NotInLanguage
+            : SpokenLanguage.WrittenWithoutSpaces(language) ? NoSpaces
             : null;
     }
 
@@ -282,7 +278,7 @@ public sealed class WholeFileChecker
             {
                 chosen.Add((job, true, r.Time));
             }
-            else if (automatic && IsDoubtful(r) && SameLanguage(job, wantedFor(job))
+            else if (automatic && IsDoubtful(r) && SameLanguage(job, wantedFor(job)) && !SpokenLanguage.WrittenWithoutSpaces(job.Language)
                 && (r.WholeFile is null || (r.WholeFile.Failed && now - r.WholeFile.Time >= RetryFailedAfter)))
             {
                 chosen.Add((job, false, r.Time));

@@ -166,6 +166,7 @@ public static partial class ResultPresenter
         [ResultStatus.NoSpeech] = "No speech",
         [ResultStatus.Replaced] = "Replaced",
         [ResultStatus.Deferred] = "Couldn't check yet",
+        [ResultStatus.OtherLanguage] = "Not the audio's language",
     };
 
     private static readonly string[] SubtitleFlags = ["forced", "foreign", "sdh", "cc", "hi", "default", "generated"];
@@ -394,6 +395,7 @@ public static partial class ResultPresenter
             ResultStatus.NoSpeech => "No speech to transcribe, so nothing was generated",
             ResultStatus.Replaced => "Replaced by a subtitle found later",
             ResultStatus.Deferred => "Couldn't check yet: speech-to-text unavailable — tried again on the next run",
+            ResultStatus.OtherLanguage => "In another language than the audio, so its timing was left alone",
             _ => StatusText(r.Status),
         };
         var open = r.Findings.Count(f => f.Suggestion is not null || f.From is not null);

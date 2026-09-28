@@ -27,7 +27,26 @@ namespace Jellyfin.Plugin.Subtitles.Pipeline;
 /// <param name="Duration">The video's length.</param>
 /// <param name="AudioStream">Which audio stream to listen to (counting audio streams only).</param>
 /// <param name="AudioLanguage">That audio stream's language tag, if known.</param>
-public sealed record SubtitleJob(Guid ItemId, string Name, string VideoPath, string SubtitlePath, string? Language, TimeSpan Duration, int AudioStream, string? AudioLanguage = null);
+public sealed record SubtitleJob(Guid ItemId, string Name, string VideoPath, string SubtitlePath, string? Language, TimeSpan Duration, int AudioStream, string? AudioLanguage = null)
+{
+    /// <summary>
+    /// Gets the first language wanted for the video's library (three-letter), taken to be the audio's language when the
+    /// audio stream has no usable tag (see <see cref="SpokenLanguage.Heard(string?, string?)"/>).
+    /// </summary>
+    public string? LibraryLanguage { get; init; }
+
+    /// <summary>Gets the language the audio is in (two-letter), if known.</summary>
+    public string? HeardLanguage => SpokenLanguage.Heard(AudioLanguage, LibraryLanguage);
+
+    /// <summary>Gets a value indicating whether the subtitle is known to be in another language than the audio.</summary>
+    public bool OtherLanguage => SpokenLanguage.Differs(Language, AudioLanguage, LibraryLanguage);
+
+    /// <summary>
+    /// Gets the language speech-to-text is told to expect (two-letter): the audio's, or the subtitle's when the audio's
+    /// isn't known. Only used for a subtitle in the audio's language.
+    /// </summary>
+    public string? SpeechLanguage => HeardLanguage ?? Languages.ToTwoLetter(Language);
+}
 
 /// <summary>
 /// The settings that decide what is applied and what waits for review.
@@ -37,7 +56,9 @@ public sealed record SubtitleJob(Guid ItemId, string Name, string VideoPath, str
 /// <param name="Cleanup">Clean-up settings.</param>
 /// <param name="Matcher">Pairs heard phrases with subtitle lines by meaning when exact words can't settle the timing (optional).</param>
 /// <param name="Auditor">Audits the wording of subtitles whose timing is settled (optional).</param>
-public sealed record Policies(ChangePolicy Timing, ChangePolicy Text, CleanupSettings Cleanup, Sync.ILineMatcher? Matcher = null, Audit.ITextAuditor? Auditor = null);
+/// <param name="TimeOtherLanguages">Whether a subtitle in another language than the audio has its timing checked by speech
+/// starts alone (experimental; any correction waits for review). Off: its timing is left alone.</param>
+public sealed record Policies(ChangePolicy Timing, ChangePolicy Text, CleanupSettings Cleanup, Sync.ILineMatcher? Matcher = null, Audit.ITextAuditor? Auditor = null, bool TimeOtherLanguages = false);
 
 /// <summary>
 /// Checks one subtitle and applies (or proposes) a timing correction according to the timing policy; applies or undoes
@@ -311,6 +332,38 @@ public sealed class SubtitleProcessor
     }
 
     /// <summary>
+    /// Whether a subtitle file needs checking (see <see cref="NeedsCheck(string, string, string?)"/>), taking its
+    /// languages into account: a subtitle in another language than the audio whose earlier check compared it with what
+    /// is said (before the languages were told apart) is checked once more, and so is one left alone for its language
+    /// once the experimental check by speech starts is switched on, or once its audio turns out to be in its language.
+    /// </summary>
+    /// <param name="job">The subtitle.</param>
+    /// <param name="fingerprint">Its fingerprint now.</param>
+    /// <param name="speechSetup">The speech-to-text service in use now (<c>null</c> to ignore).</param>
+    /// <param name="timeOtherLanguages">Whether the experimental check by speech starts is on.</param>
+    /// <returns>Whether to check it.</returns>
+    public bool NeedsCheck(SubtitleJob job, string fingerprint, string? speechSetup, bool timeOtherLanguages)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        if (NeedsCheck(job.SubtitlePath, fingerprint, speechSetup))
+        {
+            return true;
+        }
+
+        if (_results.Get(ResultStore.IdFor(job.SubtitlePath)) is not { } r || !string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var leftForLanguage = r.Status == ResultStatus.OtherLanguage;
+        var checkedForLanguage = r.Stage is SyncCheck.OtherLanguageStage or SyncCheck.OtherLanguageSkipped;
+        return job.OtherLanguage
+            ? (r.Status is ResultStatus.Unreliable or ResultStatus.WrongLanguage && !checkedForLanguage)
+                || (timeOtherLanguages && leftForLanguage && r.Stage == SyncCheck.OtherLanguageSkipped)
+            : leftForLanguage;
+    }
+
+    /// <summary>
     /// Checks a subtitle, applies what the policies allow in one write (timing, then clean-up), holds the rest for review,
     /// and records the result.
     /// </summary>
@@ -389,8 +442,11 @@ public sealed class SubtitleProcessor
             policies = policies with { Timing = ChangePolicy.Review, Text = ChangePolicy.Review, Auditor = null };
         }
 
-        var outcome = await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
-            .RunAsync(document, job.Duration, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
+        // A subtitle in another language than the audio is never lined up by words (see SpokenLanguage)
+        var outcome = job.OtherLanguage
+            ? await new SyncCheck(audio, null, refine: false).RunOtherLanguageAsync(document, job.Duration, job.Language, job.HeardLanguage, policies.TimeOtherLanguages, cancellationToken).ConfigureAwait(false)
+            : await new SyncCheck(audio, speech, refine: speech is not null, matcher: policies.Matcher)
+                .RunAsync(document, job.Duration, job.SpeechLanguage, cancellationToken).ConfigureAwait(false);
         var model = outcome.Model;
         if (outcome.Deferred)
         {
@@ -411,17 +467,18 @@ public sealed class SubtitleProcessor
             explanation += " " + stoodIn.Reason;
         }
 
-        // A timing decided from lines the AI matched by meaning always waits for review (SUB-28), until there is field data
+        // A timing decided from lines the AI matched by meaning always waits for review (SUB-28), until there is field data;
+        // so does one found by speech starts alone for a subtitle in another language than the audio (experimental)
         var status = outcome.WrongLanguageSuspected ? ResultStatus.WrongLanguage : model.Status switch
         {
             SyncStatus.InSync => ResultStatus.InSync,
-            SyncStatus.Unreliable => ResultStatus.Unreliable,
-            _ => policies.Timing == ChangePolicy.Automatic && outcome.Stage != SyncCheck.ByMeaningStage ? ResultStatus.Corrected : ResultStatus.Proposed,
+            SyncStatus.Unreliable => outcome.OtherLanguage ? ResultStatus.OtherLanguage : ResultStatus.Unreliable,
+            _ => policies.Timing == ChangePolicy.Automatic && outcome.Stage != SyncCheck.ByMeaningStage && !outcome.OtherLanguage ? ResultStatus.Corrected : ResultStatus.Proposed,
         };
         result = result with
         {
             // A stand-in's transcripts: its setup is recorded, so an unclear result is checked again with the chosen service
-            SpeechSetup = outcome.SpeechFallback?.To ?? speech?.Id ?? string.Empty,
+            SpeechSetup = outcome.OtherLanguage ? string.Empty : outcome.SpeechFallback?.To ?? speech?.Id ?? string.Empty,
             SpeechFallback = outcome.SpeechFallback,
             Status = status,
             Scale = status is ResultStatus.Corrected or ResultStatus.Proposed ? model.Scale : 1,
@@ -437,7 +494,7 @@ public sealed class SubtitleProcessor
         // A subtitle that doesn't match the speech (another language, version, or a notes track) gets only the harmless
         // clean-up (adverts, empty lines): its timing isn't touched and nothing is suggested
         var timed = status == ResultStatus.Corrected ? document.Retime(model.Map) : document;
-        var fitting = status != ResultStatus.WrongLanguage;
+        var fitting = status is not (ResultStatus.WrongLanguage or ResultStatus.OtherLanguage);
         var automatic = document.TextSuspect ? WithoutTextChanges(AutomaticOptions(policies)) : AutomaticOptions(policies);
         var full = CleanupPolicy.Options(policies.Cleanup);
         if (!fitting)
@@ -464,7 +521,7 @@ public sealed class SubtitleProcessor
         {
             var file = writes ? cleaned : document;
             Func<TimeSpan, TimeSpan> toAudio = status == ResultStatus.Proposed ? model.Map : t => t;
-            var (findings, note, by) = await WordingAudit.RunAsync(policies.Auditor, file, toAudio, outcome.Transcripts, Languages.ToTwoLetter(job.Language), cancellationToken).ConfigureAwait(false);
+            var (findings, note, by) = await WordingAudit.RunAsync(policies.Auditor, file, toAudio, outcome.Transcripts, job.SpeechLanguage, cancellationToken).ConfigureAwait(false);
             result = result with
             {
                 Audited = by is not null,
@@ -479,7 +536,7 @@ public sealed class SubtitleProcessor
         if (Calibration is not null && outcome.Stage == WholeFileChecker.SpeechStage && status is ResultStatus.InSync or ResultStatus.Corrected
             && result.Findings.Count == 0 && !document.TextSuspect && outcome.Transcripts.Count > 0)
         {
-            Learn(document, status == ResultStatus.Corrected ? model.Map : t => t, outcome.Transcripts, Languages.ToTwoLetter(job.Language));
+            Learn(document, status == ResultStatus.Corrected ? model.Map : t => t, outcome.Transcripts, job.SpeechLanguage);
         }
 
         if (!writes)
@@ -607,7 +664,7 @@ public sealed class SubtitleProcessor
     {
         var r = _results.Get(ResultStore.IdFor(subtitlePath));
         return r is { Status: ResultStatus.InSync or ResultStatus.Corrected, Audited: false, PendingReview: false }
-            && r.Stage != SyncCheck.ByMeaningStage
+            && r.Stage is not (SyncCheck.ByMeaningStage or SyncCheck.OtherLanguageStage or SyncCheck.OtherLanguageSkipped)
             && r.Version == CurrentVersion
             && (fingerprint is null || string.Equals(r.Fingerprint, fingerprint, StringComparison.Ordinal));
     }
@@ -635,7 +692,13 @@ public sealed class SubtitleProcessor
             return null;
         }
 
-        var language = Languages.ToTwoLetter(job.Language);
+        // A subtitle in another language than the audio has nothing to compare word for word
+        if (job.OtherLanguage)
+        {
+            return null;
+        }
+
+        var language = job.SpeechLanguage;
         var (model, transcripts) = await new TranscriptSynchroniser(audio, speech).SolveAsync(document, job.Duration, language, cancellationToken).ConfigureAwait(false);
         if (model.Status != SyncStatus.InSync)
         {

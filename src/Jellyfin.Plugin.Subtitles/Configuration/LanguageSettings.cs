@@ -24,7 +24,8 @@ public static class LanguageSettings
     public const string Fallback = "eng";
 
     /// <summary>
-    /// The languages a list names that are recognised, as three-letter codes, lower case, each once (possibly none).
+    /// The languages a list names that are recognised, as three-letter codes, lower case, each language once (the first
+    /// form given; possibly none).
     /// </summary>
     /// <param name="configured">The list (codes or names in any form).</param>
     /// <returns>The codes.</returns>
@@ -37,7 +38,9 @@ public static class LanguageSettings
             .Select(c => c.Length == 3 && c.All(char.IsAsciiLetter) && Common.Languages.IsoLanguages.TwoLetter(c) is not null
                 ? c.ToLowerInvariant()
                 : Common.Languages.IsoLanguages.ThreeLetter(c))
-            .OfType<string>().Distinct(StringComparer.Ordinal)];
+            .OfType<string>()
+            // One entry per language: "fre" and "fra" (or "French") are the same one, and would otherwise search twice
+            .DistinctBy(c => Common.Languages.IsoLanguages.TwoLetter(c), StringComparer.Ordinal)];
     }
 
     /// <summary>

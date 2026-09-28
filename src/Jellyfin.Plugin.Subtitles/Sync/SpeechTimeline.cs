@@ -131,6 +131,6 @@ public sealed partial class SpeechTimeline
     }
 
     // Sound descriptions, speaker labels' brackets and music symbols
-    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|[♪♫#]", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"\[[^\]]*\]|\([^)]*\)|（[^）]*）|【[^】]*】|［[^］]*］|[♪♫#]", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex NotSpoken();
 }
